@@ -35,36 +35,5 @@ Ubuntu 22.04.3 LTS - yourhostname.com
 ==============================================
 >>> Select No. ([0-18],[ShortCut],h,e,sh):
 
-==============================================
-*  Main Menu  Load:  0.04  // FreeMem: 116/3274
-==============================================
-Red Hat Linux release 7.2 (Enigma) - byus.net
-==============================================
-1. System Information / Process Management [p]
-2. Server Daemon Management [d]
-3. Package Management yum/apt [a] etc (aa)
-4. User Management [u] / Environment Variable Settings (en)
-5. System Logs / Open File Management [l]
-6. Network Management [n] / DDoS Check (dd)
-7. Initial System Setup and Others [i]
-8. Filesystem Management [f] / LVM (lvm)
-9. Local Backup [b] / Remote Backup (bb)
-10.Cloud Management [c] / rclone (cc)
-11.ssh connect / id_rsa [s]
-12.screen [x] / tmux (xx)
-13.find nfs at,cron vi ansible git irc [com]
-14.docker / kvm / proxmox / minecraft[v]
-15.Physical Server to Virtual Server Online Migration[p2v]
-16.SSL Certificate LetsEncrypt[ssl]
-17.Telegram and Push Notifications[te]
-18.Documentation/Update[help]
-0.Exit[q]/Hangul_Crash ??? -->[ko]
-
-
-
-==============================================
->>> Select No ([0-18],[ShortCut],h,e,sh):
-
-
 
 
