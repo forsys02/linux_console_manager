@@ -36,7 +36,9 @@ Ubuntu 22.04.3 LTS - yourhostname.com
 17. 텔레그램과 푸시알람 [te]
 18. 설명서 / 업데이트 [help]
 0.  Exit [q] // Hangul_Crash ??? --> [ko]
+
 ==============================================
+
 >>> Select No. ([0-18],[ShortCut],h,e,sh):
 
 
