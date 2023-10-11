@@ -9,9 +9,13 @@ Upon execution, you can see the following menu configuration:
 This script was created with a focus on Korean language users, and an English version is not yet available for distribution. It's designed to provide a user-friendly, menu-driven interface for executing various Linux console commands in Korean. The goal is to make it easier for users who are more comfortable with Korean to manage and navigate their Linux systems.
 
 ==============================================
+
 *  Main Menu  Load:  0.04  // FreeMem: 116/3274
+
 ==============================================
+
 Ubuntu 22.04.3 LTS - yourhostname.com
+
 ==============================================
 1.  시스템 정보 / 프로세스 관리 [p]
 2.  서버 데몬 관리 [d]
