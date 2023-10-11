@@ -60,6 +60,8 @@ Red Hat Linux release 7.2 (Enigma) - byus.net
 18.Documentation/Update[help]
 0.Exit[q]/Hangul_Crash ??? -->[ko]
 
+
+
 ==============================================
 >>> Select No ([0-18],[ShortCut],h,e,sh):
 
