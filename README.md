@@ -10,6 +10,7 @@ This script was created with a focus on Korean language users, and an English ve
 
 
 for english
+
 ==============================================
 *  Main Menu  Load:  0.03  // FreeMem: 1126/3911
 ==============================================
@@ -39,6 +40,7 @@ Ubuntu 22.04.3 LTS - yourhostname.com
 
 
 for korean
+
 ==============================================
 *  Main Menu  Load:  0.45  // FreeMem: 1169/39501
 ==============================================
