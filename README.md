@@ -13,7 +13,7 @@ for english
 ==============================================
 *  Main Menu  Load:  0.03  // FreeMem: 1126/3911
 ==============================================
-Ubuntu 22.04.3 LTS - docker.byus.net
+Ubuntu 22.04.3 LTS - yourhostname.com
 ==============================================
 1.  System Information / Process Management [p]
 2.  Server Daemon Management [d]
@@ -42,7 +42,7 @@ for korean
 ==============================================
 *  Main Menu  Load:  0.45  // FreeMem: 1169/39501
 ==============================================
-Debian GNU/Linux 12 (bookworm) - mint.byus.net
+Debian GNU/Linux 12 (bookworm) - yourhostname.com
 ==============================================
 1.  시스템 정보 / 프로세스 관리 [p]
 2.  서버 데몬 관리 [d]
