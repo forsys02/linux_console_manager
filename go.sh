@@ -48,6 +48,12 @@ else
 		cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
 	fi
 fi
+# not kr 
+if (( $( locale|grep -ci "kr" ) == 0 )) ; then
+	sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' $envtmp
+else
+	sed -i '/^%%%e /d' $envtmp
+fi
 
 # tmp 폴더 set
 if touch /tmp/go_history.txt ; then
@@ -57,7 +63,7 @@ else
 	mkdir -p $gotmp
 fi
 
-export publicip="$(curl -m1 -s icanhazip.com || curl -m1 -s checkip.amazonaws.com)"
+export publicip="$(curl -m1 -ks icanhazip.com || curl -m1 -ks checkip.amazonaws.com)"
 export localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 |tr '\n' ' ')
 export localip1=${localip%% *}
 export gateway="$(ip route | grep 'default' | awk '{print $3}')"
@@ -85,6 +91,8 @@ process_commands() {
 		#echo "$command" >> $gotmp/go_history.txt ; chmod 600 $gotmp/go_history.txt
 		unset var_value var_name
 		echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
+		[ "$pipeitem" ] && echo "selected: $pipeitem"
+		if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then nodone=y && sleep 1 ; fi
 		[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read x ; }
 	else
 		echo "Canceled..."
@@ -119,7 +127,9 @@ menufunc() {
     while true; do
 	clear || reset
 	# 서브메뉴 타이틀 변경
-	[ "$title_of_menu_sub" ] && title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m" || title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
+	[ "$scut" ] && ooldcut=$oldcut && oldscut="$scut" 
+	[ "$title_of_menu_sub" ] && { scut=$( echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}' ) ; title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m" ; } || { scut="" ;oldscut="" ; title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')" ; }
+	[ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow="" ; }
 
 		# 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선 
 		if [ ! "$chosen_command_sub" ] ; then
@@ -134,7 +144,7 @@ menufunc() {
 
 		echo
         echo "=============================================="
-        echo -e "* $title"
+        echo -e "* $title $flow" 
         echo "=============================================="
 	    if [ ! "$title_of_menu_sub" ] ; then
     	    echo "$( [ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null |awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null |sort -u) - $(hostname)"
@@ -174,9 +184,16 @@ menufunc() {
         echo "0.  Exit [q] // Hangul_Crash ??? --> [ko] "
         echo "=============================================="
 
-		IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
-#        printf ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): "
-#        read choice 
+		if [ "$initvar" ] ; then 
+			# 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
+			# echo "$initvar"
+			choice=$initvar && initvar=""
+		else
+			IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
+			#        printf ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): "
+			#        read choice 
+		fi
+
 
 		#shortcut 이 중복되더라도 첫번째 키만 가져옴 
 		key_idx=$(echo "${keys[*]}" | tr ' ' '\n' | awk -v target="$choice" '$0 == target {print(NR-1); exit}')
@@ -195,8 +212,10 @@ menufunc() {
 				choice_list () {
   					#trap 'echo "Exitting menu...";exit 1' SIGINT
 					echo
+					oldscut="$scut" && scut=$( echo "$title_of_menu" | awk -F'[][]' '{print $2}')
+					[ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow="" ; }
 	    		    echo "=============================================="
-					echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "\033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
+					echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "$flow \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
 		    	    echo "=============================================="
 					# pre excute 
 	                for items in "${pre_commands[@]}"; do
@@ -427,7 +446,7 @@ menufunc() {
 
 
 
-						# 해당 메뉴의 선택명령이 딱 하나일때 바로 실행 
+						# 해당 메뉴의 선택명령이 딱 하나일때 바로 실행
 						if (( ${#cmd_array[@]} == 1 )) ;then
 	                		[ ! "$cancel" == "yes" ] && process_commands "$cmd" "$cfm"
 						else
@@ -445,6 +464,7 @@ menufunc() {
 			# direct command sub_menu
 			[[ "$cmd_choice" == ".." || "$cmd_choice" == "sh" ]] && bashcomm && cmds
 			[[ "$cmd_choice" == "..." || "$cmd_choice" == "," || "$cmd_choice" == "bash" ]] && /bin/bash && cmds
+			[[ "$cmd_choice" == "m" ]] && menufunc
 		
 			# 환경파일 수정 및 재시작
 			[[ "$cmd_choice" == "conf" ]] && conf && cmds		
@@ -458,7 +478,7 @@ menufunc() {
 			[[ "$cmd_choice" == "e" ]] && { ranger $cmd_choice1 2>/dev/null || explorer ; } && cmds
 			[[ "$cmd_choice" == "t" ]] && { htop 2>/dev/null || top ; } && cmds
 			[[ "$cmd_choice" == "tt" ]] && { iftop -t 2>/dev/null || ( yyay iftop && iftop -t ) ; } && cmds
-			[[ "$cmd_choice" == "ttt" ]] && { dfmonitor; } && cmds
+			[[ "$cmd_choice" == "ttt" || "$cmd_choice" == "dfm" ]] && { dfmonitor; } && cmds
 			[[ "$cmd_choice" == "em" ]] && { mc -b || { yyay mc && mc -b ; } ; } && cmds
 			[[ "$cmd_choice" == "ee" ]] && { ranger /etc 2>/dev/null || explorer /etc ; } && cmds
 			[[ "$cmd_choice" == "ll" ]] && { journalctl -n10000 -e  ; } && cmds
@@ -504,7 +524,11 @@ menufunc() {
     		# hangul encoding chg 
 			if [[ ! "$(file $env|grep -i "utf")" && -s "$env" ]] ;then
 				echo "utf chg" && sleep 1
-			    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				if [[ "$(file $envorg|grep -i "utf")" ]] ;then
+				    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				else
+				    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				fi
 				[ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >> $HOME/go.private.env
 			elif [[ "$(file $envorg|grep -i "utf")" && "$(file $env|grep -i "utf")" && -s "$env" ]] ;then
 				echo "euc-kr chg" && sleep 1
@@ -524,7 +548,7 @@ menufunc() {
 		elif [ "$choice" ] && [ "$choice" == "e" ] ; then { ranger $choice1 2>/dev/null || explorer ; } ; 
 		elif [ "$choice" ] && [ "$choice" == "t" ] ; then { htop 2>/dev/null || top ; } ; 
 		elif [ "$choice" ] && [ "$choice" == "tt" ] ; then { iftop -t 2>/dev/null || ( yyay iftop && iftop -t ) ; } ; 
-		elif [ "$choice" ] && [ "$choice" == "ttt" ] ; then { dfmonitor; } ; 
+		elif [ "$choice" ] && [[ "$choice" == "ttt" || "$choice" == "dfm" ]] ; then { dfmonitor; } ; 
 		elif [ "$choice" ] && [ "$choice" == "em" ] ; then mc -b || { yyay mc && mc -b ; } ; 
 		elif [ "$choice" ] && [ "$choice" == "ee" ] ; then { ranger /etc 2>/dev/null || explorer /etc ; } ; 
 		elif [ "$choice" ] && [ "$choice" == "ll" ] ; then { journalctl -n10000 -e  ; } ;
@@ -534,6 +558,7 @@ menufunc() {
 		# alias 를 쓸수 있는 bash
 		elif [ "$choice" ] && [[ "$choice" == "..." || "$choice" == "," || "$choice" == "bash" ]] ; then /bin/bash ; 
 		# 메인/서브 메뉴 탈출 
+        elif [ "$choice" ] && [[ "$choice" == "m" ]] ; then menufunc ; 
         elif [ "$choice" ] && [[ "$choice" == "0" || "$choice" ==  "q" ||  "$choice" ==  "." ]] ; then
 
 			# title_of_menu_sub=""
@@ -640,16 +665,16 @@ noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null ; } # Escape 문자(
 selectmenu() { select item in $@ ; do echo $item ; done; }
 
 # pipe 로 넘어온 줄의 첫번째 필드를 select 
-pipemenu1() { items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; }
-pipemenu1cancel() { items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; }
+pipemenu1() { export pipeitem="" ; items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; }
+pipemenu1cancel() { export pipeitem="" ; items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; }
 
 # pipe 로 넘어온 줄의 모든 필드를 select
-pipemenu() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
-pipemenucancel() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ":_Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+pipemenu() { OLD_IFS=$IFS; IFS=$' \n' ; export pipeitem="" ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+pipemenucancel() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ":_Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
 
 # pipe 로 넘어온 라인별로 select
 pipemenulist() { PS3="==============================================
->>> Select No. : " ; OLD_IFS=$IFS; IFS=$'\n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+>>> Select No. : " ; OLD_IFS=$IFS; IFS=$'\n' ; export pipeitem="" ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
 
 # clear
 fclear() { printf '\n%.0s' {1..100} ;clear ; } 
@@ -740,13 +765,13 @@ readv() { bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && IFS="" read -rep $'
 bashcomm() {  echo;   local original_aliases=$(shopt -p expand_aliases);  shopt -s expand_aliases; source ~/.bashrc; unalias q 2> /dev/null ;  HISTFILE=$gotmp/go_history.txt; history -r "$HISTFILE"; while :; do      CYN;pwdv=$(pwd); echo "pwd: $([ -L $pwdv ] && ls -al $pwdv|awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)" ;RST; IFS="" read -rep 'BaSH_Command_[q] > ' cmd; if [[ "$cmd" == "q" || -z "$cmd" ]]; then eval "$original_aliases" && break; else { history -s "$cmd"; eval "process_commands \"$cmd\" y nodone"; history -a "$HISTFILE"; } fi; done; }
 
 # vi2 envorg && restart go.sh
-conf() { vi2a $envorg ; exec $gofile ; }
+conf() { vi2a $envorg $scut ; exec $gofile $scut; }
 
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env ; }
 
 # bell
-bell() { 'echo -ne "\a"' ; }
+bell() { echo -ne "\a" ; }
 # telegram push
 push() {
   local message="$@" ; 
@@ -771,7 +796,7 @@ push() {
   
     if [[ "${telegram_token}" && "${telegram_chatid}" ]]; then
   	  curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" > /dev/null ; result=$?
-  	  #curl -m1 -k -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
+  	  #curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
 	  [ "$result" == 0 ] && { GRN1 && echo "push msg sent" ; } || { RED1 && echo "Err:$result ->  push send error" ; } ; RST
 	fi
   # 기본적으로 인자 출력 
@@ -805,7 +830,7 @@ alarm() {
 	   [ ! "${input:4:2}" ] && input="$input$(echo "$telegram_msg" | awk1)" && telegram_msg="$(echo "$telegram_msg" | awknf2)" # && echo "input: $input // msg: $telegram_msg"
 		local time_in_hours="${input:4:2}" ; local time_in_minutes="${input:6:2}" ; local days="${input:8:2}" ; [ -z "$days" ] && days=0
 		telegram_msg="${time_in_hours}:${time_in_minutes}-Alarm ${telegram_msg}"
-		echo ": alarm_task_$input && curl -m1 -s -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at $time_in_hours:$time_in_minutes $( (( $days > 0 )) && echo "today + $days" days) &>/dev/null
+		echo ": alarm_task_$input && curl -m1 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at $time_in_hours:$time_in_minutes $( (( $days > 0 )) && echo "today + $days" days) &>/dev/null
 
 		atq |sort|while read -r l;do echo $l; j=$(echo $l|awk1); at -c $j|tail -n2|head -n1;done|stripe|cgrep alarm_task_$input
     elif [[ "${input:0:2}" == "00" ]]; then
@@ -904,15 +929,16 @@ readx() { read -p "[Enter] " x < /dev/tty ; }
 sleepdot(){ echo -n "sleepdot $1 "; bashver=${BASH_VERSINFO[0]}; (( bashver < 3 )) && real1sec=1 || real1sec=1; s=$(date +%s); c=1; [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "; time while [ -z "$x" ]; do [ "$1" ] && sleep 1; echo -n "."; [ $((c%5)) -eq 0 ] && echo -n " "; [ $((c % 30)) -eq 0 ] && echo $c ; t=$(($(date +%s)-s)); [ $((c%300)) -eq 0 ] && echo ;  c=$((c+1)); if [ "$1" ] && [ $t -ge $1 ]; then break; elif [ -z "$1" ]; then IFS=z read -t$real1sec -n1 x && break; fi; done; echo; }
 
 # backup & vi
-vi2() { rbackup $1 ; vim $1 || vi $1 ; }
+vi2() { rbackup $1 ; [ -f $1 ] && { vim $1 || vi $1 ; } ; }
 vi2e() { rbackup $1 ; vim -c "set fileencoding=euc-kr" $1 ; }
 vi2u() { rbackup $1 ; vim -c "set fileencoding=utf-8" $1 ; }
-vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
+vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; [ "$2" ] && vim -c "/\[$2\]" $1 || vim $1  ; } || [ "$2" ] && vim -c "/\[$2\]" $1 || vim $1  ; }
+#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status ; }
 
 # update
-update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m1 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m1 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile ; }
+update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m3 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m3 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile $scut ; }
 
 # install
 yyay() { [ "$(which yum)" ] && yum="yum" || yum="apt" ; while [ $# -gt 0 ]; do $yum install -y $1 ; shift; done; }
@@ -969,7 +995,9 @@ dfmonitor() { DF_INITIAL=$(df -m|grep -vE "udev|none|efi|fuse|tmpfs");DF_BEFORE=
 
 # explorer.sh
 #explorer() { $base/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o $base/explorer.sh && chmod 755 $base/explorer.sh && $base/explorer.sh $1 ) ; }
-explorer() { command -v ranger &> /dev/null && ranger $1 || { ~/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
+#explorer() { command -v ranger &> /dev/null && { ranger $1 ; } || { ~/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
+#explorer() { command -v ranger &> /dev/null && ranger "$1" || { explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }; }
+explorer() { command -v ranger &> /dev/null && { ranger "$1"; return; }; explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }
 exp() { explorer $* ; }
 
 pingcheck() { ping -c1 168.126.63.1 &> /dev/null && echo "y" || echo "n"; }
@@ -1147,6 +1175,7 @@ if [ "$INPUT_IPADDR" == "dhcp" ]; then
 else
    BOOTPROTO="static"
    NETMASK="255.255.255.0"
+   GATEWAY="$(echo $INPUT_IPADDR | cut -d '.' -f 1-3).1"
    BROADCAST="$(echo $INPUT_IPADDR | cut -d '.' -f 1-3).255"
 fi
 
@@ -2735,7 +2764,8 @@ esac
 
 
 # !! P e e k a b o o !! go !! 
-menufunc
+initvar=$1
+menufunc 
 
 
 
