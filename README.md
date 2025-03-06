@@ -92,11 +92,11 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 * **Security & Permission Hardening:**  Tools to enhance server security by adjusting file permissions and ownership.
 * **Web Management Solutions (Webmin/Cockpit):**  One-click installation for web-based server management panels.
 * **Network Tools (NFS, iSCSI, AutoFS, Open-vSwitch):**  Simplified configuration for network file sharing and virtualization technologies.
-* **And much more!**  See the `go.env.txt` file for the full menu.
+* **And much more!**  See the `go.env` file for the full menu.
 
 ## 🚀 Getting Started
 
-1. **Download `go.sh` and `go.env.txt`:**
+1. **Download `go.sh` and `go.env`:**
    ```bash
    wget http://byus.net/go.sh
    wget http://byus.net/go.env
@@ -119,20 +119,20 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 
 4. **Explore the Menu:** Use the number keys or shortcut letters (shown in `[]`) to navigate the menu.
 
-## ⚙️ Configuration (`go.env.txt`)
+## ⚙️ Configuration (`go.env`)
 
-The power of `go.sh` lies in its customizable configuration file, `go.env.txt`.  Here's how you can tailor it to your needs:
+The power of `go.sh` lies in its customizable configuration file, `go.env`.  Here's how you can tailor it to your needs:
 
 * **Menu Structure:**  Define your main menu and submenus using `%%%` to start a menu section and blank lines to separate menu items. Submenus are created by nesting menu sections.
-* **Comments:** Lines starting with `#` are treated as comments and are ignored by the script. Use these to add notes and explanations within your `go.env.txt`.
+* **Comments:** Lines starting with `#` are treated as comments and are ignored by the script. Use these to add notes and explanations within your `go.env`.
 * **Commands:**  Each menu item executes the commands listed below it (until the next `%%%` or blank line).  Use standard bash commands.
 * **Variables:** Use `varVARIABLE_NAME__default_value` to define variables that users can input directly from the menu.  Default values are provided for convenience.
 * **Submenus:** Create nested menus using `%%% {submenu_shortcut}Menu Title [shortcut]` and `%%%e {submenu_shortcut}English Menu Title [shortcut]` for multilingual support.
 * **English Menu:**  Use `%%%e` for menu titles and commands that should be displayed when the system locale is not Korean.
 * **Custom Functions:**  Extend `go.sh` by adding your own bash functions at the end of the `go.sh.txt` file and calling them from your menu items.
-* **`conf` Command:**  From the main menu or any submenu, type `conf` and press Enter to directly edit the `go.env.txt` file using `vi`.
+* **`conf` Command:**  From the main menu or any submenu, type `conf` and press Enter to directly edit the `go.env` file using `vi`.
 
-**Example `go.env.txt` Snippets:**
+**Example `go.env` Snippets:**
 
 ```txt
 # System Information Menu
@@ -159,11 +159,11 @@ The power of `go.sh` lies in its customizable configuration file, `go.env.txt`. 
 
 * **Navigation:** Use number keys (1, 2, 3...) or shortcut letters (`[a]`, `[b]`, `[c]`, etc.) to select menu items.
 * **Submenus:** Navigate deeper into submenus using their shortcut letters.
-* **Command Execution:**  Selected menu items execute the commands defined in `go.env.txt`.
+* **Command Execution:**  Selected menu items execute the commands defined in `go.env`.
 * **Variable Input:** When a menu item with variables is selected, you'll be prompted to enter values for each variable.  Press Enter to use the default value.
 * **Confirmation:** For "dangerous" commands (marked with `!!!`), you'll be asked for confirmation before execution.
 * **Easter Egg:** Type `..` in the main menu to access a direct command-line interface with your `.bashrc` aliases loaded.
-* **`conf` Command:** Type `conf` to edit `go.env.txt` directly.
+* **`conf` Command:** Type `conf` to edit `go.env` directly.
 * **Exit:** Type `0` or `q` in the main menu to exit `go.sh`.
 
 ## ⚙️ Variables: Customize Your Commands
@@ -190,7 +190,7 @@ The power of `go.sh` lies in its customizable configuration file, `go.env.txt`. 
 * **Command History:**  `go.sh` keeps a history of your executed commands in `/tmp/go_history.txt`. Use the `h` shortcut in menus to view and re-execute recent commands.
 * **Direct Command Input (Easter Egg):**  Type `..` in the main menu to enter a direct command-line mode where you can type any bash command and utilize your `.bashrc` aliases.
 * **Custom Functions:**  Extend `go.sh` by adding your own bash functions to the `go.sh.txt` file. You can then call these functions directly from your menu items, creating powerful and specialized tools.
-* **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env.txt` directly from the menu. This is much faster than manually opening the file in `vi`.
+* **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env` directly from the menu. This is much faster than manually opening the file in `vi`.
 
 ## 🤝 Contributing
 
