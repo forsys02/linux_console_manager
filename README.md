@@ -217,14 +217,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Enjoy simplifying your server management with `go.sh`!** 🚀
 ```
 
-**How to use the downloadable file:**
-
-1.  **Download:** Click the link above and save the `README.md` file to your computer.
-2.  **GitHub Repository:** Navigate to the root directory of your `go.sh` GitHub repository.
-3.  **Upload/Replace:**
-    *   **If you don't have a `README.md` yet:** Simply upload the downloaded `README.md` file to your repository.
-    *   **If you already have a `README.md`:** Replace your existing `README.md` file with the downloaded one. You can do this by uploading the new file and overwriting the old one, or by copying the content from the downloaded file and pasting it into your existing `README.md` file (using GitHub's web editor or a local text editor).
-
-Remember to replace the placeholder links and information (like `your-github-username`, email, etc.) in the `README.md` file with your actual details after uploading.
-
-Let me know if you have any other questions!
