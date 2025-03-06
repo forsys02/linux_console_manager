@@ -2,7 +2,7 @@
 # go.sh: Your Command-Line Swiss Army Knife for Linux Server Management 🚀
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Maintenance](https://img.shields.io/maintenance/yes/2024)](https://github.com/your-github-username/go.sh) <!-- Replace with your repo link -->
+[![Maintenance](https://img.shields.io/maintenance/yes/2024)](https://github.com/forsys02/linux_console_manager)
 [![Bash Shell Compatible](https://img.shields.io/badge/Bash-v2+-brightgreen.svg)](https://www.gnu.org/software/bash/)
 
 **Effortlessly manage your Linux servers right from your terminal with `go.sh`, a powerful and customizable menu-driven bash script.**
