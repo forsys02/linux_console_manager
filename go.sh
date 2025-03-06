@@ -789,7 +789,7 @@ rollback() { local d="$(dirname "$1")"; local base="$(basename "$1")"; local org
 
 # vi2 envorg && restart go.sh
 conf() { vi2a $envorg $scut ; [ -f /html/go.env ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env ; exec $gofile $scut; }
-conff() { vi2a $gofile $scut ; [ -f /html/go.sh ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh ; exec $gofile $scut; }
+conff() { vi2a $gofile ; [ -f /html/go.sh ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh ; exec $gofile $scut; }
 confc() { rollback $envorg ; }
 conffc() { rollback $gofile ; }
 
@@ -959,7 +959,8 @@ sleepdot(){ echo -n "sleepdot $1 "; bashver=${BASH_VERSINFO[0]}; (( bashver < 3 
 vi2() { rbackup $1 ; { vim $1 || vi $1 ; } ; }
 vi2e() { rbackup $1 ; vim -c "set fileencoding=euc-kr" $1 ; }
 vi2u() { rbackup $1 ; vim -c "set fileencoding=utf-8" $1 ; }
-vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; [ "$2" ] && vim -c "/\[$2\]" $1 || vim $1  ; } || [ "$2" ] && vim -c "/\[$2\]" $1 || vim $1  ; }
+#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "/^%%% .*\[$2\]" $1 || vim $1  ; }
+vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" $1 || vim $1  ; }
 #vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status ; }
