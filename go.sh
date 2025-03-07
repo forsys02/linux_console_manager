@@ -1,4 +1,4 @@
-
+#!/bin/bash
 # bash2 하위 호환성 유지 (redhat7/oops1)
 
 
