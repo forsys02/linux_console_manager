@@ -1,8 +1,8 @@
 #!/bin/bash
-# bash2 ÇÏÀ§ È£È¯¼º À¯Áö (redhat7/oops1)
+# bash2 í•˜ìœ„ í˜¸í™˜ì„± ìœ ì§€ (redhat7/oops1)
 
 
-# Á¸Àç ÇÏ´Â ÆÄÀÏÀÇ Àı´ë°æ·Î Ãâ·Â readlink -f 
+# ì¡´ì¬ í•˜ëŠ” íŒŒì¼ì˜ ì ˆëŒ€ê²½ë¡œ ì¶œë ¥ readlink -f
 #readlinkf() { local p="$1"; [ -L "$p" ] && p="$(dirname "$p")/$(readlink "$p")"; echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"; }
 readlinkf() { p="$1"; while [ -L "$p" ]; do lt="$(readlink "$p")"; if [[ $lt == /* ]]; then p="$lt"; else p="$(dirname "$p")/$lt"; fi; done; echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"; }
 realpathf() { while [ $# -gt 0 ]; do  echo $1 | sed -e 's/\/\.\//\//g' | awk -F'/' -v OFS="/" 'BEGIN{printf "/";}{top=1; for (i=2; i<=NF; i++) {if ($i == "..") {top--; delete stack[top];} else if ($i != "") {stack[top]=$i; top++;}} for (i=1; i<top; i++) {printf "%s", stack[i]; printf OFS;}}{print ""}' ; shift; done ; }
@@ -11,29 +11,21 @@ basefile="$( readlinkf $0 )"
 base="$( dirname $basefile )"
 
 gofile="$base/go.sh"
-envorg="$base/go.env" 
-envtmp="$base/.go.env" 
+envorg="$base/go.env"
+envtmp="$base/.go.env"
 
-# go.env È¯°æÆÄÀÏÀÌ ¾øÀ»°æ¿ì ´Ù¿î·Îµå 
+# go.env í™˜ê²½íŒŒì¼ì´ ì—†ì„ê²½ìš° ë‹¤ìš´ë¡œë“œ
 if [ ! -f "$envorg" ] ; then
 	echo "base: $base" ; chmod +x $gofile
 	echo -n ">>> go.env config file not found. Download? [y/n]: " && read down < /dev/tty
-	[ "$down" = "y" -o "$down" = "Y" ] && curl http://byus.net/go.env -o "$(cd "$(dirname "${0}")" ; echo $(pwd))"/go.env || exit 0
+	#[ "$down" = "y" -o "$down" = "Y" ] && curl -m1 http://byus.net/go.env -o "$(cd "$(dirname "${0}")" ; echo $(pwd))"/go.env || exit 0
+	[ "$down" = "y" -o "$down" = "Y" ] && output_dir="$(cd "$(dirname "${0}")" ; pwd)" && ( command -v curl >/dev/null 2>&1 && curl -m1 http://byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://byus.net/go.env || exit 0 )
 fi
 
 # /bin/go softlink
 [ ! -L /bin/go ] && ln -s $base/go.sh /bin/go && echo -ne "$(ls -al /bin/go) \n>>> Soft link created for /bin/go. Press [Enter] " && read x < /dev/tty
 
-# È¯°æ ÆÄÀÏ(ÇÑ±Ûeuc-kr) ÁÖ¼® Á¦°Å // ÇÑ±Û ÀÎÄÚµù º¯È¯ 
-if [ "$(echo $LANG|grep -i "utf" )" ] && [ ! "$(file $envorg|grep -i "utf")" ]  ; then
-	cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
-elif [ ! "$(echo $LANG|grep -i "utf" )" ] && [ "$(file $envorg|grep -i "utf")" ]  ; then
-	cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
-else
-	cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
-fi
-
-# °³ÀÎ È¯°æº¯¼ö ÆÄÀÏ ºÒ·¯¿À±â // ½ºÅ©¸³Æ®°¡ µ¹µ¿¾È »ç¿ëÀÌ °¡´ÉÇÏ¸ç // env ¿¡¼­ È®ÀÎ °¡´É 
+# ê°œì¸ í™˜ê²½ë³€ìˆ˜ íŒŒì¼ ë¶ˆëŸ¬ì˜¤ê¸° // ìŠ¤í¬ë¦½íŠ¸ê°€ ëŒë™ì•ˆ ì‚¬ìš©ì´ ê°€ëŠ¥í•˜ë©° // env ì—ì„œ í™•ì¸ ê°€ëŠ¥
 if [ -f $HOME/go.private.env ]; then
 	chmod 600 $HOME/go.private.env
     while IFS= read -r line; do
@@ -43,7 +35,28 @@ if [ -f $HOME/go.private.env ]; then
     done < $HOME/go.private.env
 fi
 
-# tmp Æú´õ set
+# í™˜ê²½ íŒŒì¼(í•œê¸€euc-kr) ì£¼ì„ ì œê±° // í•œê¸€ ì¸ì½”ë”© ë³€í™˜
+if [ "$envko" ] ; then # ì‚¬ìš©ì ìˆ˜ë™ ì„¤ì • ì €ì¥
+	[ "$envko" == "utf8" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	[ "$envko" == "euckr" ] && [ "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	[ "$envko" == "euckr" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
+else
+	if [ "$(echo $LANG|grep -i "utf" )" ] && [ ! "$(file $envorg|grep -i "utf")" ]  ; then
+		cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	elif [ ! "$(echo $LANG|grep -i "utf" )" ] && [ "$(file $envorg|grep -i "utf")" ]  ; then
+		cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	else
+		cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
+	fi
+fi
+# not kr
+if (( $( locale|grep -ci "kr" ) == 0 )) ; then
+	sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' $envtmp
+else
+	sed -i '/^%%%e /d' $envtmp
+fi
+
+# tmp í´ë” set
 if touch /tmp/go_history.txt ; then
 	gotmp="/tmp"
 else
@@ -51,21 +64,24 @@ else
 	mkdir -p $gotmp
 fi
 
-publicip="$(curl -s icanhazip.com)"
-localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 |tr '\n' ' ')
-localip1=${localip%% *}
+#export publicip="$(curl -m1 -ks icanhazip.com 2>/dev/null || curl -m1 -ks checkip.amazonaws.com 2>/dev/null)"
+export publicip="$(wget -q -O - http://icanhazip.com 2>/dev/null || wget -q -O - http://checkip.amazonaws.com 2>/dev/null)"
+export localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 |tr '\n' ' ')
+export localip1=${localip%% *}
+export guestip=$(who am i|awk -F'[():]' '{print $3}')
+export gateway="$(ip route | grep 'default' | awk '{print $3}')"
 [ ! "localip" ] && localip=$( ip -4 addr show | awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' |grep -vE "127.0.0.1|255$"|tr '\n' ' ')
 
 
 
 
-# ¸í·ÉÀÌ ³Ñ¾î¿À¸é ½ÇÇàÇÏ´Â ÇÔ¼ö 
+# ëª…ë ¹ì´ ë„˜ì–´ì˜¤ë©´ ì‹¤í–‰í•˜ëŠ” í•¨ìˆ˜
 process_commands() {
   	#trap 'sleep 0.5 ; echo "Abortd. Go CMDs.... ";cmds||exec $gofile' SIGINT
   	#trap 'echo "go [Enter] if you want...";exit 1' SIGINT
 	#trap "echo ' Ctrl+C pressed; continuing with the script.';echo;exit 0" SIGINT
     local command="$1" ; local cfm=$2 ; local nodone=$3
-	[ "${command:0:1}" == "#" ] && return # ÁÖ¼®¼±ÅÃ½Ã Ãë¼Ò 
+	[ "${command:0:1}" == "#" ] && return # ì£¼ì„ì„ íƒì‹œ ì·¨ì†Œ
     if [ "$cfm" == "y" -o "$cfm" == "Y" -o ! "$cfm" ]; then
 		[ "${command%% *}" != "cd" ] && echo && echo "=============================================="
 		#[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(printf "%q" "${command#* }")"
@@ -78,15 +94,17 @@ process_commands() {
 		#echo "$command" >> $gotmp/go_history.txt ; chmod 600 $gotmp/go_history.txt
 		unset var_value var_name
 		echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
+		[ "$pipeitem" ] && echo "selected: $pipeitem"
+		if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then nodone=y && sleep 1 ; fi
 		[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read x ; }
 	else
 		echo "Canceled..."
     fi   ; }
 
 
-# È¯°æÆÄÀÏ¿¡¼­ %%% ·Î ½ÃÀÛÇÏ´Â ¸Ş´º °¡Á®¿È 
+# í™˜ê²½íŒŒì¼ì—ì„œ %%% ë¡œ ì‹œì‘í•˜ëŠ” ë©”ë‰´ ê°€ì ¸ì˜´
 search_menulist() {
-    if [ -z "$chosen_command_sub" ]; then 
+    if [ -z "$chosen_command_sub" ]; then
 		# mainmenu list
         cat "$env" | grep -E '^%%%' | grep -vE '\{submenu' | sed -r 's/%%% //'
     else
@@ -99,22 +117,24 @@ search_menulist() {
 
 
 
-# ¸ŞÀÎ ¼­ºñ½º ÇÔ¼ö
+# ë©”ì¸ ì„œë¹„ìŠ¤ í•¨ìˆ˜
 menufunc() {
   	#trap 'echo "Exitting menu...";exit 1' SIGINT
-	# ÃÊ±â ¸Ş´º´Â ÀÎ¼ö¾øÀ½, ÀÎ¼ö ÀÖÀ»°æ¿ì ¼­ºê ¸Ş´ºÁøÀÔ
+	# ì´ˆê¸° ë©”ë‰´ëŠ” ì¸ìˆ˜ì—†ìŒ, ì¸ìˆ˜ ìˆì„ê²½ìš° ì„œë¸Œ ë©”ë‰´ì§„ì…
     local chosen_command_sub=$1 ; local title_of_menu_sub=$2
 
-	# È÷½ºÅä¸® ÆÄÀÏ Á¤ÀÇÇÏ°í ºÒ·¯¿È 
+	# íˆìŠ¤í† ë¦¬ íŒŒì¼ ì •ì˜í•˜ê³  ë¶ˆëŸ¬ì˜´
 	HISTFILE=$gotmp/go_history.txt; history -r "$HISTFILE"
 
-	# Å»ÃâÄÚµå ¶Ç´Â ctrlc °¡ ÀÔ·ÂµÇÁö ¾Ê´Â °æ¿ì ·çÇÁ 
+	# íƒˆì¶œì½”ë“œ ë˜ëŠ” ctrlc ê°€ ì…ë ¥ë˜ì§€ ì•ŠëŠ” ê²½ìš° ë£¨í”„
     while true; do
 	clear || reset
-	# ¼­ºê¸Ş´º Å¸ÀÌÆ² º¯°æ
-	[ "$title_of_menu_sub" ] && title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m" || title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
+	# ì„œë¸Œë©”ë‰´ íƒ€ì´í‹€ ë³€ê²½
+	[ "$scut" ] && ooldcut=$oldcut && oldscut="$scut"
+	[ "$title_of_menu_sub" ] && { scut=$( echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}' ) ; title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m" ; } || { scut="" ;oldscut="" ; title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')" ; }
+	[ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow="" ; }
 
-		# ¸ŞÀÎ¸Ş´º¿¡¼­ ¼­ºê ¸Ş´ºÀÇ shortcut µµ »ç¿ëÇÒ¼ö ÀÖµµ·Ï ±â´É°³¼± 
+		# ë©”ì¸ë©”ë‰´ì—ì„œ ì„œë¸Œ ë©”ë‰´ì˜ shortcut ë„ ì‚¬ìš©í• ìˆ˜ ìˆë„ë¡ ê¸°ëŠ¥ê°œì„ 
 		if [ ! "$chosen_command_sub" ] ; then
             IFS=$'\n' allof_sub_shortcut_item="$( cat "$env" | grep "%%% {submenu_" | grep -E '\[.+\]$'  )"
 			subkey=() ; idx=0
@@ -127,21 +147,22 @@ menufunc() {
 
 		echo
         echo "=============================================="
-        echo -e "* $title"
+        echo -e "* $title $flow"
         echo "=============================================="
 	    if [ ! "$title_of_menu_sub" ] ; then
-    	    [ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null |awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null |sort -u
+    	    echo "$( [ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null |awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null |sort -u) - $(hostname)"
         	echo "=============================================="
-		else	
+		else
 
-			# pre_commands °ËÃâ¹× ½ÇÇà (submenu ÀÏ¶§¸¸)
-			listof_comm_submain() {
-			IFS=$'\n' allof_chosen_commands="$( cat "$env" | awk -v title_of_menu="%%% ${title_of_menu_sub}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag'  )"
-			IFS=$'\n' pre_commands=( $(echo "${allof_chosen_commands}" | grep "^%% ") )
-			}
+			# pre_commands ê²€ì¶œë° ì‹¤í–‰ (submenu ì¼ë•Œë§Œ)
+			#listof_comm_submain() {
+			#IFS=$'\n' allof_chosen_commands="$( cat "$env" | awk -v title_of_menu="%%% ${title_of_menu_sub}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag'  )"
+			#IFS=$'\n' pre_commands=( $(echo "${allof_chosen_commands}" | grep "^%% ") )
+			#}
 
-			listof_comm_submain	
-			# pre excute 
+			# listof_comm_submain
+
+			# pre excute
 	        for items in "${pre_commands[@]}"; do
        		    eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
     	    done > >( output=$(cat); [ -n "$output" ] && { [ "$(echo "$output" |grep -E '0m')" ] && { echo "$output" ; echo "=============================================="; } || { CYN ; echo "$output" ; RST ; echo "=============================================="; } ; } )
@@ -152,7 +173,7 @@ menufunc() {
 
         local unset items ; menu_idx=0 ; shortcut_idx=0 ; unset keys ; declare -a keys ; unset idx_mapping ; declare -a idx_mapping
 
-		# ¸ŞÀÎ or ¼­ºê ¸Ş´º ¸®½ºÆ® ±¸¼º
+		# ë©”ì¸ or ì„œë¸Œ ë©”ë‰´ ë¦¬ìŠ¤íŠ¸ êµ¬ì„±
         while read line; do
             menu_idx=$(( menu_idx + 1 ))
             items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //' )
@@ -161,20 +182,27 @@ menufunc() {
 			key=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
 			[ "$key" ] && { keys[$shortcut_idx]="$key" ; idx_mapping[$shortcut_idx]=$menu_idx ; ((shortcut_idx++)) ; }
 
-			printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}. 
-        done < <(search_menulist) # %%% ¸ğÀ½ °¡Á®¿Í¼­ ÆÄ½Ì 
+			printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
+        done < <(search_menulist) # %%% ëª¨ìŒ ê°€ì ¸ì™€ì„œ íŒŒì‹±
 
         echo "0.  Exit [q] // Hangul_Crash ??? --> [ko] "
         echo "=============================================="
 
-		IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
-#        printf ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): "
-#        read choice 
+		if [ "$initvar" ] ; then
+			# ìµœì´ˆ ì‹¤í–‰ì‹œ íŠ¹ì • ë©”ë‰´ shortcut ê°€ì ¸ì˜´ ex) bash go.sh px
+			# echo "$initvar"
+			choice=$initvar && initvar=""
+		else
+			IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
+			#        printf ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): "
+			#        read choice
+		fi
 
-		#shortcut ÀÌ Áßº¹µÇ´õ¶óµµ Ã¹¹øÂ° Å°¸¸ °¡Á®¿È 
+
+		#shortcut ì´ ì¤‘ë³µë˜ë”ë¼ë„ ì²«ë²ˆì§¸ í‚¤ë§Œ ê°€ì ¸ì˜´
 		key_idx=$(echo "${keys[*]}" | tr ' ' '\n' | awk -v target="$choice" '$0 == target {print(NR-1); exit}')
 
-		#shortcut À» ÂüÁ¶ÇÏ¿© choice ¹øÈ£ ¼³Á¤ 
+		#shortcut ì„ ì°¸ì¡°í•˜ì—¬ choice ë²ˆí˜¸ ì„¤ì •
 		[ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]}
 
 
@@ -184,14 +212,16 @@ menufunc() {
 
 
 
-				# È¯°æÆÄÀÏ¿¡¼­ °¡Á®¿Â ¸í·É¹® Ãâ·Â // CMDs // command list print func
+				# í™˜ê²½íŒŒì¼ì—ì„œ ê°€ì ¸ì˜¨ ëª…ë ¹ë¬¸ ì¶œë ¥ // CMDs // command list print func
 				choice_list () {
   					#trap 'echo "Exitting menu...";exit 1' SIGINT
 					echo
+					oldscut="$scut" && scut=$( echo "$title_of_menu" | awk -F'[][]' '{print $2}')
+					[ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow="" ; }
 	    		    echo "=============================================="
-					echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "\033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
+					echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "$flow \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
 		    	    echo "=============================================="
-					# pre excute 
+					# pre excute
 	                for items in "${pre_commands[@]}"; do
        		          eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
     	            done > >( output=$(cat); [ -n "$output" ] && { [ "$(echo "$output" |grep -E '0m')" ] && { echo "$output" ; echo "=============================================="; } || { CYN ; echo "$output" ; RST ; echo "=============================================="; } ; sleep 0.1 ; } )
@@ -199,46 +229,46 @@ menufunc() {
 					display_idx=1 ; unset cmd_choice original_indices ; original_indices=()
     	        	for i in $(seq 1 ${#chosen_commands[@]}) ; do
 
-				
+
 						c_cmd="${chosen_commands[$((i-1))]}"
 
-						# ¸í·É±¸¹®¿¡¼­ ÆÄÀÏ°æ·Î ÃßÃâ /dev /proc Á¦¿ÜÇÑ ÀÏ¹İ°æ·Î  
+						# ëª…ë ¹êµ¬ë¬¸ì—ì„œ íŒŒì¼ê²½ë¡œ ì¶”ì¶œ /dev /proc ì œì™¸í•œ ì¼ë°˜ê²½ë¡œ
 						file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
 
 
-						# ÇØ´ç ¼­¹ö¿¡ ¾ø´Â °æ·Î¿¡ ´ëÇØ¼­´Â À½¿µÃ³¸® // ÀÖ´Â °æ·Î´Â ¹à°Ô
-						# ¼­¹ö¿¡ µû¶ó È¯°æÆÄÀÏÀÇ °æ·Î°¡ ´Ş¶ó ´«À¸·Î Ã¼Å© 
-						IFS=$' \n' ; processed_paths=""  
+						# í•´ë‹¹ ì„œë²„ì— ì—†ëŠ” ê²½ë¡œì— ëŒ€í•´ì„œëŠ” ìŒì˜ì²˜ë¦¬ // ìˆëŠ” ê²½ë¡œëŠ” ë°ê²Œ
+						# ì„œë²„ì— ë”°ë¼ í™˜ê²½íŒŒì¼ì˜ ê²½ë¡œê°€ ë‹¬ë¼ ëˆˆìœ¼ë¡œ ì²´í¬
+						IFS=$' \n' ; processed_paths=""
 						for file_path in $file_paths; do
 						  if ! echo "$processed_paths" | grep -q -F "$file_path"; then
 							#[ "$file_path" ] && echo "file_path: $file_path"
 						    [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
 						    c_cmd="${c_cmd//$file_path/${file_marker}${file_path}${file_marker}}"
 							#echo "c_cmd: $c_cmd"
-					        processed_paths="${processed_paths}${file_path}"$'\n'        
+					        processed_paths="${processed_paths}${file_path}"$'\n'
 						  fi
 						done
-						unset IFS  
+						unset IFS
 
-						# ÁÖ¼® ¾Æ´Ñ°æ¿ì ¹è¿­ ¼ø¹ø¿¡ ÁÙ¹øÈ£¸¦ ÇÒ´ç (ÁÖ¼®Àº ¹øÈ£ÇÒ´ç ¿­¿Ü)
+						# ì£¼ì„ ì•„ë‹Œê²½ìš° ë°°ì—´ ìˆœë²ˆì— ì¤„ë²ˆí˜¸ë¥¼ í• ë‹¹ (ì£¼ì„ì€ ë²ˆí˜¸í• ë‹¹ ì—´ì™¸)
 						pi="" ; if [ ${c_cmd:0:1} != "#" ]; then
 						    pi="${display_idx}."
-							# ¹è¿­ È®Àå 
+							# ë°°ì—´ í™•ì¥
 						    original_indices=("${original_indices[@]}" $i)
 						    display_idx=$((display_idx + 1))
 						fi
 
-					
-						# ¸í·É¹®¿¡ »ö±ò ÀÔÈ÷±â // ÁÖ¼®Àº Å»ÃâÄÚµå ÁÖ¼®»öÀ¸·Î Á¶Á¤
-					printf "\e[1m%-3s\e[0m " ${pi} ; echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# Ã¹ ¹øÂ° ÁÙ Á¦¿Ü °¢ ¶óÀÎ µé¿©¾²±â`\
-						-e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path ¹àÀº Èò»ö`\
-						-e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path ¾îµÎ¿î È¸»ö`\
-						-e 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var º¯¼ö ÀÚÁÖ»ö`\
-						-e 's/@@/\//g' `# º¯¼ö¿¡ @@ ¸¦ ¾µ°æ¿ì / ·Î º¯È¯ `\
-						-e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' °æ°íÇ¥½Ã ³ë¶õ»ö`\
-						-e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' Ã»·Ï»ö`\
-						-e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# ÁÖ¼®ÇàÀÇ Å»ÃâÄÚµå Á¶Á¤`\
-						-e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# ÁÖ¼®À» Ã»·Ï»öÀ¸·Î Æ÷¸Ë`
+
+						# ëª…ë ¹ë¬¸ì— ìƒ‰ê¹” ì…íˆê¸° // ì£¼ì„ì€ íƒˆì¶œì½”ë“œ ì£¼ì„ìƒ‰ìœ¼ë¡œ ì¡°ì •
+					printf "\e[1m%-3s\e[0m " ${pi} ; echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# ì²« ë²ˆì§¸ ì¤„ ì œì™¸ ê° ë¼ì¸ ë“¤ì—¬ì“°ê¸°`\
+						-e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path ë°ì€ í°ìƒ‰`\
+						-e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path ì–´ë‘ìš´ íšŒìƒ‰`\
+						-e 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var ë³€ìˆ˜ ìì£¼ìƒ‰`\
+						-e 's/@@/\//g' `# ë³€ìˆ˜ì— @@ ë¥¼ ì“¸ê²½ìš° / ë¡œ ë³€í™˜ `\
+						-e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' ê²½ê³ í‘œì‹œ ë…¸ë€ìƒ‰`\
+						-e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' ì²­ë¡ìƒ‰`\
+						-e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# ì£¼ì„í–‰ì˜ íƒˆì¶œì½”ë“œ ì¡°ì •`\
+						-e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# ì£¼ì„ì„ ì²­ë¡ìƒ‰ìœ¼ë¡œ í¬ë§·`
 
 	        	    done
 
@@ -246,14 +276,14 @@ menufunc() {
 					#echo "original_indices -> ${original_indices}"
 					vx="" ; cmd_choice="" ; [ "$x" ] && [[ "$x" == [0-9] || "$x" == [1-9][0-9] ]] && vx=$x && x=""
 					[ "(tail -n1 $gotmp/go_history.txt | grep "vi2")" ] && [ "$vx" ] && echo "I won't discard the number you pressed." && sleep 0.5 && cmd_choice=$vx
-					[ ! "$vx" ] && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh): " cmd_choice cmd_choice1 ; } && vx=""
+					[ ! "$vx" ] && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 ; } && vx=""
 
-					# ¼±ÅÃÇÏÁö ¾ÊÀ¸¸é ¸Ş´º ´Ù½Ã print // ¼±ÅÃÇÏ¸é ½ÇÁ¦ ÁÙ¹øÈ£ ºÎ¿© -> ·çÇÁ 2È¸ µ¹¾Æ¼­ ÁÖ¼® Ã³¸®µÊ
+					# ì„ íƒí•˜ì§€ ì•Šìœ¼ë©´ ë©”ë‰´ ë‹¤ì‹œ print // ì„ íƒí•˜ë©´ ì‹¤ì œ ì¤„ë²ˆí˜¸ ë¶€ì—¬ -> ë£¨í”„ 2íšŒ ëŒì•„ì„œ ì£¼ì„ ì²˜ë¦¬ë¨
 					# [ ! "$cmd_choice" ] && choice_list $title_of_menu ${#chosen_commands[@]}
 					#[ ! "$cmd_choice" ] && bashcomm && cmds
 					[ "$cmd_choice" ] && [[ "$cmd_choice" == [0-9] || "$cmd_choice" == [1-9][0-9] ]] && [ "$cmd_choice" -gt 0 ] && cmd_choice=${original_indices[$((cmd_choice - 1))]}
 					#echo "cmd_choice -> $cmd_choice" && readx
-				} # end of choice_list() 
+				} # end of choice_list()
 
 
 
@@ -261,48 +291,51 @@ menufunc() {
 
 
 
-			# È¯°æÆÄÀÏ¿¡¼­ ¸í·É¹®µé °¡Á®¿À´Â ÇÔ¼ö 
+			# í™˜ê²½íŒŒì¼ì—ì„œ ëª…ë ¹ë¬¸ë“¤ ê°€ì ¸ì˜¤ëŠ” í•¨ìˆ˜
 
 			listof_comm() {
-			# ¼±ÅÃÇÑ ¸Ş´º°¡ ¼­ºê¸Ş´ºÀÎ°æ¿ì ${chosen_command_sub}°¡ Æ÷ÇÔµÈ ¸®½ºÆ® ¼öÁı 
+			# ì„ íƒí•œ ë©”ë‰´ê°€ ì„œë¸Œë©”ë‰´ì¸ê²½ìš° ${chosen_command_sub}ê°€ í¬í•¨ëœ ë¦¬ìŠ¤íŠ¸ ìˆ˜ì§‘
 			sub_menu="${chosen_command_sub:-}"
+			#echo "sub_menu: $sub_menu" ; sleep 3 ; bell
 			IFS=$'\n' allof_chosen_commands="$( cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag'  )"
+			#echo "title_of_menu: $title_of_menu" ; sleep 3 ; bell
 			IFS=$'\n' chosen_commands=( $(echo "${allof_chosen_commands}" | grep -v "^%% ") )
 			IFS=$'\n' pre_commands=( $(echo "${allof_chosen_commands}" | grep "^%% ") )
+			#echo "${pre_commands}" ; sleep 3  ;bell
 			}
 
 
 
 
 
-		# ¼­ºê¸Ş´º¿¡ ¼û¾îÀÖ´Â shortcut È£ÃâÀÌ ÀÖÀ»¶§ 
+		# ì„œë¸Œë©”ë‰´ì— ìˆ¨ì–´ìˆëŠ” shortcut í˜¸ì¶œì´ ìˆì„ë•Œ
 		if [ '$choice' ] && (( ! $choice > 0 )) 2>/dev/null ; then
-			# subshortcut À» ÂüÁ¶ÇÏ¿© title_of_menu ¼³Á¤ 
-			# ex) chosen_command:{submenu_systemsetup} // title_of_menu:½Ã½ºÅÛ ÃÊ±â¼³Á¤°ú ±âÅ¸ (submenu) [i]
-			for item in "${subkey[@]}"; do 
-				# echo $item 
+			# subshortcut ì„ ì°¸ì¡°í•˜ì—¬ title_of_menu ì„¤ì •
+			# ex) chosen_command:{submenu_systemsetup} // title_of_menu:ì‹œìŠ¤í…œ ì´ˆê¸°ì„¤ì •ê³¼ ê¸°íƒ€ (submenu) [i]
+			for item in "${subkey[@]}"; do
+				# echo $item
 				if [ "$choice" == "${item%%|||*}" ] ; then
-					#chosen_command="$(echo $item| awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}' )" 
-					chosen_command_sub="$(echo $item| awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}' )" 
-					title_of_menu="${item#*\}}"  
-					title_of_menu_sub="${item#*\}}"  
-					# choice 99 ·Î ¾Æ·¡ ¸Ş´º ÁøÀÔ ½Ãµµ 
+					#chosen_command="$(echo $item| awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}' )"
+					chosen_command_sub="$(echo $item| awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}' )"
+					title_of_menu="${item#*\}}"
+					title_of_menu_sub="${item#*\}}"
+					# choice 99 ë¡œ ì•„ë˜ ë©”ë‰´ ì§„ì… ì‹œë„
 					choice=99
 				fi
-			done 
+			done
 			#echo "$chosen_command ${title_of_menu_sub}" && sleep 3
 		fi
 
-		
 
-		# ¸ŞÀÎ/¼­ºê ¸Ş´º¿¡¼­ Á¤»ó ¹üÀ§ÀÇ ¼ıÀÚ°¡ ÀÔ·ÂµÈ°æ¿ì 
+
+		# ë©”ì¸/ì„œë¸Œ ë©”ë‰´ì—ì„œ ì •ìƒ ë²”ìœ„ì˜ ìˆ«ìê°€ ì…ë ¥ëœê²½ìš°
 		if [ "$choice" ] && [[ "$choice" == [0-9] || "$choice" == [1-9][0-9] ]] && ( [ "$choice" -ge 1 -a "$choice" -le "$menu_idx" ] || [ "$choice" == 99 ] ) ; then
 
-			# ¼±ÅÃÇÑ ÁÙ¹øÈ£ÀÇ Å¸ÀÌÆ² °¡Á®¿È
+			# ì„ íƒí•œ ì¤„ë²ˆí˜¸ì˜ íƒ€ì´í‹€ ê°€ì ¸ì˜´
 			[ ! "$choice" == 99 ] && 	title_of_menu="$( search_menulist | awk -v choice="$choice" 'NR==choice {print}' )"
-			#echo "$title_of_menu" && read x 
+			#echo "$title_of_menu" && read x
 
-			# ¼±ÅÃÇÑ ÁÙ¹øÈ£ÀÇ Å¸ÀÌÆ²¿¡ ¸Â´Â ¸®½ºÆ®°¡Á®¿È 
+			# ì„ íƒí•œ ì¤„ë²ˆí˜¸ì˜ íƒ€ì´í‹€ì— ë§ëŠ” ë¦¬ìŠ¤íŠ¸ê°€ì ¸ì˜´
 			listof_comm
 
 
@@ -310,17 +343,17 @@ menufunc() {
 
 			cmds() {
 
-			while true ; do # ÇÏºÎ ¸Ş´º CMDs loop 
-	
+			while true ; do # í•˜ë¶€ ë©”ë‰´ CMDs loop
+
 			chosen_command=""
-        	num_commands=${#chosen_commands[@]} # ÁÙ±æÀÌ Ã¼Å© 
+        	num_commands=${#chosen_commands[@]} # ì¤„ê¸¸ì´ ì²´í¬
 
 	        if [ $num_commands -gt 1 ]; then
 
-			
-			# È¯°æÆÄÀÏ¿¡¼­ °¡Á®¿Â ¸í·É¹® Ãâ·Â && read cmd_choice 
-			choice_list 
-				
+
+			# í™˜ê²½íŒŒì¼ì—ì„œ ê°€ì ¸ì˜¨ ëª…ë ¹ë¬¸ ì¶œë ¥ && read cmd_choice
+			choice_list
+
 	            if [ "$cmd_choice" ] && [[ "$cmd_choice" == [0-9] || "$cmd_choice" == [1-9][0-9] ]] && [ "$cmd_choice" -ge 1 -a "$cmd_choice" -le $num_commands ]; then
     	            chosen_command=${chosen_commands[$((cmd_choice-1))]}
 	            fi
@@ -329,15 +362,15 @@ menufunc() {
 			else
 				echo "error : num_commands->$num_commands" ; break
         	fi ### end of [ $num_commands -gt 1 ]
-			
-			#echo "chosen_command:$chosen_command // title_of_menu:$title_of_menu" && read x 
+
+			#echo "chosen_command:$chosen_command // title_of_menu:$title_of_menu" && read x
 
 
 
             if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
-                menufunc $chosen_command ${title_of_menu} 
+                menufunc $chosen_command ${title_of_menu}
 
-            elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]  ;then  
+            elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]  ;then
 				echo
 				if [ "$(echo "$chosen_command" | awk '{print $1}' )" == "!!!" ] ;then
 					chosen_command=${chosen_command#* }
@@ -347,42 +380,45 @@ menufunc() {
 					# echo -e "--> \x1b[1;36;40m$chosen_command\x1b[0m"
     	        	echo ; cfm=y
 				fi
-					# ;; ·Î ÀÌ¾îÁø ¸í·ÉµéÀº ¼øÂ÷ÀûÀ¸·Î ½ÇÇà (¾ÕÀÇ °á°ú¸¦ º¸°í µÚÀÇ º¯¼ö¸¦ ÀÔ·Â °¡´É)
+					# ;; ë¡œ ì´ì–´ì§„ ëª…ë ¹ë“¤ì€ ìˆœì°¨ì ìœ¼ë¡œ ì‹¤í–‰ (ì•ì˜ ê²°ê³¼ë¥¼ ë³´ê³  ë’¤ì˜ ë³€ìˆ˜ë¥¼ ì…ë ¥ ê°€ëŠ¥)
 					if [[ "$chosen_command" != *"case"* ]] && [[ "$chosen_command" != *"esac"* ]] ; then
-						IFS=$'\n' cmd_array=($(echo "$chosen_command" | sed 's/;;/\n/g')) # ¸í·É¾î ¹è¿­ »ı¼º
+						IFS=$'\n' cmd_array=($(echo "$chosen_command" | sed 's/;;/\n/g')) # ëª…ë ¹ì–´ ë°°ì—´ ìƒì„±
 					else
 						cmd_array=("$chosen_command")
 					fi
-					
+
 					local count=1
-					for cmd in "${cmd_array[@]}"; do # ¹è¿­À» ¹İº¹ÇÏ¸ç ¸í·É¾î Ã³¸®
+					for cmd in "${cmd_array[@]}"; do # ë°°ì—´ì„ ë°˜ë³µí•˜ë©° ëª…ë ¹ì–´ ì²˜ë¦¬
 
 					 	echo -e "--> \x1b[1;36;40m$cmd\x1b[0m"
-						
-						# µ¿ÀÏÇÑ var ´Â Á¦¿ÜÇÏ°í read // awk '!seen[$0]++'
+
+						# ë™ì¼í•œ var ëŠ” ì œì™¸í•˜ê³  read // awk '!seen[$0]++'
 						# echo "$(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++' )"
+
+                        if [ "$cfm" == "y" -o "$cfm" == "Y" -o ! "$cfm" ]; then
+
 						while read -r var; do
 						 var_value="" ; dvar_value=""
 						 var_name="var${var#var}"
 
-						 # ±âº»°ªÀÌ ÀÖÀ»¶§ ÆÄ½Ì
+						 # ê¸°ë³¸ê°’ì´ ìˆì„ë•Œ íŒŒì‹±
 						 if [[ $var_name == *__[a-zA-Z0-9.@-]* ]] ; then
 							#echo "var_name: $var_name"
-							dvar_value="${var_name##*__}" && dvar_value="${dvar_value//@@//}" 
+							dvar_value="${var_name##*__}" && dvar_value="${dvar_value//@@//}"
 							[ "$( echo "${var_name%__*}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
-							printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%__*} Default:$dvar_value] \e[0m: " 
+							printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%__*} Default:$dvar_value] \e[0m: "
 							readv var_value < /dev/tty
 
-						 # ±âº»°ª¿¡ ¾µ¼ö ¾ø´Â ¹®ÀÚ°¡ µé¾î¿Ã°æ¿ì Á¾·á 
+						 # ê¸°ë³¸ê°’ì— ì“¸ìˆ˜ ì—†ëŠ” ë¬¸ìê°€ ë“¤ì–´ì˜¬ê²½ìš° ì¢…ë£Œ
 						 elif [[ $var_name == *__[a-zA-Z0-9./]* ]] ;then
-							printf "!!! error -> var: only var[A-Z][a-zA-Z0-9_.@-]* -> / ÇÊ¿ä½Ã @@ ·Î ´ëÃ¼ ÀÔ·Â°¡´É \n " && exit 0
+							printf "!!! error -> var: only var[A-Z][a-zA-Z0-9_.@-]* -> / í•„ìš”ì‹œ @@ ë¡œ ëŒ€ì²´ ì…ë ¥ê°€ëŠ¥ \n " && exit 0
 
-						 # º¯¼ö ±âº»°ªÀÌ ¾øÀ»¶§ 
+						 # ë³€ìˆ˜ ê¸°ë³¸ê°’ì´ ì—†ì„ë•Œ
 						 else
-							# $HOME/go.private.env ¿¡ Á¤ÀÇµÈ º¯¼ö°¡ ÀÖÀ»¶§ 
-							if [ "${!var_name}" ] ;then
+							# $HOME/go.private.env ì— ì •ì˜ëœ ë³€ìˆ˜ê°€ ìˆì„ë•Œ
+							if [ "${!var_name}" ] || [ "${!var_name%__*}" ] ;then
 								 dvar_value="${!var_name}"
-								 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: " 
+								 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
 								 readv var_value < /dev/tty
 							else
 								[ "$( echo "${var_name}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
@@ -391,10 +427,10 @@ menufunc() {
 							fi
 						 fi
 						 echo
-						 # º¯¼ö¿¡ read ¼ö½Å°ª ÇÒ´ç 
+						 # ë³€ìˆ˜ì— read ìˆ˜ì‹ ê°’ í• ë‹¹
 						 if [ ! "$var_value" ] && [ "$dvar_value" ]  ; then
 							#echo "input type a"
-							# º¯¼öÀÇ ±âº»°ªÀ» ÁöÁ¤ (varABC__22) ±âº»°ªÀº ¼ıÀÚ¿Í¿µ¹®ÀÚ¸¸ °¡´É
+							# ë³€ìˆ˜ì˜ ê¸°ë³¸ê°’ì„ ì§€ì • (varABC__22) ê¸°ë³¸ê°’ì€ ìˆ«ìì™€ì˜ë¬¸ìë§Œ ê°€ëŠ¥
   							if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
 							    var_value="$dvar_value"
 							elif [ "${!var_name}" ] ; then
@@ -411,54 +447,67 @@ menufunc() {
 						 #echo "var_name: $var_name // var_value: ->$var_value<-"
 
 
-						 # ½ÇÇàÁß // µ¿ÀÏ ÀÌ¸§ º¯¼ö Àç»ç¿ë 
-						 [ "$var_value" ] && [[ $var_name != *__[a-zA-Z0-9.@-]* ]] && eval "export $var_name='${var_value}'"
+						 # ì‹¤í–‰ì¤‘ // ë™ì¼ ì´ë¦„ ë³€ìˆ˜ ì¬ì‚¬ìš© export
+						 #[ "$var_value" ] && [[ $var_name != *__[a-zA-Z0-9.@-]* ]] && eval "export $var_name='${var_value}'"
+						 # ê¸°ë³¸ê°’ì´ ì£¼ì–´ì§„ ë³€ìˆ˜ë„ ì¬ì‚¬ìš© export
+						 [ "$var_value" ] && eval "export ${var_name%__*}='${var_value}'"
 
 						done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++' )
+                        # end of while
+                        else # cfm -> n
+                            # Danger item -> canceled
+                            cmd="canceled"
+                        fi # end of cfm=y
 
-
-
-						# ÇØ´ç ¸Ş´ºÀÇ ¼±ÅÃ¸í·ÉÀÌ µü ÇÏ³ªÀÏ¶§ ¹Ù·Î ½ÇÇà 
+						# í•´ë‹¹ ë©”ë‰´ì˜ ì„ íƒëª…ë ¹ì´ ë”± í•˜ë‚˜ì¼ë•Œ ë°”ë¡œ ì‹¤í–‰
 						if (( ${#cmd_array[@]} == 1 )) ;then
 	                		[ ! "$cancel" == "yes" ] && process_commands "$cmd" "$cfm"
 						else
-							# ¸í·É¾î°¡ ³¡³¯¶§ Done... [Enter] print
+							# ëª…ë ¹ì–´ê°€ ëë‚ ë•Œ Done... [Enter] print
 	                		[ ! "$cancel" == "yes" ] && { if (( ${#cmd_array[@]} > $count )) ;then process_commands "$cmd" "$cfm" "nodone" ; else process_commands "$cmd" "$cfm" ; fi ;  }
 						fi
 						(( count++ ))
-					done	
-					#[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read x 
+					done # end of for
+					#[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read x
 					unset cancel
 
 
 
-            fi  
+            fi
 			# direct command sub_menu
 			[[ "$cmd_choice" == ".." || "$cmd_choice" == "sh" ]] && bashcomm && cmds
-			[[ "$cmd_choice" == "..." || "$cmd_choice" == "bash" ]] && /bin/bash && cmds
-		
-			# È¯°æÆÄÀÏ ¼öÁ¤ ¹× Àç½ÃÀÛ
-			[[ "$cmd_choice" == "conf" ]] && conf && cmds		
-			
+			[[ "$cmd_choice" == "..." || "$cmd_choice" == "," || "$cmd_choice" == "bash" ]] && /bin/bash && cmds
+			[[ "$cmd_choice" == "m" ]] && menufunc
+
+			# í™˜ê²½íŒŒì¼ ìˆ˜ì • ë° ì¬ì‹œì‘
+			[[ "$cmd_choice" == "conf" ]] && conf && cmds
+			[[ "$cmd_choice" == "confc" ]] && confc && cmds
+			[[ "$cmd_choice" == "conff" ]] && conff && cmds
+			[[ "$cmd_choice" == "conffc" ]] && conffc && cmds
+
 			# gohistory history reselct
 			[[ "$cmd_choice" == "h" ]] && gohistory && cmds
 			# hh view history view
 			[[ "$cmd_choice" == "hh" ]] && hi && read -rep "[Enter] " x && cmds
-			
-			# explorer
-			[[ "$cmd_choice" == "e" ]] && { ranger 2>/dev/null || explorer ; } && cmds
-			[[ "$cmd_choice" == "t" ]] && { htop 2>/dev/null || top ; } && cmds
-			[[ "$cmd_choice" == "ee" ]] && { mc -b || { yyay mc && mc -b ; } ; } && cmds
 
-			# cancel exit 0 
-            if [[ "$cmd_choice" == "0"  || "$cmd_choice" == "q" ||  "$cmd_choice" ==  "." ||  "$cmd_choice" ==  "," ]] ;then
-				# È¯°æº¯¼ö ÃÊ±âÈ­ 
+			# explorer
+			[[ "$cmd_choice" == "e" ]] && { ranger $cmd_choice1 2>/dev/null || explorer ; } && cmds
+			[[ "$cmd_choice" == "t" ]] && { htop 2>/dev/null || top ; } && cmds
+			[[ "$cmd_choice" == "tt" ]] && { iftop -t 2>/dev/null || ( yyay iftop && iftop -t ) ; } && cmds
+			[[ "$cmd_choice" == "ttt" || "$cmd_choice" == "dfm" ]] && { dfmonitor; } && cmds
+			[[ "$cmd_choice" == "em" ]] && { mc -b || { yyay mc && mc -b ; } ; } && cmds
+			[[ "$cmd_choice" == "ee" ]] && { ranger /etc 2>/dev/null || explorer /etc ; } && cmds
+			[[ "$cmd_choice" == "ll" ]] && { journalctl -n10000 -e  ; } && cmds
+
+			# cancel exit 0
+            if [[ "$cmd_choice" == "0"  || "$cmd_choice" == "q" ||  "$cmd_choice" ==  "." ]] ;then
+				# í™˜ê²½ë³€ìˆ˜ ì´ˆê¸°í™”
 				unsetvar varl
-				# CMDs ·çÇÁÁ¾·á 
+				# CMDs ë£¨í”„ì¢…ë£Œ
 				break
 			fi
-			
-			# ¼ıÀÚ¸¦ ¼±ÅÃÇÏÁö ¾Ê°í Á÷Á¢ ¸í·ÉÀ» ÀÔ·ÂÇÑ °æ¿ì ±× ¸í·ÉÀÌ Á¸ÀçÇÏ¸é ½ÇÇà 
+
+			# ìˆ«ìë¥¼ ì„ íƒí•˜ì§€ ì•Šê³  ì§ì ‘ ëª…ë ¹ì„ ì…ë ¥í•œ ê²½ìš° ê·¸ ëª…ë ¹ì´ ì¡´ì¬í•˜ë©´ ì‹¤í–‰
 			[ "$cmd_choice" ] && [ "${cmd_choice//[0-9]}" ] && command -v "$cmd_choice" &> /dev/null && echo && eval "$cmd_choice $cmd_choice1" && read -p 'You Win! Done... [Enter] ' x
 
 			# alarm
@@ -466,61 +515,76 @@ menufunc() {
 
             [ $num_commands -eq 1 ] && break
 
-			done #        end of      while true ; do # ÇÏºÎ ¸Ş´º loop ³¡ command list
+			done #        end of      while true ; do # í•˜ë¶€ ë©”ë‰´ loop ë command list
 
 			}
-			cmds	
+			cmds
 
 
-			# ÇÏºÎ ¸Ş´º ·çÇÁ¿¡¼­ ³ª¿ÂÈÄ 
-			# ¼­ºê ¸Ş´º ¼îÆ®ÄÆ Å»Ãâ½Ã 
+			# í•˜ë¶€ ë©”ë‰´ ë£¨í”„ì—ì„œ ë‚˜ì˜¨í›„
+			# ì„œë¸Œ ë©”ë‰´ ì‡¼íŠ¸ì»· íƒˆì¶œì‹œ
 	        [ "$choice" ] && [ "$choice" == "99" ] && menufunc
 
 
 
 
 
-		# ¸Ş´ºÁß¿¡ Á¤»ó¹üÀ§ ¼ıÀÚµµ ¾Æ´Ï°í ¸ŞÀÎ¼îÆ®ÄÆµµ ¾Æ´Ñ ¿¹¿Ü ¸Ş´º ÇÒ´ç 
-	
+		# ë©”ë‰´ì¤‘ì— ì •ìƒë²”ìœ„ ìˆ«ìë„ ì•„ë‹ˆê³  ë©”ì¸ì‡¼íŠ¸ì»·ë„ ì•„ë‹Œ ì˜ˆì™¸ ë©”ë‰´ í• ë‹¹
+
         elif [ "$choice" ] && [ "$choice" == "koo" ] ; then
-			# ÇÑ±ÛÀÌ ³×¸ğ³ª ´ÙÀÌ¾Æ¸óµå º¸ÀÌ´Â °æ¿ì (ÄÜ¼Ö tty) 
+			# í•œê¸€ì´ ë„¤ëª¨ë‚˜ ë‹¤ì´ì•„ëª¬ë“œ ë³´ì´ëŠ” ê²½ìš° (ì½˜ì†” tty)
 			if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
 			    which jfbterm 2>/dev/null && jfbterm || ( yum install -y jfbterm && jfbterm )
 			fi
         elif [ "$choice" ] && [ "$choice" == "ko" ] ; then
-    		# hangul encoding chg 
+    		# hangul encoding chg
 			if [[ ! "$(file $env|grep -i "utf")" && -s "$env" ]] ;then
 				echo "utf chg" && sleep 1
-			    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				if [[ "$(file $envorg|grep -i "utf")" ]] ;then
+				    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				else
+				    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				fi
+				[ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >> $HOME/go.private.env
 			elif [[ "$(file $envorg|grep -i "utf")" && "$(file $env|grep -i "utf")" && -s "$env" ]] ;then
 				echo "euc-kr chg" && sleep 1
 			    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+				[ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >> $HOME/go.private.env
 			else
 				echo "euc-kr print" && sleep 1
 			    #cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
 				cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
 				[[ ${LANG} != ${LANG/UTF} || ${LANG} != ${LANG/utf} ]] && export LANG=euc-kr
+				[ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >> $HOME/go.private.env
 			fi
 			menufunc
-		elif [ "$choice" ] && [ "$choice" == "conf" ] ; then conf ; 
-		elif [ "$choice" ] && [ "$choice" == "h" ] ; then gohistory ; 
-		elif [ "$choice" ] && [ "$choice" == "hi" ] ; then hi && read -rep "[Enter] " x ; 
-		elif [ "$choice" ] && [ "$choice" == "e" ] ; then { ranger 2>/dev/null || explorer ; } ; 
-		elif [ "$choice" ] && [ "$choice" == "t" ] ; then { htop 2>/dev/null || top ; } ; 
-		elif [ "$choice" ] && [ "$choice" == "ee" ] ; then mc -b || { yyay mc && mc -b ; } ; 
-		elif [ "$choice" ] && [ "$choice" == "update" ] ; then update ; 
-		# ³»Àå ÇÔ¼ö¿Í .bashrc alias ¸¦ ¾µ¼ö ÀÖ´Â bash
-		elif [ "$choice" ] && [[ "$choice" == ".." || "$choice" == "sh" ]] ; then bashcomm ; 
-		# alias ¸¦ ¾µ¼ö ÀÖ´Â bash
-		elif [ "$choice" ] && [[ "$choice" == "..." || "$choice" == "bash" ]] ; then /bin/bash ; 
-		# ¸ŞÀÎ/¼­ºê ¸Ş´º Å»Ãâ 
-        elif [ "$choice" ] && [[ "$choice" == "0" || "$choice" ==  "q" ||  "$choice" ==  "." ||  "$choice" ==  "," ]] ; then
+		elif [ "$choice" ] && [ "$choice" == "conf" ] ; then conf ;
+		elif [ "$choice" ] && [ "$choice" == "confc" ] ; then confc ;
+		elif [ "$choice" ] && [ "$choice" == "conff" ] ; then conff ;
+		elif [ "$choice" ] && [ "$choice" == "conffc" ] ; then conffc ;
+		elif [ "$choice" ] && [ "$choice" == "h" ] ; then gohistory ;
+		elif [ "$choice" ] && [ "$choice" == "hi" ] ; then hi && read -rep "[Enter] " x ;
+		elif [ "$choice" ] && [ "$choice" == "e" ] ; then { ranger $choice1 2>/dev/null || explorer ; } ;
+		elif [ "$choice" ] && [ "$choice" == "t" ] ; then { htop 2>/dev/null || top ; } ;
+		elif [ "$choice" ] && [ "$choice" == "tt" ] ; then { iftop -t 2>/dev/null || ( yyay iftop && iftop -t ) ; } ;
+		elif [ "$choice" ] && [[ "$choice" == "ttt" || "$choice" == "dfm" ]] ; then { dfmonitor; } ;
+		elif [ "$choice" ] && [ "$choice" == "em" ] ; then mc -b || { yyay mc && mc -b ; } ;
+		elif [ "$choice" ] && [ "$choice" == "ee" ] ; then { ranger /etc 2>/dev/null || explorer /etc ; } ;
+		elif [ "$choice" ] && [ "$choice" == "ll" ] ; then { journalctl -n10000 -e  ; } ;
+		elif [ "$choice" ] && [[ "$choice" == "update" || "$choice" == "uu" ]] ; then update ;
+		# ë‚´ì¥ í•¨ìˆ˜ì™€ .bashrc alias ë¥¼ ì“¸ìˆ˜ ìˆëŠ” bash
+		elif [ "$choice" ] && [[ "$choice" == ".." || "$choice" == "sh" ]] ; then bashcomm ;
+		# alias ë¥¼ ì“¸ìˆ˜ ìˆëŠ” bash
+		elif [ "$choice" ] && [[ "$choice" == "..." || "$choice" == "," || "$choice" == "bash" ]] ; then /bin/bash ;
+		# ë©”ì¸/ì„œë¸Œ ë©”ë‰´ íƒˆì¶œ
+        elif [ "$choice" ] && [[ "$choice" == "m" ]] ; then menufunc ;
+        elif [ "$choice" ] && [[ "$choice" == "0" || "$choice" ==  "q" ||  "$choice" ==  "." ]] ; then
 
 			# title_of_menu_sub=""
 			chosen_command_sub=""
 			chosen_command=""
 
-			# ¼­ºê¸Ş´º¿¡¼­ Å»ÃâÇÒ°æ¿ì ¸ŞÀÎ¸Ş´º·Î µ¹¾Æ¿È 
+			# ì„œë¸Œë©”ë‰´ì—ì„œ íƒˆì¶œí• ê²½ìš° ë©”ì¸ë©”ë‰´ë¡œ ëŒì•„ì˜´
 			[ "$title_of_menu_sub" ] && menufunc || exit 0
 
 			# alarm
@@ -530,8 +594,8 @@ menufunc() {
 
 			[ "$choice" ] && [ "${choice//[0-9]}" ] && command -v "$choice" &> /dev/null && echo && eval "$choice $choice1" && read -p 'You Win! Done... [Enter] ' x
 
-        fi  
-    done # end of main while 
+        fi
+    done # end of main while
 }
 
 
@@ -546,13 +610,22 @@ menufunc() {
 
 
 
-# go.env ¿¡¼­ »ç¿ë°¡´ÉÇÑ ÇÑÁÙ ÇÔ¼ö subfunc
+# go.env ì—ì„œ ì‚¬ìš©ê°€ëŠ¥í•œ í•œì¤„ í•¨ìˆ˜ subfunc
 
-# ÇÔ¼öÀÇ ³»¿ëÀ» Ãâ·ÂÇÏ´Â ÇÔ¼ö ex) ff atqq
+# í•¨ìˆ˜ì˜ ë‚´ìš©ì„ ì¶œë ¥í•˜ëŠ” í•¨ìˆ˜ ex) ff atqq
 ff() { declare -f $* ; }
 
 # colored ip (1 line multi ip apply)
-cip() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH); if (!(IP in FC)) {BN[IP]=1; if (TC<6) {FC[IP]=36-TC;} else { do {FC[IP]=30+(TC-6)%8; BC[IP]=(40+(TC-6))%48; TC++; } while (FC[IP]==BC[IP]-10); if (FC[IP]==37) {FC[IP]--;}} TC++;} if (BC[IP]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[IP], FC[IP], BC[IP], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[IP], FC[IP], IP);}; gsub(IP, CP, $0); } print;}' ;}
+#cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=31+(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]==37){FC[IP]=36;}}TC++;}if(BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
+#cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
+cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' || awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
+
+# ì‹¤ì‹œê°„ ì¶œë ¥ tail -f ë“±ì— ì¦‰ê° ë°˜ì‘
+cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g' ; }
+
+ipc() { ip a | cgrep DOWN | cgrep1 UP | cip ; }
+ipa() { ip a | cgrep DOWN | cgrep1 UP | cip ; }
+ipl() { ip l | cgrep DOWN | cgrep1 UP | cip ; }
 
 # colred ip cidr/24 -> same color
 cip24() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
@@ -560,12 +633,13 @@ cip24() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
 # colred ip cidr/16 -> same color
 cip16() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' ; }
 
-# °Ë»ö¹®ÀÚ¿­µé »öÄ¥(red) 
+# ê²€ìƒ‰ë¬¸ìì—´ë“¤ ìƒ‰ì¹ (red)
 #cgrep() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}' ; }
 cgrep() { for word in "$@"; do awk_cmd="${awk_cmd}{gsub(/$word/, \"\033[1;31m&\033[0m\")}"; done; awk "${awk_cmd}{print}"; }
 cgrep1() { for word in "$@"; do awk_cmd="${awk_cmd}{gsub(/$word/, \"\033[1;33m&\033[0m\")}"; done; awk "${awk_cmd}{print}"; }
+cgrepl() { for word in "$@"; do awk_cmd="${awk_cmd}/$word/ {print \"\033[1;31m\"\$0\"\033[0m\"; next} "; done; awk "${awk_cmd}{print}" ; }
 cgrepline() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}' ; }
-# Å»ÃâÄÚµå¸¦ Æ¯Á¤»öÀ¸·Î ÁöÁ¤ 
+# íƒˆì¶œì½”ë“œë¥¼ íŠ¹ì •ìƒ‰ìœ¼ë¡œ ì§€ì •
 cgrep3132() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;32m"); print $0;}'; }
 cgrep3133() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;33m"); print $0;}'; }
 cgrep3134() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;34m"); print $0;}'; }
@@ -574,11 +648,11 @@ cgrep3136() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gs
 cgrep3137() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;37m"); print $0;}'; }
 
 
-# ÁÙ±ß±â draw line
+# ì¤„ê¸‹ê¸° draw line
 dline() { num_characters="${1:-50}" ; delimiter="${2:-=}" ; printf "%.0s$delimiter" $(seq "$num_characters") ; printf "\n"; }
 
 # colored percent
-cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p>89?31:p>69?35:33)"m"p"%\033[0m")}1' ; }
+cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p==100?31:p>89?31:p>69?35:33)"m"p"%\033[0m")}1' ; }
 
 # colored url
 courl() { awk '{match_str="https?:\\/\\/[^ ]+";gsub(match_str, "\033[1;36;04m&\033[0m"); print $0;}' ; }
@@ -586,84 +660,89 @@ courl() { awk '{match_str="https?:\\/\\/[^ ]+";gsub(match_str, "\033[1;36;04m&\0
 # colored host
 chost() { awk '{match_str="([a-zA-Z0-9_-]+\\.)*([a-zA-Z0-9_-]+\\.)(com|net|org|co.kr|or.kr|pe.kr|io|co|info|biz|me|xyz)";gsub(match_str, "\033[1;33;40m&\033[0m"); print $0;}' ; }
 
-# colored diff 
+# colored diff
 cdiff() { local f1 f2 old new R Y N l ; f1="$1"; f2="$2"; [ "$f1" -nt "$f2" ] && { old="$f2"; new="$f1"; } || { old="$f1"; new="$f2"; }; R='\033[1;31m'; Y='\033[1;33m'; N='\033[0m'; diff -u "$old" "$new" | while IFS= read -r l; do case "$l" in "-"*) printf "${R}${l}${N}\n" ;; "+"*) printf "${Y}${l}${N}\n" ;; *) printf "${l}\n" ;; esac; done; }
 
 # colored dir
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
 # cpipe -> courl && cip24 && cdir
-cpipe() { awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
+cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' || \
+          awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'  ; }
+#cpipe() { awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
+
+# cpipef() { sed -E "s/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;33m&\x1B[0m/g;  s/(https?:\/\/[^ ]+)/\x1B[1;36;04m&\x1B[0m/g" ; }
+cpipef() { sed "s/\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}/\x1B[1;33m&\x1B[0m/g;  s/\(https\?\:\/\/[^ ]\+\)/\x1B[1;36;04m&\x1B[0m/g" ; }
 
 # color_alternate_lines
 stripe() { awk '{printf (NR % 2 == 0) ? "\033[37m" : "\033[36m"; print $0 "\033[0m"}'; }
 
-# ansi ex) RED ; echo "haha" ; BLU ; echo "hoho" ; RST 
+# ansi ex) RED ; echo "haha" ; BLU ; echo "hoho" ; RST
 RED() { echo -en "\033[31m"; } ; GRN() { echo -en "\033[32m"; } ; YEL() { echo -en "\033[33m"; } ; BLU() { echo -en "\033[34m"; }
 MAG() { echo -en "\033[35m"; } ; CYN() { echo -en "\033[36m"; } ; WHT() { echo -en "\033[37m"; } ; RST() { echo -en "\033[0m"; }
 
-# ¹àÀº»ö
+# ë°ì€ìƒ‰
 RED1() { echo -en "\033[1;31m"; } ; GRN1() { echo -en "\033[1;32m"; } ; YEL1() { echo -en "\033[1;33m"; } ; BLU1() { echo -en "\033[1;34m"; }
-MAG1() { echo -en "\033[1;35m"; } ; CYN1() { echo -en "\033[1;36m"; } ; WHT1() { echo -en "\033[1;37m"; } ; 
+MAG1() { echo -en "\033[1;35m"; } ; CYN1() { echo -en "\033[1;36m"; } ; WHT1() { echo -en "\033[1;37m"; } ;
 YBLU() { echo -en "\033[1;33;44m"; } ; YRED() { echo -en "\033[1;33;41m"; }
 
 # noansi
 noansised() { sed 's/\\033\[[0-9;]*[MKHJm]//g' ; }
-noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null ; } # Escape ¹®ÀÚ(ASCII 27) ¸¦ ¸ğµÎ µ¿ÀÏÇÏ°Ô ÀÎ½Ä \033, \x1b, ¹× \e ¸ğµÎ Ã³¸®°¡´É
+noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null ; } # Escape ë¬¸ì(ASCII 27) ë¥¼ ëª¨ë‘ ë™ì¼í•˜ê²Œ ì¸ì‹ \033, \x1b, ë° \e ëª¨ë‘ ì²˜ë¦¬ê°€ëŠ¥
 
 # selectmenu
 selectmenu() { select item in $@ ; do echo $item ; done; }
 
-# pipe ·Î ³Ñ¾î¿Â ÁÙÀÇ Ã¹¹øÂ° ÇÊµå¸¦ select 
-pipemenu1() { items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; }
-pipemenu1cancel() { items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; }
+# pipe ë¡œ ë„˜ì–´ì˜¨ ì¤„ì˜ ì²«ë²ˆì§¸ í•„ë“œë¥¼ select
+pipemenu1() { export pipeitem="" ; items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; }
+pipemenu1cancel() { export pipeitem="" ; items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; }
 
-# pipe ·Î ³Ñ¾î¿Â ÁÙÀÇ ¸ğµç ÇÊµå¸¦ select
-pipemenu() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
-pipemenucancel() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ":_Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+# pipe ë¡œ ë„˜ì–´ì˜¨ ì¤„ì˜ ëª¨ë“  í•„ë“œë¥¼ select
+pipemenu() { OLD_IFS=$IFS; IFS=$' \n' ; export pipeitem="" ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ) ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+pipemenucancel() { OLD_IFS=$IFS; IFS=$' \n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ":_Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
 
-# pipe ·Î ³Ñ¾î¿Â ¶óÀÎº°·Î select
+# pipe ë¡œ ë„˜ì–´ì˜¨ ë¼ì¸ë³„ë¡œ select
 pipemenulist() { PS3="==============================================
->>> Select No. : " ; OLD_IFS=$IFS; IFS=$'\n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
+>>> Select No. : " ; OLD_IFS=$IFS; IFS=$'\n' ; export pipeitem="" ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
 
 # clear
-fclear() { printf '\n%.0s' {1..100} ;clear ; } 
+fclear() { printf '\n%.0s' {1..100} ;clear ; }
 
-# ÆÄÀÌÇÁ·Î µé¾î¿Â ÁÙÀ» dialog ¸Ş´º·Î ÆÄ½Ì 
+# íŒŒì´í”„ë¡œ ë“¤ì–´ì˜¨ ì¤„ì„ dialog ë©”ë‰´ë¡œ íŒŒì‹±
 fdialog() { local i=0 ; while IFS= read -r line; do options[i]="${line%% *}" ; options[i+1]=$(echo "${line#* }" | awk '{if (NF>1) {$1=$1;print} else {print " "}}' ) ; ((i+=2)) ; done ; choice=$(dialog --clear --stdout --menu "Select option:" 22 76 16 "${options[@]}") ; echo "$choice" ; }
 fdialogw() { local i=0 ; while IFS= read -r line; do options[i]="${line%% *}" ; options[i+1]=$(echo "${line#* }" | awk '{if (NF>1) {$1=$1;print} else {print " "}}' ) ; ((i+=2)) ; done ; choice=$(whiptail --clear --menu "Select option:" 22 76 16 "${options[@]}" 3>&1 1>&2 2>&3) ; echo "$choice" ; }
 
-# ÆÄÀÌÇÁ·Î µé¾î¿Â °¢¿­À» dialog ¸Ş´º·Î ÆÄ½Ì 
+# íŒŒì´í”„ë¡œ ë“¤ì–´ì˜¨ ê°ì—´ì„ dialog ë©”ë‰´ë¡œ íŒŒì‹±
 fdialog1() { local i=0; while IFS=' ' read -ra words; do for word in "${words[@]}"; do options[i]="$word"; options[i+1]=" "; ((i+=2)); done; done; choice=$(dialog --clear --stdout --menu "Select option:" 22 76 16 "${options[@]}"); echo "$choice"; }
 
-# ¶óÀÎ stripe
+# ë¼ì¸ stripe
 pipemenulistc() { PS3="==============================================
 >>> Select No. : " ; OLD_IFS=$IFS; IFS=$'\n' ; items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done|stripe ; echo ": Cancel") ; [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break ; done < /dev/tty ; IFS=$OLD_IFS ; unset PS3 ;  }
 
 # blkid -> fstab ex) blkid2fstab /dev/sdd1 /tmp
 blkid2fstab() { d=${2/\/\///} ;  [ ! -d "$d" ] && echo "mkdir $d" ; fstabadd="$(printf "# UUID=%s\t%s\t%s\tdefaults,nosuid,noexec,noatime\t0 0\n" "$(blkid -o value -s UUID "$1")" "$d" "$(blkid -o value -s TYPE "$1")" )" ; echo "$fstabadd" >> /etc/fstab ; }
 
-# ¸í·É¾î »ç¿ë°¡´É¿©ºÎ Ã¼Å© acmd curl -o 
+# ëª…ë ¹ì–´ ì‚¬ìš©ê°€ëŠ¥ì—¬ë¶€ ì²´í¬ acmd curl -m1 -o
 able() { command -v "$1" &> /dev/null && return 0 || return 1 ; }
 
-# ¸í·É¾î ÀÌ¸§ Ãâ·ÂÈÄ °á°ú Ãâ·Â
+# ëª…ë ¹ì–´ ì´ë¦„ ì¶œë ¥í›„ ê²°ê³¼ ì¶œë ¥
 eval0() { local c="$@"; echo -n "$c: " ; eval "$c"; }
 
 # ip filter
-gip() { grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}' ; } 
+gip() { grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}' ; }
 # ip only filter - 1 line multi ip
 gipa() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' ; }
-# gipa0 ¾ÆÀÌÇÇ ³¡ÀÚ¸® .0 ´ëÃ¼ /24 
+# gipa0 ì•„ì´í”¼ ëìë¦¬ .0 ëŒ€ì²´ /24
 gipa0() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ".0"; $0 = substr($0, RSTART+RLENGTH)}}' ; }
 # ip && port
 gipp() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' ; }
-# Ã¹¹øÂ° ÇÊµå¿Í ¾ÆÀÌÇÇ¿Í Æ÷Æ® Ãâ·Â  $1 && ip && port
+# ì²«ë²ˆì§¸ í•„ë“œì™€ ì•„ì´í”¼ì™€ í¬íŠ¸ ì¶œë ¥  $1 && ip && port
 gipp1() { awk '{printf $1 " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; print ""}' ; }
-# µÎ¹øÂ° ÇÊµå¿Í ¾ÆÀÌÇÇ¿Í Æ÷Æ® Ãâ·Â
+# ë‘ë²ˆì§¸ í•„ë“œì™€ ì•„ì´í”¼ì™€ í¬íŠ¸ ì¶œë ¥
 gipp2() { awk '{printf $2 " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; print ""}' ; }
 
 
-# ip only filter gip5-> 5¹øÂ° ÇÊµå¿¡¼­ ¾ÆÀÌÇÇ¸¸ ÃßÃâ
+# ip only filter gip5-> 5ë²ˆì§¸ í•„ë“œì—ì„œ ì•„ì´í”¼ë§Œ ì¶”ì¶œ
 gip0() { awk 'match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($0, RSTART, RLENGTH)}' ; }
 gip1() { awk 'match($1, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($1, RSTART, RLENGTH)}' ; }
 gip2() { awk 'match($2, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($2, RSTART, RLENGTH)}' ; }
@@ -671,39 +750,45 @@ gip3() { awk 'match($3, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($3, RSTA
 gip4() { awk 'match($4, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($4, RSTART, RLENGTH)}' ; }
 gip5() { awk 'match($5, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($5, RSTART, RLENGTH)}' ; }
 
-# Æ¯Á¤ÇÊµå¿¡ °Ë»ö¾î°¡ ÀÖ´Â ÁÙÃßÃâ gfind 1 search 
+# íŠ¹ì •í•„ë“œì— ê²€ìƒ‰ì–´ê°€ ìˆëŠ” ì¤„ì¶”ì¶œ gfind 1 search
 gfind() { awk -v search="$2" -v f="$1" 'match($f, search) {print $0}'; }
 
 # exceptip filter
-eip() { [ -s $gotmp/go_exceptips_grep.txt ] && grep -vEf $gotmp/go_exceptips_grep.txt || cat ; } 
+eip() { [ -s $gotmp/go_exceptips_grep.txt ] && grep -vEf $gotmp/go_exceptips_grep.txt || cat ; }
 
-# field except // grep -v Àº ÁÙÀüÃ¼¸¦ ±âÁØÀ¸·Î ÇÏÁö¸¸ eip5 ´Â 5¹øÂ° ÇÊµå¸¦ ±âÁØÀ¸·Î ¼¼ºĞÈ­ÇÔ
-eipf() { field="$1"; if [ -s $gotmp/go_exceptips_grep.txt ]; then 
+# field except // grep -v ì€ ì¤„ì „ì²´ë¥¼ ê¸°ì¤€ìœ¼ë¡œ í•˜ì§€ë§Œ eip5 ëŠ” 5ë²ˆì§¸ í•„ë“œë¥¼ ê¸°ì¤€ìœ¼ë¡œ ì„¸ë¶„í™”í•¨
+eipf() { field="$1"; if [ -s $gotmp/go_exceptips_grep.txt ]; then
 
 awk -v field="$field" -v gotmp="$gotmp" 'BEGIN { while (getline < (gotmp "/go_exceptips_grep.txt")) exceptips[$0] = 1 } { ma = 0; for (except in exceptips) { if (index($field, except) == 1) { ma = 1; break } } if (ma == 0) print }' -; else cat; fi; }
 eip1() { eipf 1; }; eip2() { eipf 2; }; eip3() { eipf 3; }; eip4() { eipf 4; }; eip5() { eipf 5; }
 
 # proxmox vmslist
-vmslist() { pvesh get /cluster/resources -type vm 2>/dev/null| grep -E "qemu|lxc" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9a-zA-Z]+/) printf ("%s ", $i); print ""}' |awk '{print $1,$13,$15}' ; }
+#vmslist() { pvesh get /cluster/resources -type vm 2>/dev/null| grep -E "qemu|lxc" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9a-zA-Z]+/) printf ("%s ", $i); print ""}' |awk '{print $1,$13,$15}'|awk '{if($2=="") print $1,"cluster down"; else print $0}' ; }
+#vmslist() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$13,$15}' |awk '{if($2=="") print $1,"cluster down"; else print $0}' ; }
+vmslist() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' |awk '{if($2=="") print $1,"cluster down"; else print $0}' ; }
 vmslistview() { output=$( vmslist ) ; vmslistcount=$( echo "$output" |wc -l ) ; (( $vmslistcount > 10 )) && echo "$output" | s3cols || echo "$output" | s2cols ; }
+# ë³€ìˆ˜ ì¬ì‚¬ìš© (5ì´ˆ ì´ë‚´)
+#vmslistview() { [ -z "$vmslistoutput" ] || (( $(date +%s) - ${vmslistoutput:0:10} >= 5 )) && export vmslistoutput="$(date +%s)$(vmslist)"; output_value=${vmslistoutput:10}; vmslistcount=$(echo "$output_value" | wc -l); (( $vmslistcount > 10 )) && echo "$output_value" | s3cols || echo "$output_value" | s2cols ;}
 
-# ±äÁÙÀ» 2¿­·Î 13 24 36...
+
+
+# ê¸´ì¤„ì„ 2ì—´ë¡œ 13 24 36...
 s2cols() { inp=$(cat); t_lines=$(echo "$inp" | wc -l); l_p_col=$(($t_lines / 2 + (t_lines % 2 > 0 ? 1 : 0))); echo "$inp" | awk -v l_p_col=$l_p_col '{ if (NR <= l_p_col) c1[NR] = $0; else c2[NR - l_p_col] = $0 } END { for (i = 1; i <= l_p_col; ++i) { line = c1[i]; if (i in c2) line = line " | " c2[i]; print line; } }' |column -t ; }
 
-# ±äÁÙÀ» 3¿­·Î 147 258 369...
+# ê¸´ì¤„ì„ 3ì—´ë¡œ 147 258 369...
 s3cols() { inp=$(cat); t_lines=$(echo "$inp" | wc -l); l_p_col=$(($t_lines / 3 + (t_lines % 3 > 0 ? 1 : 0))); echo "$inp" | awk -v l_p_col=$l_p_col '{ if (NR <= l_p_col) c1[NR] = $0; else if (NR > l_p_col && NR <= l_p_col * 2) c2[NR - l_p_col] = $0; else c3[NR - l_p_col * 2] = $0 } END { for (i = 1; i <= l_p_col; ++i) { line = c1[i] " | "; if (i in c2) line = line c2[i] " | "; if (i in c3) line = line c3[i]; print line; } }' |column -t ; }
 
 # datetag
 datetag() { datetag1 ; }
-datetag1() { date "+%Y%m%d" ; } 
+datetag1() { date "+%Y%m%d" ; }
 datetag2() { date "+%Y%m%d_%H%M%S" ; }
 datetag3() { date "+%Y%m%d_%H%M%S"_$(($RANDOM%9000+1000)) ; }
 datetagw() { date "+%Y%m%d_%w" ; } # 0-6
-lastday() { date -d "$(date '+%Y-%m-01') 1 month -1 day" '+%Y-%m-%d' ; } 
-lastdaya() { date -d "$(date '+%Y-%m-01') 2 month -1 day" '+%Y-%m-%d' ; } 
-lastdayb() { date -d "$(date '+%Y-%m-01') 0 month -1 day" '+%Y-%m-%d' ; } 
+lastday() { date -d "$(date '+%Y-%m-01') 1 month -1 day" '+%Y-%m-%d' ; }
+lastdaya() { date -d "$(date '+%Y-%m-01') 2 month -1 day" '+%Y-%m-%d' ; }
+lastdayb() { date -d "$(date '+%Y-%m-01') 0 month -1 day" '+%Y-%m-%d' ; }
 
-# seen # not sort && uniq 
+# seen # not sort && uniq
 seen() { awk '!seen[$0]++' ; }
 # not sort && uniq && lastseen print
 lastseen() { awk '{ records[$0] = NR } END { for (record in records) { sorted[records[record]] = record } for (i = 1; i <= NR; i++) { if (sorted[i]) { print sorted[i] } } }'; }
@@ -711,22 +796,30 @@ lastseen() { awk '{ records[$0] = NR } END { for (record in records) { sorted[re
 #readv() { bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep $'\n>>> : ' $1 ; }
 readv() { bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep '' $1 ; }
 
-# bashcomm .bashrc ÀÇ alias »ç¿ë°¡´É // history »ç¿ë°¡´É 
+# bashcomm .bashrc ì˜ alias ì‚¬ìš©ê°€ëŠ¥ // history ì‚¬ìš©ê°€ëŠ¥
 bashcomm() {  echo;   local original_aliases=$(shopt -p expand_aliases);  shopt -s expand_aliases; source ~/.bashrc; unalias q 2> /dev/null ;  HISTFILE=$gotmp/go_history.txt; history -r "$HISTFILE"; while :; do      CYN;pwdv=$(pwd); echo "pwd: $([ -L $pwdv ] && ls -al $pwdv|awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)" ;RST; IFS="" read -rep 'BaSH_Command_[q] > ' cmd; if [[ "$cmd" == "q" || -z "$cmd" ]]; then eval "$original_aliases" && break; else { history -s "$cmd"; eval "process_commands \"$cmd\" y nodone"; history -a "$HISTFILE"; } fi; done; }
 
-# vi2 envorg && restart go.sh
-conf() { vi2a $envorg ; exec $gofile ; }
+# rbackup -> rollback
+rollback() { local d="$(dirname "$1")"; local base="$(basename "$1")"; local org="${base}.org.$(date +%Y%m%d)"; echo "$d / $base / $org" ;read x ; [ ! -f "$1" ] && { echo "ì˜¤ë¥˜: íŒŒì¼ ì—†ìŒ."; return 1; }; PS3="ì„ íƒ: "; select file in $(find "$d" -maxdepth 1 -name "${base}.[0-9]*.bak" -print0 | xargs -0 ls -lt | awk '{print $NF}' | head -n 5); do [ -n "$file" ] && { mv -n "$1" "$d/$org" && cp -f "$file" "$d/$base" && echo "ë³µì›ë¨: '$d/$base', ì›ë˜: '$d/$org'"; break; }; done;read x ; }
 
-# confp # env È¯°æº¯¼ö·Î ºÒ·¯¿Í ½ºÅ©¸³Æ®°¡ ½ÇÇàµÇ´Â µ¿¾È º¯¼ö·Î ¾µ¼ö ÀÖÀ½
+# vi2 envorg && restart go.sh
+conf() { vi2a $envorg $scut ; [ -f /html/go.env ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env ; exec $gofile $scut; }
+conff() { vi2a $gofile ; [ -f /html/go.sh ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh ; exec $gofile $scut; }
+confc() { rollback $envorg ; }
+conffc() { rollback $gofile ; }
+
+# confp # env í™˜ê²½ë³€ìˆ˜ë¡œ ë¶ˆëŸ¬ì™€ ìŠ¤í¬ë¦½íŠ¸ê°€ ì‹¤í–‰ë˜ëŠ” ë™ì•ˆ ë³€ìˆ˜ë¡œ ì“¸ìˆ˜ ìˆìŒ
 confp() { vi2a $HOME/go.private.env ; }
 
+# bell
+bell() { echo -ne "\a" ; }
 # telegram push
 push() {
-  local message="$@" ; 
-  #[ ! "$message" ] && message="$(timeout 0.1 cat)" 2>/dev/null # timeout ¸í·É¾î À¯¹« Á¦¿Ü
-  #[ ! "$message" ] && message="$(cat)" 2>/dev/null # timeout ºÒ°¡ÇÏ¿© Á¦¿Ü 
+  local message="$@" ;
+  #[ ! "$message" ] && message="$(timeout 0.1 cat)" 2>/dev/null # timeout ëª…ë ¹ì–´ ìœ ë¬´ ì œì™¸
+  #[ ! "$message" ] && message="$(cat)" 2>/dev/null # timeout ë¶ˆê°€í•˜ì—¬ ì œì™¸
   [ ! "$message" ] && IFS='' read -d '' -t1  message
-  # ÀÎ¼öµµ ÆÄÀÌÇÁ°ªµµ ¾øÀ»¶§ ±âº»°ª hostname À¸·Î ÁöÁ¤ 
+  # ì¸ìˆ˜ë„ íŒŒì´í”„ê°’ë„ ì—†ì„ë•Œ ê¸°ë³¸ê°’ hostname ìœ¼ë¡œ ì§€ì •
   [ ! "$message" ] && message="$HOSTNAME"
 
   if [ "$@" ] && [[ -z "${telegram_token}" || -z "${telegram_chatid}" ]]; then
@@ -741,21 +834,21 @@ push() {
 	  export telegram_token=${telegram_token} && export telegram_chatid=${telegram_chatid}
     fi
   fi
-  
+
     if [[ "${telegram_token}" && "${telegram_chatid}" ]]; then
-  	  curl -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" > /dev/null ; result=$?
-  	  #curl -k -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
+  	  curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" > /dev/null ; result=$?
+  	  #curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
 	  [ "$result" == 0 ] && { GRN1 && echo "push msg sent" ; } || { RED1 && echo "Err:$result ->  push send error" ; } ; RST
 	fi
-  # ±âº»ÀûÀ¸·Î ÀÎÀÚ Ãâ·Â 
-  echo "$message" 
+  # ê¸°ë³¸ì ìœ¼ë¡œ ì¸ì ì¶œë ¥
+  echo "$message"
 }
 
 atqq() { atq |sort|while read -r l;do echo $l; j=$(echo $l|awk1); at -c $j|tail -n2|head -n1;done ; }
 
-# 0060 msg           # 60ºĞ ÈÄ¿¡ "60ºĞ ¾Ë¶÷ msg "ÀÌ¶ó´Â ¸Ş½ÃÁö¸¦ ÅÚ·¹±×·¥À¸·Î Àü¼ÛÇÕ´Ï´Ù.
-# 00001700 msg or 0000 1700 msg      # ¿ÀÈÄ 5½Ã¿¡ "17:00 ¾Ë¶÷ msg "ÀÌ¶ó´Â ¸Ş½ÃÁö¸¦ ÅÚ·¹±×·¥À¸·Î Àü¼ÛÇÕ´Ï´Ù.
-# 000017001 msg      # ³»ÀÏ ¿ÀÈÄ 5½Ã¿¡ "17:00 ¾Ë¶÷ msg "ÀÌ¶ó´Â ¸Ş½ÃÁö¸¦ ÅÚ·¹±×·¥À¸·Î Àü¼ÛÇÕ´Ï´Ù.
+# 0060 msg           # 60ë¶„ í›„ì— "60ë¶„ ì•ŒëŒ msg "ì´ë¼ëŠ” ë©”ì‹œì§€ë¥¼ í…”ë ˆê·¸ë¨ìœ¼ë¡œ ì „ì†¡í•©ë‹ˆë‹¤.
+# 00001700 msg or 0000 1700 msg      # ì˜¤í›„ 5ì‹œì— "17:00 ì•ŒëŒ msg "ì´ë¼ëŠ” ë©”ì‹œì§€ë¥¼ í…”ë ˆê·¸ë¨ìœ¼ë¡œ ì „ì†¡í•©ë‹ˆë‹¤.
+# 000017001 msg      # ë‚´ì¼ ì˜¤í›„ 5ì‹œì— "17:00 ì•ŒëŒ msg "ì´ë¼ëŠ” ë©”ì‹œì§€ë¥¼ í…”ë ˆê·¸ë¨ìœ¼ë¡œ ì „ì†¡í•©ë‹ˆë‹¤.
 
 isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|kr|co.kr|org|io|info|xyz|app|dev)(\.[a-z]{2,})?$' >/dev/null && return 0 || return 1; }
 
@@ -763,27 +856,27 @@ urlencode() { od -t x1 -A n | tr " " % ; }
 urldecode() { echo -en "$(sed 's/+/ /g; s/%/\\x/g')" ; }
 
 alarm() {
-	# ÀÎ¼ö·Î ³Ñ¾î¿Ã¶§ "$1" "$2" // $2¿¡ read ³ª¸ÓÁö ¸ğµÎ 
-	# ÀÎ¼ö·Î ³Ñ¾î¿Ã¶§ "$1" "$2" "$3" ... // µÎ°¡Áö ÇüÅÂ Á¸Àç 
+	# ì¸ìˆ˜ë¡œ ë„˜ì–´ì˜¬ë•Œ "$1" "$2" // $2ì— read ë‚˜ë¨¸ì§€ ëª¨ë‘
+	# ì¸ìˆ˜ë¡œ ë„˜ì–´ì˜¬ë•Œ "$1" "$2" "$3" ... // ë‘ê°€ì§€ í˜•íƒœ ì¡´ì¬
 
     local input="$1" ; shift ; local telegram_msg="$1" ; shift
     while [ $# -gt 0 ]; do telegram_msg="$telegram_msg $1" ; shift; done
 	if [ ! "$input" ] ; then
-		: ÇöÀç ¾Ë¶÷ Å×½ºÆ® ³»¿ª Ãâ·Â 
-		echo ">>> alarm set list..." 
+		: í˜„ì¬ ì•ŒëŒ í…ŒìŠ¤íŠ¸ ë‚´ì—­ ì¶œë ¥
+		echo ">>> alarm set list..."
 		CYN ; atqq ; RST
 		ps -ef |grep [a]larm_task|awknf8|cgrep "alarm_task_$input"|grep -v "awk"
 	fi
-    if [[ "${input:0:4}" == "0000" ]]; then	
+    if [[ "${input:0:4}" == "0000" ]]; then
 	   [ ! "${input:4:2}" ] && input="$input$(echo "$telegram_msg" | awk1)" && telegram_msg="$(echo "$telegram_msg" | awknf2)" # && echo "input: $input // msg: $telegram_msg"
 		local time_in_hours="${input:4:2}" ; local time_in_minutes="${input:6:2}" ; local days="${input:8:2}" ; [ -z "$days" ] && days=0
 		telegram_msg="${time_in_hours}:${time_in_minutes}-Alarm ${telegram_msg}"
-		echo ": alarm_task_$input && curl -s -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at $time_in_hours:$time_in_minutes $( (( $days > 0 )) && echo "today + $days" days) &>/dev/null
+		echo ": alarm_task_$input && curl -m1 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at $time_in_hours:$time_in_minutes $( (( $days > 0 )) && echo "today + $days" days) &>/dev/null
 
 		atq |sort|while read -r l;do echo $l; j=$(echo $l|awk1); at -c $j|tail -n2|head -n1;done|stripe|cgrep alarm_task_$input
     elif [[ "${input:0:2}" == "00" ]]; then
 		local time_in_minutes="${input:2}"  ; time_in_minutes="${time_in_minutes#0}"
-		telegram_pre="${time_in_minutes}ºĞ Ä«¿îÆ® ¿Ï·á."
+		telegram_pre="${time_in_minutes}ë¶„ ì¹´ìš´íŠ¸ ì™„ë£Œ."
 		[ ! "$(file $gofile|grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" |iconv -f EUC-KR -t UTF-8 )"
 		[ ! "$(echo $LANG|grep -i "utf" )" ] && telegram_msg="$(echo "$telegram_msg" |iconv -f EUC-KR -t UTF-8 )"
 		telegram_msg="${telegram_pre}${telegram_msg}"
@@ -792,20 +885,20 @@ alarm() {
 		current_seconds=$(date +%S) ; current_seconds="${current_seconds#0}"
 		wait_seconds=$(($current_seconds - 4)) ; adjusted_minutes=$((time_in_minutes))
 		(( $wait_seconds < 0 )) && wait_seconds=$((60 + wait_seconds)) && adjusted_minutes=$((time_in_minutes - 1))
-	
-		echo ": alarm_task_$input && sleep $wait_seconds && curl -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
+
+		echo ": alarm_task_$input && sleep $wait_seconds && curl -m1 -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
 
 		atq |sort|while read -r l;do echo $l; j=$(echo $l|awk1); at -c $j|tail -n2|head -n1;done|stripe|cgrep alarm_task_$input
     elif [[ "${input:0:1}" == "0" ]]; then
 		local time_in_seconds="${input:1}" ; time_in_seconds="${time_in_seconds#0}"
-		telegram_pre="${time_in_seconds}ÃÊ Ä«¿îÆ® ¿Ï·á."
+		telegram_pre="${time_in_seconds}ì´ˆ ì¹´ìš´íŠ¸ ì™„ë£Œ."
 		[ ! "$(file $gofile|grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" |iconv -f EUC-KR -t UTF-8 )"
 		[ ! "$(echo $LANG|grep -i "utf" )" ] && telegram_msg="$(echo "$telegram_msg" |iconv -f EUC-KR -t UTF-8 )"
 		telegram_msg="${telegram_pre}${telegram_msg}"
 
 		date
 		#echo "input: $input // msg: $telegram_msg"
-		sleepdot $time_in_seconds && curl -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
+		sleepdot $time_in_seconds && curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
 
 		atq |sort|while read -r l;do echo $l; j=$(echo $l|awk1); at -c $j|tail -n2|head -n1;done|stripe|cgrep alarm_task_$input
     fi
@@ -818,16 +911,16 @@ gohistory() { echo ; echo "= go_history =================================" ; eva
 # loadvar
 loadvar() { load=$(awk '{print $1}' /proc/loadavg 2>/dev/null); color="0"; int_load=${load%.*}; case 1 in $((int_load>=3)) ) color="1;33;41" ;; $((int_load==2)) ) color="1;31" ;; $((int_load==1)) ) color="1;35" ;; esac; echo -ne "\033[${color}m ${load} \033[0m " ; }
 
-# awk NF select awk8 -> 8¿­ Ãâ·Â // awk2
+# awk NF select awk8 -> 8ì—´ ì¶œë ¥ // awk2
 for ((i=1; i<=10; i++)); do eval "awk${i}() { awk '{print \$$i}'; }" ; done
-# awk nf nf-1 awk99 -> ³¡¿­ Ãâ·Â 
+# awk nf nf-1 awk99 -> ëì—´ ì¶œë ¥
 awk99() { awk '{print $NF}' ; }; awk98() { awk '(NF>1){print $(NF-1)}'; }
-# awk NR pass awknr2 -> 2ÇàºÎÅÍ ³¡±îÁö Ãâ·Â 
+# awk NR pass awknr2 -> 2í–‰ë¶€í„° ëê¹Œì§€ ì¶œë ¥
 #for ((i=1; i<=10; i++)); do eval "awknr${i}() { awk 'NR > $(( $i -1 )) '; }" ; done
 for ((i=1; i<=10; i++)); do eval "awknr${i}() { awk 'NR >= '$i' '; }" ; done
-# awk NF pass awknf8 -> 8¿­ºÎÅÍ ³¡±îÁö Ãâ·Â 
+# awk NF pass awknf8 -> 8ì—´ë¶€í„° ëê¹Œì§€ ì¶œë ¥
 #for ((i=1; i<=10; i++)); do eval "awknf${i}() { awk '{print substr(\$0, index(\$0,\$$i))}' ; }" ; done
-# Æ¯Á¤¿­ÀÌ ¾øÀ»°æ¿ì ¹ö±× ³ª´Â°Í ¼öÁ¤ 
+# íŠ¹ì •ì—´ì´ ì—†ì„ê²½ìš° ë²„ê·¸ ë‚˜ëŠ”ê²ƒ ìˆ˜ì •
 for ((i=1; i<=10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print substr(\$0, index(\$0,\$$i))}' ; }" ; done
 
 
@@ -835,57 +928,63 @@ for ((i=1; i<=10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print substr
 
 idpw() { id="$1"; pw="$2"; host="${3:-$HOSTNAME}"; port="${4:-22}"; { expect -c "set timeout 3;log_user 0; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect -re \"password:\" { sleep 0.2 ; send \"$pw\r\" } -re \"key fingerprint\" { sleep 0.2 ; send \"yes\r\" ; expect -re \"password:\" ; sleep 0.2 ; send \"$pw\r\" }; expect \"*Last login*\" { exit 0 } \"*Welcome to *\" { exit 0 } timeout { exit 1 } eof { exit 1 };" ; } ; [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" ||echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"; }
 
-# assh id:pw@host:port  (pw ¿¡ Æ¯¼ö¹®ÀÚ°¡ ¾ø´Â °æ¿ì¿¡ ÇÑÇÏ¿© ÀÌ¿ë)
-# assh id pw host port  (pw ¿¡ Æ¯¼ö¹®ÀÚ°¡ ÀÖ´Â °æ¿ì 'pw' ÇüÅÂ·Î ÀÌ¿ë°¡´É)
-assh() { local input="$1"; if [[ $input == *":"* ]] && [[ $input == *"@"* ]]; then IFS='@:' read -r id pw host port < <(echo "$input"); else IFS=' ' read -r id pw host port < <(echo "$*"); fi; local port="${port:-22}"; expect -c "set timeout 3; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect \"password:\" { sleep 0.2; send [exec echo \"$pw\"]\r } \"key fingerprint\" { sleep 0.2; send \"yes\r\"; expect \"password:\"; sleep 0.2; send [exec echo \"$pw\"]\r }; interact"; }
+# assh id:pw@host:port  (pw ì— íŠ¹ìˆ˜ë¬¸ìê°€ ì—†ëŠ” ê²½ìš°ì— í•œí•˜ì—¬ ì´ìš©)
+# assh id pw host port  (pw ì— íŠ¹ìˆ˜ë¬¸ìê°€ ìˆëŠ” ê²½ìš° 'pw' í˜•íƒœë¡œ ì´ìš©ê°€ëŠ¥)
+#assh() { local input="$1"; if [[ $input == *":"* ]] && [[ $input == *"@"* ]]; then IFS='@:' read -r id pw host port < <(echo "$input"); else IFS=' ' read -r id pw host port < <(echo "$*"); fi; local port="${port:-22}"; echo "id:$id pw:$pw host:$host port:$port" ; expect -c "set timeout 3; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect \"password:\" { sleep 0.2; send [exec echo \"$pw\"]\r } \"key fingerprint\" { sleep 0.2; send \"yes\r\"; expect \"password:\"; sleep 0.2; send [exec echo \"$pw\"]\r }; interact"; }
+assh() { local input="$1"; local id pw host port; if [[ "$input" == *":"* ]] && [[ "$input" == *"@"* ]]; then IFS='@:' read -r id pw host port < <(echo "$input"); else id="$1"; pw="$2"; host="$3"; port="$4"; fi; port="${port:-22}"; echo "id:$id pw:$pw host:$host port:$port"; expect -c "set timeout 3; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } \"key fingerprint\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } }; interact"; }
 
-# ÀÎ¼ö ¾øÀ»¶§ read -p 
+# ì¸ìˆ˜ ì—†ì„ë•Œ read -p
 get_input() { [ -z "$1" ] && read -p "$2: " input && echo "$input" || echo "$1" ; }
 
-# ncp zstd or tar ¾ĞÃà Àü¼Û 
-ncp() { local h p r l i dir cmd; h=$(get_input "$1" "¿ø°İ È£½ºÆ® (¿¹: abc.com)"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); r=$(get_input "$2" "¿ø°İ °æ·Î"); l=$(get_input "$3" "·ÎÄÃ µğ·ºÅä¸®"); i=$(basename "$r"); dir=$(dirname "$r"); cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && ssh $p $h 'cd \"${dir}\" && tar cf - \"${i}\" | zstd ' | { pv 2>/dev/null||cat; }| zstd -d | tar xf - -C \"${l}\" || ssh $p $h 'cd \"${dir}\" && tar czf - \"${i}\"' | { pv 2>/dev/null||cat; } | tar xzf - -C \"${l}\""; echo "$cmd"; eval "$cmd"; }
+# ncp zstd or tar ì••ì¶• ì „ì†¡
+ncp() { local h p r l i dir cmd; h=$(get_input "$1" "ì›ê²© í˜¸ìŠ¤íŠ¸ (ì˜ˆ: abc.com)"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); r=$(get_input "$2" "ì›ê²© ê²½ë¡œ"); l=$(get_input "$3" "ë¡œì»¬ ë””ë ‰í† ë¦¬"); i=$(basename "$r"); dir=$(dirname "$r"); cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && ssh $p $h 'cd \"${dir}\" && tar cf - \"${i}\" | zstd ' | { pv 2>/dev/null||cat; }| zstd -d | tar xf - -C \"${l}\" || ssh $p $h 'cd \"${dir}\" && tar czf - \"${i}\"' | { pv 2>/dev/null||cat; } | tar xzf - -C \"${l}\""; echo "$cmd"; eval "$cmd"; }
 
-ncpr() { local l h r p i dir cmd; l=$(get_input "$1" "·ÎÄÃ °æ·Î"); h=$(get_input "$2" "¿ø°İ È£½ºÆ® (¿¹: abc.com)"); r=$(get_input "$3" "¿ø°İ °æ·Î"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); i=$(basename "$l"); dir=$(dirname "$r"); cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && tar cf - \"${l}\" | zstd | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && zstd -d | tar xf - -C \"${dir}\"' || tar czf - \"${l}\" | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && tar xzf - -C \"${dir}\"'"; echo "$cmd"; eval "$cmd"; }
+ncpr() { local l h r p i dir cmd; l=$(get_input "$1" "ë¡œì»¬ ê²½ë¡œ"); h=$(get_input "$2" "ì›ê²© í˜¸ìŠ¤íŠ¸ (ì˜ˆ: abc.com)"); r=$(get_input "$3" "ì›ê²© ê²½ë¡œ"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); i=$(basename "$l"); dir=$(dirname "$r"); cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && tar cf - \"${l}\" | zstd | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && zstd -d | tar xf - -C \"${dir}\"' || tar czf - \"${l}\" | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && tar xzf - -C \"${dir}\"'"; echo "$cmd"; eval "$cmd"; }
 
-# ncp ·Î ÆÄÀÏÀ» Ä«ÇÇÇÒ¶§ ¾ĞÃàÆÄÀÏ ÇüÅÂ·Î ·ÎÄÃ¿¡ ÀúÀå 
-ncpzip() { local h p r l i dir; h=$(get_input "$1" "¿ø°İ È£½ºÆ® (¿¹: abc.com)"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); r=$(get_input "$2" "¿ø°İ °æ·Î"); l=$(get_input "$3" "·ÎÄÃ µğ·ºÅä¸®"); i=$(basename "$r"); dir=$(dirname "$r"); ssh $p $h "command -v zstd &>/dev/null " && command -v zstd &>/dev/null && { ssh $p $h "cd '$dir' && tar cf - '$i' | zstd " | ( pv 2>/dev/null|| cat ) > "${l}/${h}.${i}.tar.zst" && ls -alh "${l}/${h}.${i}.tar.zst" ; } || { ssh $p $h "cd '$dir' && tar czf - '$i'" | ( pv 2>/dev/null|| cat ) > "${l}/${h}.${i}.tgz"; ls -alh "${l}/${h}.${i}.tgz" ; } ; }
+# ncp ë¡œ íŒŒì¼ì„ ì¹´í”¼í• ë•Œ ì••ì¶•íŒŒì¼ í˜•íƒœë¡œ ë¡œì»¬ì— ì €ì¥
+ncpzip() { local h p r l i dir; h=$(get_input "$1" "ì›ê²© í˜¸ìŠ¤íŠ¸ (ì˜ˆ: abc.com)"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); r=$(get_input "$2" "ì›ê²© ê²½ë¡œ"); l=$(get_input "$3" "ë¡œì»¬ ë””ë ‰í† ë¦¬"); i=$(basename "$r"); dir=$(dirname "$r"); ssh $p $h "command -v zstd &>/dev/null " && command -v zstd &>/dev/null && { ssh $p $h "cd '$dir' && tar cf - '$i' | zstd " | ( pv 2>/dev/null|| cat ) > "${l}/${h}.${i}.tar.zst" && ls -alh "${l}/${h}.${i}.tar.zst" ; } || { ssh $p $h "cd '$dir' && tar czf - '$i'" | ( pv 2>/dev/null|| cat ) > "${l}/${h}.${i}.tgz"; ls -alh "${l}/${h}.${i}.tgz" ; } ; }
 
-# ncpzip ÀÌÈÄ ¾÷µ¥ÀÌÆ®µÈ ÆÄÀÏÀÌ ÀÖÀ»¶§ ¾÷µ¥ÀÌÆ®
+# ncpzip ì´í›„ ì—…ë°ì´íŠ¸ëœ íŒŒì¼ì´ ìˆì„ë•Œ ì—…ë°ì´íŠ¸
 #ncpzipupdate() { local h r l p i dir b uf ts fn; h=$(get_input "$1"); r=$(get_input "$2"); l=$(get_input "$3"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); i=$(basename "$r"); b="${l}/${h}.${i}"; ts=$(date +%Y%m%d.%H%M%S); if [ -f "${b}.tar.zst" ]; then last_modified=$(date -r "${b}.tar.zst" +%s); elif [ -f "${b}.tgz" ]; then last_modified=$(date -r "${b}.tgz" +%s); else echo "No backup files found for $i."; return; fi; uf=$(ssh $p $h "find $r -type f -newermt @${last_modified}"); if [ "$uf" ]; then echo "$i updating..."; fn="${b}.update.${ts}.txt"; echo "$uf" > "$fn"; if [ -f "${b}.tar.zst" ]; then ssh $p $h "tar -cf - -T /dev/stdin" < "$fn" | zstd | (pv 2>/dev/null|| cat) > "${b}.update.${ts}.tar.zst"; elif [ -f "${b}.tgz" ]; then ssh $p $h "tar -czf - -T /dev/stdin" < "$fn" | (pv 2>/dev/null|| cat) > "${b}.update.${ts}.tgz"; fi; else echo "$i skipped..."; fi; }
 ncpzipupdate() { local h r l p i dir b uf ts fn; h=$(get_input "$1"); r=$(get_input "$2"); l=$(get_input "$3"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); i=$(basename "$r"); b="${l}/${h}.${i}"; ts=$(date +%Y%m%d.%H%M%S); if [ -f "${b}.tar.zst" ]; then last_modified=$(date -r "${b}.tar.zst" +%s); elif [ -f "${b}.tgz" ]; then last_modified=$(date -r "${b}.tgz" +%s); else echo "No backup files found for $i."; return; fi; uf=$(ssh $p $h "find $r -type f -newermt @${last_modified}"); if [ "$uf" ]; then echo "$i updating..."; if [ -f "${b}.tar.zst" ]; then fn="${b}.tar.zst.update.${ts}.txt"; echo "$uf" > "${b}.tar.zst.update.${ts}.txt"; ssh $p $h "tar -cf - -T /dev/stdin" < "${b}.tar.zst.update.${ts}.txt" | zstd | (pv 2>/dev/null|| cat) > "${b}.tar.zst.update.${ts}.tar.zst"; elif [ -f "${b}.tgz" ]; then fn="${b}.tgz.update.${ts}.txt"; echo "$uf" > "${b}.tgz.update.${ts}.txt"; ssh $p $h "tar -czf - -T /dev/stdin" < "${b}.tgz.update.${ts}.txt" | (pv 2>/dev/null|| cat) > "${b}.tgz.update.${ts}.tgz"; fi; else echo "$i skipped..."; fi; }
 
 
-
-# ¾÷µ¥ÀÌÆ®°¡ ºó¹øÇÑ ÆÄÀÏÀÇ °æ¿ì // ¸ğµç ¹é¾÷ÆÄÀÏÀÌ ¿À´Ã ³¯Â¥ÀÎ °æ¿ì // ÀÌÀü³¯Â¥ÀÇ ¹é¾÷ÆÄÀÏ º°µµ º¸°ü
-# file.1.bak ÇüÅÂ·Î ¹é¾÷ Á¶Á¤ (¿øº»¼³Á¤À¸·Î Ãë±ŞµÇ´Â°Í ¹æÁö)
+# rotate backup
+# ì—…ë°ì´íŠ¸ê°€ ë¹ˆë²ˆí•œ íŒŒì¼ì˜ ê²½ìš° // ëª¨ë“  ë°±ì—…íŒŒì¼ì´ ì˜¤ëŠ˜ ë‚ ì§œì¸ ê²½ìš° // ì´ì „ë‚ ì§œì˜ ë°±ì—…íŒŒì¼ ë³„ë„ ë³´ê´€
+# file.1.bak í˜•íƒœë¡œ ë°±ì—… ì¡°ì • (ì›ë³¸ì„¤ì •ìœ¼ë¡œ ì·¨ê¸‰ë˜ëŠ”ê²ƒ ë°©ì§€)
 rbackup() { t=$(date +%Y%m%d); while [ $# -gt 0 ]; do d="${1%/}"; base="${d}"; if [ -f "$d" ] && [ "$(diff $d ${base}.1.bak 2>/dev/null)" -o ! -f ${base}.1.bak ]; then d3=$(date -r ${base}.3.bak +%Y%m%d 2>/dev/null); d4=$(date -r ${base}.4.bak +%Y%m%d 2>/dev/null); if [ -f "${base}.4.bak" ] && [[ $t == "$d3" && $t != "$d4" ]]; then cdate=$(date -r ${base}.4.bak +%Y%m%d); mv ${base}.4.bak ${base}.${cdate}.bak; fi; for i in 3 2 1 ""; do cmd=${i:+mv}; cmd=${cmd:-cp}; $cmd ${base}.${i}.bak ${base}.$((${i:-0}+1)).bak 2>/dev/null; done; cp $d ${base}.1.bak; fi; shift; done; }
 
-
-# È¯°æº¯¼ö¿¡ Ãß°¡ prefix[0-999]=$2
+# í™˜ê²½ë³€ìˆ˜ì— ì¶”ê°€ prefix[0-999]=$2
 exportvar() { p=$1; v=$2; i=1; while true; do n="${p}${i}"; if [ -z "${!n}" ]; then export ${n}="${v}"; YEL1 ; echo "Exported: ${n}=${v}"; RST ;  break; fi; ((i++)); done; }
-# prefix[0-999] È¯°æº¯¼ö ¸ğµÎ unset
+# prefix[0-999] í™˜ê²½ë³€ìˆ˜ ëª¨ë‘ unset
 unsetvar() { p=$1; i=1; while true; do n="${p}${i}"; if ( ! declare -p ${n} 2>/dev/null ); then break; fi; unset ${n}; echo "Unset: ${n}"; ((i++)); done; }
-# °­Á¦Á¾·á½Ã ³²¾ÆÀÖÀ»¼ö ÀÖ´Â ·ÎÄÃº¯¼ö ¼±¾ğ ÃÊ±âÈ­
+# ê°•ì œì¢…ë£Œì‹œ ë‚¨ì•„ìˆì„ìˆ˜ ìˆëŠ” ë¡œì»¬ë³€ìˆ˜ ì„ ì–¸ ì´ˆê¸°í™”
 unsetvar varl
 
-# wait enter 
+# wait enter
 readx() { read -p "[Enter] " x < /dev/tty ; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 #sleepdot(){ echo -n "sleepdot $1 " ; bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && real1sec=1 || real1sec=0.01  ; c=1; [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "; while [ -z "$x" ]; do sleep 1; echo -n "."; [ $((c%5)) -eq 0 ] && echo -n " "; [ $((c % 30)) -eq 0 ] && echo $c ; [ $((c%300)) -eq 0 ] && echo ;  c=$((c+1)); [ "$1" ] && [ $c -gt $1 ] && break; [ -z "$1" ] && IFS=z read -t$real1sec -n1 x; done; echo; }
-# $1 ·Î ÇÒ´çµÈ ½ÇÁ¦ ½Ã°£(ÃÊ)ÀÌ Áö³ª¸é Á¾·á µÇµµ·Ï °³¼± sleep $1 °ú µ¿ÀÏÇÏÁö¸¸ ½Ã°¢È­ 
+# $1 ë¡œ í• ë‹¹ëœ ì‹¤ì œ ì‹œê°„(ì´ˆ)ì´ ì§€ë‚˜ë©´ ì¢…ë£Œ ë˜ë„ë¡ ê°œì„  sleep $1 ê³¼ ë™ì¼í•˜ì§€ë§Œ ì‹œê°í™”
 sleepdot(){ echo -n "sleepdot $1 "; bashver=${BASH_VERSINFO[0]}; (( bashver < 3 )) && real1sec=1 || real1sec=1; s=$(date +%s); c=1; [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "; time while [ -z "$x" ]; do [ "$1" ] && sleep 1; echo -n "."; [ $((c%5)) -eq 0 ] && echo -n " "; [ $((c % 30)) -eq 0 ] && echo $c ; t=$(($(date +%s)-s)); [ $((c%300)) -eq 0 ] && echo ;  c=$((c+1)); if [ "$1" ] && [ $t -ge $1 ]; then break; elif [ -z "$1" ]; then IFS=z read -t$real1sec -n1 x && break; fi; done; echo; }
 
 # backup & vi
-vi2() { rbackup $1 ; vim $1 || vi $1 ; }
+#vi2() { rbackup $1 ; [ -f $1 ] && { vim $1 || vi $1 ; } ; }
+vi2() { rbackup $1 ; { vim $1 || vi $1 ; } ; }
 vi2e() { rbackup $1 ; vim -c "set fileencoding=euc-kr" $1 ; }
 vi2u() { rbackup $1 ; vim -c "set fileencoding=utf-8" $1 ; }
-vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
+#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "/^%%% .*\[$2\]" $1 || vim $1  ; }
+vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" $1 || vim $1  ; }
+#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status ; }
 
+# euc-kr -> utf-8 file encoding
+utt() { if ! file -i "$1" | grep -qi utf-8 ; then rbackup $1 || cp -a $1 $1.bak ; iconv -f euc-kr -t utf-8//IGNORE "$1" > "$1.temp" && cat "$1.temp" > "$1" && rm -f "$1.temp" ; fi ; }
+
 # update
-update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile ; }
+update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m3 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m3 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile $scut ; }
 
 # install
 yyay() { [ "$(which yum)" ] && yum="yum" || yum="apt" ; while [ $# -gt 0 ]; do $yum install -y $1 ; shift; done; }
@@ -904,13 +1003,14 @@ ipallow24() { valid_ips=true; for ip in "$@"; do ipcheck ${ip%/*} && iptables -D
 ipallow16() { valid_ips=true; for ip in "$@"; do ipcheck ${ip%/*} && iptables -D INPUT -s ${ip%/*}/16 -j DROP || { valid_ips=false; break; }; done; $valid_ips && iptables -L -v -n | tail -n20 | gip | cip; }
 
 
-# ÆÄÀÏ ¾ÏÈ£È­/º¹È£È­ env ÂüÁ¶ 
+# íŒŒì¼ ì•”í˜¸í™”/ë³µí˜¸í™” env ì°¸ì¡°
 encrypt_file_old() { k="${ENC_KEY:-$HOSTNAME}"; i=$(readlinkf "$1"); o="$i.enc"; openssl enc -aes-256-cbc -in "$i" -out "$o" -pass pass:"$k"; rm "$i"; chmod 600 "$o"; }
 decrypt_file_old() { k="${ENC_KEY:-$HOSTNAME}"; i=$(readlinkf "$1"); o="${i%.*}"; openssl enc -aes-256-cbc -d -in "$i" -out "$o" -pass pass:"$k"; rm "$i"; chmod 600 "$o"; }
-# new 
+# new
 encrypt_file() { [ -n "$2" ] && k="$2" || k="${ENC_KEY:-$HOSTNAME}"; i=$(readlinkf "$1"); o="$i.enc"; openssl enc -des-ede3-cbc -in "$i" -out "$o" -pass pass:"$k" 2>/dev/null && { rm "$i"; chmod 600 "$o"; }; }
 decrypt_file() { [ -n "$2" ] && k="$2" || k="${ENC_KEY:-$HOSTNAME}"; i=$(readlinkf "$1"); o="${i%.enc}"; openssl enc -des-ede3-cbc -d -in "$i" -out "$o" -pass pass:"$k" 2>/dev/null && chmod 600 "$o"; }
 encrypt() {
+	# ì¸ìˆ˜ì¤‘ ë§ˆì§€ë§‰ ì¸ì -> key ex) encrypt hello world mykey or echo "hello world" | encrypt mykey
     [ "$1" ] && local k="${!#}" ; [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" ; #echo "k: $k"
     IFS='' read -d '' -t1 message;
     [ "$2" ] && message="$message $(echo "${*:1:$(($#-1))}" | tr '\n' ' ')"
@@ -925,24 +1025,92 @@ decrypt() {
     echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null;
 }
 
-# Áßº¹ ½ÇÇà ¹æÁö ÇÔ¼ö
+# ì¤‘ë³µ ì‹¤í–‰ ë°©ì§€ í•¨ìˆ˜
 runlock() { local lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f $Lockfile ] && { P=$(cat $Lockfile); [ -n "$(ps --no-headers -f $P)" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > $Lockfile; trap 'rm -f "$Lockfile"' INT EXIT TERM; }
 
-# runlock ÇÔ¼ö¸¦ ½ºÅ©¸³Æ® ÆÄÀÏ¿¡ »ğÀÔÇÏ´Â ÇÔ¼ö 
+# runlock í•¨ìˆ˜ë¥¼ ìŠ¤í¬ë¦½íŠ¸ íŒŒì¼ì— ì‚½ì…í•˜ëŠ” í•¨ìˆ˜
 runlockadd() {
   local f="$1" ;  local t="$(mktemp ${TMPDIR:=/tmp}/tmpfile_XXXXXX)"
   grep -q "runlock()" "$f" && { echo "runlock function already exists."; return ; }
   rbackup $f && sed -e '1a\runlock() { local lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f $Lockfile ] && { P=$(cat $Lockfile); [ -n "$(ps --no-headers -f $P)" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > $Lockfile; trap '\''rm -f "$Lockfile"'\'' INT TERM EXIT; }' -e '1a\runlock' "$f" > "$t" && { cat "$t" > "$f"; rm -f $t; diff ${f}.1 ${f}; ls -al ${f} ${f}.1; }; }
 
-# Ä«ÇÇ³ª ¾ĞÃàµî df -m  ¿¡ º¯µ¿ÀÌ ÀÖÀ»°æ¿ì ¸ğ´ÏÅÍ¸µ¿ë
-dfmonitor() { DF_BEFORE=$(df -m|grep -vE "tmpfs"); while true; do clear; echo -e "System Uptime:\n--------------"; uptime; echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"; ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep ; echo -e "\033[0m\n\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n\n"; DF_AFTER=$(df -m|grep -vE "tmpfs"); DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER")); echo -e "New df -m output with changes highlighted:\n------------------------------------------"; echo "${DF_AFTER}" | while IFS= read -r line; do if [[ "${DIFF}" == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done; echo -e "\033[0m"; DF_BEFORE=$DF_AFTER; echo -n ">>> Quit -> [Anykey] " ; for i in $(seq 1 4); do read -p"." -t1 -n1 x && break ; done; [ "$x" ] && break ; echo; done; }
-dfm() { dfmonitor ; }
+# ì¹´í”¼ë‚˜ ì••ì¶•ë“± df -m  ì— ë³€ë™ì´ ìˆì„ê²½ìš° ëª¨ë‹ˆí„°ë§ìš©
+#dfmonitor() { DF_BEFORE=$(df -m|grep -vE "tmpfs"); while true; do clear; echo -e "System Uptime:\n--------------"; uptime; echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"; ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep ; echo -e "\033[0m\n\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n\n"; DF_AFTER=$(df -m|grep -vE "tmpfs"); DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER")); echo -e "New df -m output with changes highlighted:\n------------------------------------------"; echo "${DF_AFTER}" | while IFS= read -r line; do if [[ "${DIFF}" == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done; echo -e "\033[0m"; DF_BEFORE=$DF_AFTER; echo -n ">>> Quit -> [Anykey] " ; for i in $(seq 1 4); do read -p"." -t1 -n1 x && break ; done; [ "$x" ] && break ; echo; done; }
+
+dfmonitor() { DF_INITIAL=$(df -m|grep -vE "udev|none|efi|fuse|tmpfs");DF_BEFORE=$DF_INITIAL; while true; do clear; echo -e "System Uptime:\n--------------"; uptime; echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"; ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep ;         echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL";echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"; DF_AFTER=$(df -m|grep -vE "udev|none|efi|fuse|Available|tmpfs"); DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER")); echo -e "New df -m output with changes highlighted:\n------------------------------------------"; echo "${DF_AFTER}" | while IFS= read -r line; do if [[ "${DIFF}" == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done; echo -e "\033[0m"; DF_BEFORE=$DF_AFTER; echo -n ">>> Quit -> [Anykey] " ; for i in $(seq 1 4); do read -p"." -t1 -n1 x && break ; done; [ "$x" ] && break ; echo; done; }
 
 # explorer.sh
-#explorer() { $base/explorer.sh $1 || ( curl http://byus.net/explorer.sh -o $base/explorer.sh && chmod 755 $base/explorer.sh && $base/explorer.sh $1 ) ; }
-explorer() { command -v ranger &> /dev/null && ranger $1 || { ~/explorer.sh $1 || ( curl http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
+#explorer() { $base/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o $base/explorer.sh && chmod 755 $base/explorer.sh && $base/explorer.sh $1 ) ; }
+#explorer() { command -v ranger &> /dev/null && { ranger $1 ; } || { ~/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
+#explorer() { command -v ranger &> /dev/null && ranger "$1" || { explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }; }
+explorer() { command -v ranger &> /dev/null && { ranger "$1"; return; }; explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }
 exp() { explorer $* ; }
 
+pingcheck() { ping -c1 168.126.63.1 &> /dev/null && echo "y" || echo "n"; }
+pingtest() { echo; [ "$1" ] && ping -c3 $1 || ping -c3 168.126.63.1 ; }
+pingtesta() { echo; [ "$1" ] && ping $1 || ping 168.126.63.1 ; }
+pingtestg() { echo; ping -c3 $gateway ; }
+pp() { pingtest $* ; } ; ppa() { pingtesta $* ; } ; ppg() { pingtestg $* ; } ;
+
+reconnect_down_veth_interfaces () {
+    # ë„¤íŠ¸ì›Œí¬ ì¬ì‹œì‘ì‹œ ë„¤íŠ¸ì›Œí¬ê°€ ì˜¬ë¼ì˜¤ì§€ ì•ŠëŠ” ê²½ìš° ë°œìƒ
+    # ëª¨ë“  veth ì¸í„°í˜ì´ìŠ¤ì— ëŒ€í•´ ë°˜ë³µ
+    for iface in $( ifconfig -a | grep veth | awk -F: '{print $1}' ); do
+        # í•´ë‹¹ ì¸í„°í˜ì´ìŠ¤ê°€ ì–´ë–¤ VM ë˜ëŠ” LXCì™€ ì—°ê²°ë˜ì–´ ìˆëŠ”ì§€ í™•ì¸
+        id=$(echo $iface | sed 's/veth\([0-9]*\)i0/\1/')
+
+        config_path=$(find /etc/pve/nodes/ -maxdepth 3 -name ${id}.conf)
+
+        if [ ! -f "$config_path" ]; then
+            echo "Configuration file does not exist for interface: $iface"
+            continue
+        fi
+
+        # í•´ë‹¹ VMì´ë‚˜ LXCê°€ ì–´ë–¤ ë¸Œë¦¬ì§€ë¥¼ ì‚¬ìš©í•´ì•¼ í•˜ëŠ”ì§€ í™•ì¸
+        bridge=$(cat ${config_path} | grep '^net' | sed 's/^.*bridge=\([^,]*\).*$/\1/')
+
+        # í•´ë‹¹ ì¸í„°í˜ì´ìŠ¤ê°€ ì´ë¯¸ ë¸Œë¦¬ì§€ì— ì—°ê²°ë˜ì–´ ìˆëŠ”ì§€ í™•ì¸
+        # if ! ip link show $iface | grep -q "master $bridge"; then
+        if ! brctl show $bridge | grep -q $iface; then
+            # í•´ë‹¹ ì¸í„°í˜ì´ìŠ¤ë¥¼ ì ì ˆí•œ ë¸Œë¦¬ì§€ì— ì—°ê²°
+            brctl addif $bridge $iface
+            echo "Interface ${iface} of instance ${id} has been added to the bridge ${bridge}."
+         fi
+    done
+}
+
+
+rrnet() {
+	if [ ! -f /etc/network/interfaces ]; then
+    	echo "Error: /etc/network/interfaces does not exist." ; exit 1
+	fi
+
+    backup_files=("/etc/network/interfaces.backup" "/etc/network/interfaces.1.bak" "/etc/network/interfaces.2.bak" "/etc/network/interfaces.3.bak")
+    files=("/etc/network/interfaces" "${backup_files[@]}")
+
+    for file in "${files[@]}"; do
+        if [ -f $file ]; then
+            cp $file /etc/network/interfaces 2>/dev/null
+            systemctl restart networking.service
+
+            if ping -c 4 8.8.8.8 > /dev/null; then
+                echo "Network configuration from $file is successful."
+				reconnect_down_veth_interfaces
+                return 0
+            else
+                echo "Ping test failed for configuration from $file."
+                 [ "$file" == "/etc/network/interfaces" ] && cp /etc/network/interfaces /etc/network/interfaces.err.$(date "+%Y%m%d_%H%M%S")
+
+            fi
+
+        elif [ "$file" != "/etc/network/interfaces" ]; then
+            echo "Backup file $file does not exist."
+        fi
+    done
+
+    echo "All configurations failed the ping test."
+    return 1
+}
 
 
 dockersvcorg() { able docker && dockerps=$(docker ps|awknr2 2>/dev/null) &&  [ "${dockerps}" ] && echo "$dockerps" | grep "0.0.0.0" | awk '{split($2, arr, "/"); printf arr[1] " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; {print ""} ;  }' ; }
@@ -959,7 +1127,7 @@ dockersvc() {
   echo -e "$result" | cip | chost | column -t
 }
 
-# °¢¿­ÀÇ ÇÊµå±æÀÌ¸¦ Á¦ÇÑ w|maxl 5 5 5 5 // ÇÑÁÙÆøÀ» ³Ñ¾î°¡´Â µ¥ÀÌÅÍ°¡ ¸¹À»°æ¿ì, Àû´çÈ÷ ÄÆ ÇÊ¿ä¾ø´Â ÇÊµå´Â 0À¸·Î ¼³Á¤ 
+# ê°ì—´ì˜ í•„ë“œê¸¸ì´ë¥¼ ì œí•œ w|maxl 5 5 5 5 // í•œì¤„í­ì„ ë„˜ì–´ê°€ëŠ” ë°ì´í„°ê°€ ë§ì„ê²½ìš°, ì ë‹¹íˆ ì»· í•„ìš”ì—†ëŠ” í•„ë“œëŠ” 0ìœ¼ë¡œ ì„¤ì •
 maxl() { local args=("$@"); awk -v limits="${args[*]}" '{n = split(limits, limit_arr, " "); for (i = 1; i <= n; i++) { if (length($(i)) > limit_arr[i]) { $(i) = substr($(i), 1, limit_arr[i]) } } print $0 }'; }
 
 
@@ -972,7 +1140,7 @@ incremental_backup() {
 
   local backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
 
-  # Á¶°Ç¿¡ µû¶ó prefix¸¦ ¼³Á¤ÇÕ´Ï´Ù.
+  # ì¡°ê±´ì— ë”°ë¼ prefixë¥¼ ì„¤ì •í•©ë‹ˆë‹¤.
   local prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {printf "/%s", $2}}}')
 
   cd "$prefix"
@@ -986,16 +1154,16 @@ incremental_backup() {
   rm "$backup_dir/new_files.txt"
 }
 
-# ±âÁ¸ ¹é¾÷ ÆÄÀÏÀ» ÀÎ¼ö·Î ÇÏ¿© ¾÷µ¥ÀÌÆ®µÈ ÆÄÀÏ¸¸ Ãß°¡·Î ¹é¾÷ incremental backup
+# ê¸°ì¡´ ë°±ì—… íŒŒì¼ì„ ì¸ìˆ˜ë¡œ í•˜ì—¬ ì—…ë°ì´íŠ¸ëœ íŒŒì¼ë§Œ ì¶”ê°€ë¡œ ë°±ì—… incremental backup
 # $1:backupfile.tgz [$2:path_prefix]
 ibackup() {
   local backup_file="$1" ; local backup_filepath="$(readlinkf $1)" ; local custom_prefix="$2"
   local backup_dir=$(dirname "$backup_file")
   local backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
   # local backup_timestamp=$(date -r "$backup_file" '+%Y-%m-%d %H:%M:%S')
-  # var/lib/mysql/ or account/ or root/ .. account ´Â prefix °¡ ÇÊ¿äÇÔ 
+  # var/lib/mysql/ or account/ or root/ .. account ëŠ” prefix ê°€ í•„ìš”í•¨
 
-  # ¾ĞÃàÆÄÀÏÀÌ °æ·ÎÇüÅÂ¸é /, ¾ĞÃàÆÄÀÏÀÌ Æú´õÇÏ³ª¸é $custom_prefix, 
+  # ì••ì¶•íŒŒì¼ì´ ê²½ë¡œí˜•íƒœë©´ /, ì••ì¶•íŒŒì¼ì´ í´ë”í•˜ë‚˜ë©´ $custom_prefix,
   local prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {print "/" }}}')
 
   echo "prefix $prefix backup_folder $backup_folder "
@@ -1003,28 +1171,30 @@ ibackup() {
   if [ -d "${prefix}${backup_folder}" ] ; then
     cd "$prefix"
     find "${prefix}${backup_folder}" -type f -newer "$backup_filepath" > "$backup_dir/new_files.txt"
-    tar -czvf "${backup_file}.update.$(date +%Y%m%d.%H%M%S).tgz" -C "$backup_dir" -T "$backup_dir/new_files.txt" 
+    tar -czvf "${backup_file}.update.$(date +%Y%m%d.%H%M%S).tgz" -C "$backup_dir" -T "$backup_dir/new_files.txt"
   fi
 }
 
-# ifcfg-ethx ÆÄÀÏÀÌ ¾ø¾î »ı¼ºÇØ¾ß ÇÒ °æ¿ì 
+# ifcfg-ethx íŒŒì¼ì´ ì—†ì–´ ìƒì„±í•´ì•¼ í•  ê²½ìš°
 ifcfgset() {
 [ ! "$(which ifconfig 2>/dev/null)" ] && "ifconfig command not found!" && exit
 
 # Get all ethernet interfaces
 INTERFACES=$(ifconfig -a | grep HWaddr | awk '{print $1}')
+[ ! "$INTERFACES" ] && INTERFACES="$(ip link show | awk -F ': ' '/^[0-9]+:/ {gsub(/:$/, "", $2); if ($2 != "lo") print $2}')"
 
 for INTERFACE in $INTERFACES; do
     # Check if the configuration file already exists
     if [ -e /etc/sysconfig/network-scripts/ifcfg-$INTERFACE ]; then
         read -p "Configuration file for $INTERFACE already exists. Do you want to delete and reconfigure it? (y/n): " REPLY
-        
-        if [ "$REPLY" != "Y" ] && [ "$REPLY" != "y" ]; then 
+
+        if [ "$REPLY" != "Y" ] && [ "$REPLY" != "y" ]; then
             echo "Skipping configuration for $INTERFACE."
-            continue 
+            continue
         fi
-        
+
         mv -f /etc/sysconfig/network-scripts/ifcfg-$INTERFACE /etc/sysconfig/network-scripts/ifcfg-$INTERFACE.bak
+		ls -al /etc/sysconfig/network-scripts/ ; echo
     fi
 
     # Get ifconfig output for this interface
@@ -1032,8 +1202,11 @@ for INTERFACE in $INTERFACES; do
 
     # Extract necessary information
     HWADDR=$(echo "$OUTPUT" | grep -oi -E 'HWaddr [0-9a-f:]{17}' | cut -d ' ' -f 2)
+    [ ! "$HWADDR" ] && HWADDR=$(echo "$OUTPUT" | grep -oi -E 'ether [0-9a-f:]{17}' | cut -d ' ' -f 2)
     IPADDR=$(echo "$OUTPUT" | grep -oi -E 'inet addr:[0-9\.]+' | cut -d ':' -f 2)
-    
+    [ ! "$IPADDR" ] && IPADDR=$(echo "$OUTPUT" | grep -oi -E 'inet [0-9\.]+' | cut -d ' ' -f 2)
+	GATEWAY="${IPADDR%.*}.1"
+
 # If IP address is not set, ask for it and set netmask and broadcast address to typical values
 read -p "Enter the IP address for $INTERFACE (or type dhcp, default: $IPADDR): " INPUT_IPADDR
 
@@ -1048,6 +1221,7 @@ if [ "$INPUT_IPADDR" == "dhcp" ]; then
 else
    BOOTPROTO="static"
    NETMASK="255.255.255.0"
+   GATEWAY="$(echo $INPUT_IPADDR | cut -d '.' -f 1-3).1"
    BROADCAST="$(echo $INPUT_IPADDR | cut -d '.' -f 1-3).255"
 fi
 
@@ -1060,16 +1234,17 @@ BOOTPROTO="$BOOTPROTO"
 HWADDR="$HWADDR"
 EOF
 
-if [ "$BOOTPROTO" == "static" ]; then 
-cat >> /etc/sysconfig/network-scripts/ifcfg-$INTERFACE << EOF   
+if [ "$BOOTPROTO" == "static" ]; then
+cat >> /etc/sysconfig/network-scripts/ifcfg-$INTERFACE << EOF
 IPADDR="$IPADDR"
+GATEWAY="$GATEWAY"
 NETMASK="$NETMASK"
 BROADCAST="$BROADCAST"
 EOF
 
-fi 
+fi
 
-cat >> /etc/sysconfig/network-scripts/ifcfg-$INTERFACE << EOF  
+cat >> /etc/sysconfig/network-scripts/ifcfg-$INTERFACE << EOF
 ONBOOT="yes"
 TYPE="Ethernet"
 EOF
@@ -1108,14 +1283,14 @@ services:
       - PASSWORD=PASS_WORD
       - WG_PORT=51820
       - WG_DEFAULT_ADDRESS=10.8.0.x
-      - WG_DEFAULT_DNS=1.1.1.1
+      - WG_DEFAULT_DNS=168.126.63.1
       - WG_MTU=1420
-      - WG_ALLOWED_IPS=192.168.1.0/24, 10.8.0.0/24
-      
+      - WG_ALLOWED_IPS=192.168.0.0/16,10.0.0.0/16,172.16.0.0/16
+
     image: weejewel/wg-easy
     container_name: wg-easy
     volumes:
-      - /data/wg-easy/data:/etc/wireguard
+      - /data/wireguard/data:/etc/wireguard
     ports:
       - "51820:51820/udp"
       - "51821:51821/tcp"
@@ -1209,7 +1384,7 @@ services:
       PMA_HOSTS: db
     ports:
       - 3300:80
-    networks:    
+    networks:
       - wordpress
 
 networks:
@@ -1507,12 +1682,12 @@ cat > "$file_path" << 'EOF'
     server_name example.com www.example.com;
 
    location /.well-known/acme-challenge/ {
-      root     /var/www/certbot; 
-      allow all; 
+      root     /var/www/certbot;
+      allow all;
      }
 
    location / {
-      return     301 https://$host$request_uri;  
+      return     301 https://$host$request_uri;
     }
   }
 
@@ -1942,13 +2117,13 @@ services:
     #restart: unless-stopped
     #image: postgres:14
     #hostname: postgres
-    #volumes: 
+    #volumes:
     #  - semaphore-postgres:/var/lib/postgresql/data
     #environment:
     #  POSTGRES_USER: semaphore
     #  POSTGRES_PASSWORD: semaphore
     #  POSTGRES_DB: semaphore
-  # if you wish to use postgres, comment the mysql service section below 
+  # if you wish to use postgres, comment the mysql service section below
   mysql:
     restart: unless-stopped
     image: mysql:8.0
@@ -1978,7 +2153,7 @@ services:
       SEMAPHORE_ADMIN_EMAIL: admin@localhost
       SEMAPHORE_ADMIN: admin
       SEMAPHORE_ACCESS_KEY_ENCRYPTION: gs72mPntFATGJs9qK0pQ0rKtfidlexiMjYCH9gWKhTU=
-      SEMAPHORE_LDAP_ACTIVATED: 'no' # if you wish to use ldap, set to: 'yes' 
+      SEMAPHORE_LDAP_ACTIVATED: 'no' # if you wish to use ldap, set to: 'yes'
       SEMAPHORE_LDAP_HOST: dc01.local.example.com
       SEMAPHORE_LDAP_PORT: '636'
       SEMAPHORE_LDAP_NEEDTLS: 'yes'
@@ -2043,10 +2218,541 @@ name=Extra Packages for Enterprise Linux 6 - $basearch
 baseurl=https://archives.fedoraproject.org/pub/archive/epel/6/$basearch/
 failovermethod=priority
 enabled=1
-gpgcheck=0 
+gpgcheck=0
 
 EOF
 ;;
+
+
+postfix.yml )
+cat > "$file_path" << EOF
+# See /usr/share/postfix/main.cf.dist for a commented, more complete version
+
+myhostname=$(hostname)
+
+smtpd_banner = \$myhostname ESMTP \$mail_name (Debian/GNU)
+biff = no
+
+# appending .domain is the MUA's job.
+append_dot_mydomain = no
+
+# Uncomment the next line to generate "delayed mail" warnings
+#delay_warning_time = 4h
+
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+mydestination = \$myhostname, localhost.\$mydomain, localhost
+#relayhost =
+mynetworks = 127.0.0.0/8
+inet_interfaces = loopback-only
+recipient_delimiter = +
+
+compatibility_level = 2
+
+inet_protocols = all
+relayhost = smtp.gmail.com:587
+smtp_use_tls = yes
+smtp_sasl_auth_enable = yes
+smtp_sasl_security_options =
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_tls_CAfile = /etc/ssl/certs/Entrust_Root_Certification_Authority.pem
+smtp_tls_session_cache_database = btree:/var/lib/postfix/smtp_tls_session_cache
+smtp_tls_session_cache_timeout = 3600s
+
+EOF
+;;
+
+
+vimrc1.yml )
+cat > "$file_path" << 'EOF'
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Maintainer:
+"       Amir Salihefendic ? @amix3k
+"
+" Awesome_version:
+"       Get this config, nice color schemes and lots of plugins!
+"
+"       Install the awesome version from:
+"
+"           https://github.com/amix/vimrc
+"
+" Sections:
+"    -> General
+"    -> VIM user interface
+"    -> Colors and Fonts
+"    -> Files and backups
+"    -> Text, tab and indent related
+"    -> Visual mode related
+"    -> Moving around, tabs and buffers
+"    -> Status line
+"    -> Editing mappings
+"    -> vimgrep searching and cope displaying
+"    -> Spell checking
+"    -> Misc
+"    -> Helper functions
+"
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => General
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Sets how many lines of history VIM has to remember
+set history=500
+
+set fileencodings=utf8,euc-kr
+
+" Enable filetype plugins
+filetype plugin on
+filetype indent on
+
+" Set to auto read when a file is changed from the outside
+set autoread
+au FocusGained,BufEnter * checktime
+
+" With a map leader it's possible to do extra key combinations
+" like <leader>w saves the current file
+let mapleader = ","
+
+" Fast saving
+nmap <leader>w :w!<cr>
+
+" :W sudo saves the file
+" (useful for handling the permission-denied error)
+command! W execute 'w !sudo tee % > /dev/null' <bar> edit!
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => VIM user interface
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Set 7 lines to the cursor - when moving vertically using j/k
+set so=7
+
+" Avoid garbled characters in Chinese language windows OS
+let $LANG='en'
+set langmenu=en
+source $VIMRUNTIME/delmenu.vim
+source $VIMRUNTIME/menu.vim
+
+" Turn on the Wild menu
+set wildmenu
+
+" Ignore compiled files
+set wildignore=*.o,*~,*.pyc
+if has("win16") || has("win32")
+    set wildignore+=.git\*,.hg\*,.svn\*
+else
+    set wildignore+=*/.git/*,*/.hg/*,*/.svn/*,*/.DS_Store
+endif
+
+"Always show current position
+set ruler
+
+" Height of the command bar
+set cmdheight=1
+
+" A buffer becomes hidden when it is abandoned
+set hid
+
+" Configure backspace so it acts as it should act
+set backspace=eol,start,indent
+set whichwrap+=<,>,h,l
+
+" Ignore case when searching
+set ignorecase
+
+" When searching try to be smart about cases
+set smartcase
+
+" Highlight search results
+set hlsearch
+
+" Makes search act like search in modern browsers
+set incsearch
+
+" Don't redraw while executing macros (good performance config)
+set lazyredraw
+
+" For regular expressions turn magic on
+set magic
+
+" Show matching brackets when text indicator is over them
+set showmatch
+" How many tenths of a second to blink when matching brackets
+set mat=2
+
+" No annoying sound on errors
+set noerrorbells
+set novisualbell
+set t_vb=
+set tm=500
+
+" Properly disable sound on errors on MacVim
+if has("gui_macvim")
+    autocmd GUIEnter * set vb t_vb=
+endif
+
+
+" Add a bit extra margin to the left
+set foldcolumn=1
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Colors and Fonts
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Enable syntax highlighting
+syntax enable
+
+" Enable 256 colors palette in Gnome Terminal
+if $COLORTERM == 'gnome-terminal'
+    set t_Co=256
+endif
+
+try
+    colorscheme desert
+catch
+endtry
+
+set background=dark
+
+" Set extra options when running in GUI mode
+if has("gui_running")
+    set guioptions-=T
+    set guioptions-=e
+    set t_Co=256
+    set guitablabel=%M\ %t
+endif
+
+" Set utf8 as standard encoding and en_US as the standard language
+set encoding=utf8
+"set encoding=euc-kr
+
+" Use Unix as the standard file type
+set ffs=unix,dos,mac
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Files, backups and undo
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Turn backup off, since most stuff is in SVN, git etc. anyway...
+set nobackup
+set nowb
+set noswapfile
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Text, tab and indent related
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Use spaces instead of tabs
+set expandtab
+
+" Be smart when using tabs ;)
+set smarttab
+
+" 1 tab == 4 spaces
+set shiftwidth=4
+set tabstop=4
+
+" Linebreak on 500 characters
+set lbr
+set tw=500
+
+set ai "Auto indent
+set si "Smart indent
+set wrap "Wrap lines
+
+
+""""""""""""""""""""""""""""""
+" => Visual mode related
+""""""""""""""""""""""""""""""
+" Visual mode pressing * or # searches for the current selection
+" Super useful! From an idea by Michael Naumann
+vnoremap <silent> * :<C-u>call VisualSelection('', '')<CR>/<C-R>=@/<CR><CR>
+vnoremap <silent> # :<C-u>call VisualSelection('', '')<CR>?<C-R>=@/<CR><CR>
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Moving around, tabs, windows and buffers
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Map <Space> to / (search) and Ctrl-<Space> to ? (backwards search)
+map <space> /
+map <C-space> ?
+
+" Disable highlight when <leader><cr> is pressed
+map <silent> <leader><cr> :noh<cr>
+
+" Smart way to move between windows
+map <C-j> <C-W>j
+map <C-k> <C-W>k
+map <C-h> <C-W>h
+map <C-l> <C-W>l
+
+" Close the current buffer
+map <leader>bd :Bclose<cr>:tabclose<cr>gT
+
+" Close all the buffers
+map <leader>ba :bufdo bd<cr>
+
+map <leader>l :bnext<cr>
+map <leader>h :bprevious<cr>
+
+" Useful mappings for managing tabs
+map <leader>tn :tabnew<cr>
+map <leader>to :tabonly<cr>
+map <leader>tc :tabclose<cr>
+map <leader>tm :tabmove
+map <leader>t<leader> :tabnext
+
+" Let 'tl' toggle between this and the last accessed tab
+let g:lasttab = 1
+nmap <Leader>tl :exe "tabn ".g:lasttab<CR>
+au TabLeave * let g:lasttab = tabpagenr()
+
+
+" Opens a new tab with the current buffer's path
+" Super useful when editing files in the same directory
+map <leader>te :tabedit <C-r>=expand("%:p:h")<cr>/
+
+" Switch CWD to the directory of the open buffer
+map <leader>cd :cd %:p:h<cr>:pwd<cr>
+
+" Specify the behavior when switching between buffers
+try
+  set switchbuf=useopen,usetab,newtab
+  set stal=2
+catch
+endtry
+
+" Return to last edit position when opening files (You want this!)
+au BufReadPost * if line("'\"") > 1 && line("'\"") <= line("$") | exe "normal! g'\"" | endif
+
+
+""""""""""""""""""""""""""""""
+" => Status line
+""""""""""""""""""""""""""""""
+" Always show the status line
+set laststatus=2
+
+" Format the status line
+set statusline=\ %{HasPaste()}%F%m%r%h\ %w\ \ CWD:\ %r%{getcwd()}%h\ \ \ Line:\ %l\ \ Column:\ %c
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Editing mappings
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Remap VIM 0 to first non-blank character
+map 0 ^
+
+" Move a line of text using ALT+[jk] or Command+[jk] on mac
+nmap <M-j> mz:m+<cr>`z
+nmap <M-k> mz:m-2<cr>`z
+vmap <M-j> :m'>+<cr>`<my`>mzgv`yo`z
+vmap <M-k> :m'<-2<cr>`>my`<mzgv`yo`z
+
+if has("mac") || has("macunix")
+  nmap <D-j> <M-j>
+  nmap <D-k> <M-k>
+  vmap <D-j> <M-j>
+  vmap <D-k> <M-k>
+endif
+
+" Delete trailing white space on save, useful for some filetypes ;)
+fun! CleanExtraSpaces()
+    let save_cursor = getpos(".")
+    let old_query = getreg('/')
+    silent! %s/\s\+$//e
+    call setpos('.', save_cursor)
+    call setreg('/', old_query)
+endfun
+
+if has("autocmd")
+    autocmd BufWritePre *.txt,*.js,*.py,*.wiki,*.sh,*.coffee :call CleanExtraSpaces()
+endif
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Spell checking
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Pressing ,ss will toggle and untoggle spell checking
+map <leader>ss :setlocal spell!<cr>
+
+" Shortcuts using <leader>
+map <leader>sn ]s
+map <leader>sp [s
+map <leader>sa zg
+map <leader>s? z=
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Misc
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Remove the Windows ^M - when the encodings gets messed up
+noremap <Leader>m mmHmt:%s/<C-V><cr>//ge<cr>'tzt'm
+
+" Quickly open a buffer for scribble
+map <leader>q :e ~/buffer<cr>
+
+" Quickly open a markdown buffer for scribble
+map <leader>x :e ~/buffer.md<cr>
+
+" Toggle paste mode on and off
+map <leader>pp :setlocal paste!<cr>
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" => Helper functions
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Returns true if paste mode is enabled
+function! HasPaste()
+    if &paste
+        return 'PASTE MODE  '
+    endif
+    return ''
+endfunction
+
+" Don't close window, when deleting a buffer
+command! Bclose call <SID>BufcloseCloseIt()
+function! <SID>BufcloseCloseIt()
+    let l:currentBufNum = bufnr("%")
+    let l:alternateBufNum = bufnr("#")
+
+    if buflisted(l:alternateBufNum)
+        buffer #
+    else
+        bnext
+    endif
+
+    if bufnr("%") == l:currentBufNum
+        new
+    endif
+
+    if buflisted(l:currentBufNum)
+        execute("bdelete! ".l:currentBufNum)
+    endif
+endfunction
+
+function! CmdLine(str)
+    call feedkeys(":" . a:str)
+endfunction
+
+function! VisualSelection(direction, extra_filter) range
+    let l:saved_reg = @"
+    execute "normal! vgvy"
+
+    let l:pattern = escape(@", "\\/.*'$^~[]")
+    let l:pattern = substitute(l:pattern, "\n$", "", "")
+
+    if a:direction == 'gv'
+        call CmdLine("Ack '" . l:pattern . "' " )
+    elseif a:direction == 'replace'
+        call CmdLine("%s" . '/'. l:pattern . '/')
+    endif
+
+    let @/ = l:pattern
+    let @" = l:saved_reg
+endfunction
+set t_ti= t_te=
+
+EOF
+;;
+
+
+dhcp.yml )
+cat > "$file_path" << EOF
+subnet $iprange24.0 netmask 255.255.255.0 {
+  range $iprange24.2 $iprange24.254;
+  option domain-name-servers 8.8.8.8, 8.8.4.4;
+  option routers $iprange24.1;
+  option subnet-mask 255.255.255.0;
+  option broadcast-address $iprange24.255;
+}
+EOF
+;;
+
+debian.network.restart.yml )
+cat > "$file_path" << 'EOF'
+#!/bin/bash
+
+# ë°±ì—… íŒŒì¼ë“¤ì„ ë°°ì—´ë¡œ ì €ì¥í•©ë‹ˆë‹¤.
+backup_files=("/etc/network/interfaces.backup" "/etc/network/interfaces.1.bak" "/etc/network/interfaces.2.bak" "/etc/network/interfaces.3.bak")
+
+# ë„¤íŠ¸ì›Œí¬ ì„œë¹„ìŠ¤ë¥¼ ì¬ì‹œì‘í•©ë‹ˆë‹¤.
+systemctl restart networking.service
+
+# ì™¸ë¶€ í˜¸ìŠ¤íŠ¸ë¡œ í•‘ì„ ë³´ëƒ…ë‹ˆë‹¤.
+ping -c 4 8.8.8.8 > /dev/null
+
+# í•‘ì˜ ê²°ê³¼ê°€ ì„±ê³µì ì´ë¼ë©´ ìŠ¤í¬ë¦½íŠ¸ë¥¼ ì¢…ë£Œí•©ë‹ˆë‹¤.
+if [ $? -eq 0 ]; then
+    echo "Network configuration is successful."
+    exit 0
+fi
+
+# í•‘ í…ŒìŠ¤íŠ¸ê°€ ì‹¤íŒ¨í•˜ë©´, í˜„ì¬ì˜ ë„¤íŠ¸ì›Œí¬ ì„¤ì •ì„ interfaces.err íŒŒì¼ë¡œ ë³µì‚¬í•©ë‹ˆë‹¤.
+echo "Initial configuration failed the ping test, copying to interfaces.err"
+cp /etc/network/interfaces /etc/network/interfaces.err
+
+# ê° ë°±ì—… íŒŒì¼ì— ëŒ€í•´ ë°˜ë³µí•©ë‹ˆë‹¤.
+for backup_file in "${backup_files[@]}"; do
+    # í•´ë‹¹ ë°±ì—… íŒŒì¼ì´ ì¡´ì¬í•˜ëŠ”ì§€ í™•ì¸í•©ë‹ˆë‹¤.
+    if [ ! -f $backup_file ]; then
+        echo "Backup file $backup_file does not exist."
+        continue  # ë‹¤ìŒ ë°±ì—… íŒŒì¼ë¡œ ë„˜ì–´ê°‘ë‹ˆë‹¤.
+    fi
+
+    # ì›ë˜ì˜ ë„¤íŠ¸ì›Œí¬ ì„¤ì •ìœ¼ë¡œ ë³µêµ¬í•©ë‹ˆë‹¤.
+    cp $backup_file /etc/network/interfaces
+
+    # ë„¤íŠ¸ì›Œí¬ ì„œë¹„ìŠ¤ë¥¼ ì¬ì‹œì‘í•©ë‹ˆë‹¤.
+    systemctl restart networking.service
+
+     # ì™¸ë¶€ í˜¸ìŠ¤íŠ¸ë¡œ í•‘ì„ ë³´ëƒ…ë‹ˆë‹¤.
+     ping -c 4 8.8.8.8 > /dev/null
+
+     # í•‘ì˜ ê²°ê³¼ë¥¼ í™•ì¸í•©ë‹ˆë‹¤.
+     if [ $? -eq 0 ]; then
+         echo "Network configuration from $backup_file is successful."
+         exit 0   # í•‘ í…ŒìŠ¤íŠ¸ê°€ ì„±ê³µí•˜ë©´ ìŠ¤í¬ë¦½íŠ¸ë¥¼ ì¢…ë£Œí•©ë‹ˆë‹¤.
+     else
+         echo "Ping test failed for configuration from $backup_file."
+     fi
+done
+
+echo "All configurations failed the ping test."
+exit 1   # ëª¨ë“  ì„¤ì •ì´ ì‹¤íŒ¨í•˜ë©´ ì—ëŸ¬ ì½”ë“œì™€ í•¨ê»˜ ìŠ¤í¬ë¦½íŠ¸ë¥¼ ì¢…ë£Œí•©ë‹ˆë‹¤.
+EOF
+;;
+
+cband.conf )
+cat > "$file_path" << EOF
+<IfModule mod_cband.c>
+
+        <Location /cband-status>
+                SetHandler cband-status
+        </Location>
+        <Location /throttle-status>
+                SetHandler cband-status
+        </Location>
+
+        <Location /throttle-me>
+                SetHandler cband-status-me
+        </Location>
+        <Location /~*/throttle-me>
+                SetHandler cband-status-me
+        </Location>
+
+        <Location ~ (/cband-status|/throttle-status|/server-status)>
+           Order deny,allow
+           Deny from all
+           Allow from localhost
+           Allow from $localip1/24
+           Allow from $guestip/24
+        </Location>
+
+</IfModule>
+
+EOF
+;;
+
 .yml )
 cat > "$file_path" << 'EOF'
 
@@ -2128,7 +2834,8 @@ esac
 
 
 
-# !! P e e k a b o o !! go !! 
+# !! P e e k a b o o !! go !!
+initvar=$1
 menufunc
 
 
