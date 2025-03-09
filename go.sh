@@ -87,7 +87,7 @@ process_commands() {
 		#[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(printf "%q" "${command#* }")"
 		#[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(echo "${command#* }"|sed -e 's/(/\\(/g' -e 's/)/\\)/g')"
         eval "$command"
-        echo "$command" >> $gotmp/go_history.txt ; chmod 600 $gotmp/go_history.txt
+        echo "$command" >> $gotmp/go_history.txt 2>/dev/null && chmod 600 $gotmp/go_history.txt 2>/dev/null || chown root.root $gotmp/go_history.txt 2>/dev/null
 		[ "${command%% *}" != "cd" ] && echo "=============================================="
         #echo "=============================================="
 		#eval "$command" > >( output=$(cat); [ -n "$output" ] && { echo "$output"; echo "=============================================="; } )
@@ -408,6 +408,8 @@ menufunc() {
 							[ "$( echo "${var_name%__*}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
 							printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%__*} Default:$dvar_value] \e[0m: "
 							readv var_value < /dev/tty
+                            # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
+                            eval flagof_${var_name%__*}=set
 
 						 # 기본값에 쓸수 없는 문자가 들어올경우 종료
 						 elif [[ $var_name == *__[a-zA-Z0-9./]* ]] ;then
@@ -416,14 +418,24 @@ menufunc() {
 						 # 변수 기본값이 없을때
 						 else
 							# $HOME/go.private.env 에 정의된 변수가 있을때
+                            # 이전에 동일한 이름 변수에 값이 할당된 적이 있을때
 							if [ "${!var_name}" ] || [ "${!var_name%__*}" ] ;then
 								 dvar_value="${!var_name}"
-								 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
-								 readv var_value < /dev/tty
+                                 # 이미 설정한 변수는 pass
+                                 #echo "set-> $(eval echo \${flagof_${var_name}})"
+                                 if [ "$(eval echo \${flagof_${var_name}})" == "set" ] ; then
+                                    var_value="$dvar_value"
+                                 else
+                                    printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
+								    readv var_value < /dev/tty
+                                    eval flagof_${var_name}=set
+                                 fi
+
 							else
 								[ "$( echo "${var_name}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
 								printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
 								readv var_value < /dev/tty
+                                eval flagof_${var_name}=set
 							fi
 						 fi
 						 echo
@@ -454,6 +466,8 @@ menufunc() {
 
 						done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++' )
                         # end of while
+
+
                         else # cfm -> n
                             # Danger item -> canceled
                             cmd="canceled"
@@ -471,6 +485,8 @@ menufunc() {
 					#[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read x
 					unset cancel
 
+                    # flagof 변수 초기화
+                    unset $(compgen -v | grep '^flagof_')
 
 
             fi
@@ -971,7 +987,8 @@ sleepdot(){ echo -n "sleepdot $1 "; bashver=${BASH_VERSINFO[0]}; (( bashver < 3 
 
 # backup & vi
 #vi2() { rbackup $1 ; [ -f $1 ] && { vim $1 || vi $1 ; } ; }
-vi2() { rbackup $1 ; { vim $1 || vi $1 ; } ; }
+#vi2() { rbackup $1 ; { vim $1 || vi $1 ; } ; }
+vi2() { rbackup "$1"; if [ -n "$2" ]; then vim "$1" -c "autocmd VimEnter * silent! | /$2"; else vim "$1" || vi "$1"; fi; }
 vi2e() { rbackup $1 ; vim -c "set fileencoding=euc-kr" $1 ; }
 vi2u() { rbackup $1 ; vim -c "set fileencoding=utf-8" $1 ; }
 #vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "/^%%% .*\[$2\]" $1 || vim $1  ; }
