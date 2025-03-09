@@ -405,6 +405,9 @@ menufunc() {
 						 if [[ $var_name == *__[a-zA-Z0-9.@-]* ]] ; then
 							#echo "var_name: $var_name"
 							dvar_value="${var_name##*__}" && dvar_value="${dvar_value//@@//}"
+                            # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
+                            [ "$dvar_value" == "datetag" ] && dvar_value=$(datetag) ; [ "$dvar_value" == "datetag2" ] && dvar_value=$(datetag2)
+                            [ "$dvar_value" == "adatetag" ] && dvar_value=at_$(datetag) ; [ "$dvar_value" == "adatetag2" ] && dvar_value=at_$(datetag2)
 							[ "$( echo "${var_name%__*}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
 							printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%__*} Default:$dvar_value] \e[0m: "
 							readv var_value < /dev/tty
