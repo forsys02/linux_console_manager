@@ -150,7 +150,7 @@ menufunc() {
         echo -e "* $title $flow"
         echo "=============================================="
 	    if [ ! "$title_of_menu_sub" ] ; then
-    	    echo "$( [ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null |awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null |sort -u) - $(hostname)"
+    	    echo -ne "$( [ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null |awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null |sort -u) - $(WHT1;hostname;RST)"
         	echo "=============================================="
 		else
 
@@ -1004,7 +1004,9 @@ weblog() { lynx --dump --width=260 http://localhost/server-status ; }
 utt() { if ! file -i "$1" | grep -qi utf-8 ; then rbackup $1 || cp -a $1 $1.bak ; iconv -f euc-kr -t utf-8//IGNORE "$1" > "$1.temp" && cat "$1.temp" > "$1" && rm -f "$1.temp" ; fi ; }
 
 # update
-update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m3 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m3 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile $scut ; }
+#update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m3 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m3 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile $scut ; }
+update() { rbackup "$gofile" "$envorg" ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut" ; }
+
 
 # install
 yyay() { [ "$(which yum)" ] && yum="yum" || yum="apt" ; while [ $# -gt 0 ]; do $yum install -y $1 ; shift; done; }
