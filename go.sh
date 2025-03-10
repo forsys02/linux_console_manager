@@ -22,8 +22,8 @@ if [ ! -f "$envorg" ] ; then
 	[ "$down" = "y" -o "$down" = "Y" ] && output_dir="$(cd "$(dirname "${0}")" ; pwd)" && ( command -v curl >/dev/null 2>&1 && curl -m1 http://byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://byus.net/go.env || exit 0 )
 fi
 
-# /bin/go softlink
-[ ! -L /bin/go ] && ln -s $base/go.sh /bin/go && echo -ne "$(ls -al /bin/go) \n>>> Soft link created for /bin/go. Press [Enter] " && read x < /dev/tty
+# /bin/gosh softlink
+[ ! -L /bin/go ] && [ ! -L /bin/gosh ] && ln -s $base/go.sh /bin/gosh && echo -ne "$(ls -al /bin/gosh) \n>>> Soft link created for /bin/gosh. Press [Enter] " && read x < /dev/tty
 
 # 개인 환경변수 파일 불러오기 // 스크립트가 돌동안 사용이 가능하며 // env 에서 확인 가능
 if [ -f $HOME/go.private.env ]; then
