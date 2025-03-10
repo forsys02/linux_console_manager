@@ -404,15 +404,25 @@ menufunc() {
 						 # 기본값이 있을때 파싱
 						 if [[ $var_name == *__[a-zA-Z0-9.@-]* ]] ; then
 							#echo "var_name: $var_name"
-							dvar_value="${var_name##*__}" && dvar_value="${dvar_value//@@//}"
+							dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@@/\/}"
+                            dvar_value_array=($(echo "$dvar_value"|awk -F'__' '{for(i=1;i<=NF;i++)print $i}'));
+
                             # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
                             [ "$dvar_value" == "datetag" ] && dvar_value=$(datetag) ; [ "$dvar_value" == "datetag2" ] && dvar_value=$(datetag2)
                             [ "$dvar_value" == "adatetag" ] && dvar_value=at_$(datetag) ; [ "$dvar_value" == "adatetag2" ] && dvar_value=at_$(datetag2)
-							[ "$( echo "${var_name%__*}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
-							printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%__*} Default:$dvar_value] \e[0m: "
-							readv var_value < /dev/tty
+
+                            # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
+                            if [ ${#dvar_value_array[@]} -gt 1 ] ;then
+                                { select dvar_value in "${dvar_value_array[@]}"; do reply=$REPLY ; break; done; } < /dev/tty
+                                dvar_value="${dvar_value_array[$((reply - 1))]}"
+                            # 기본값이 하나일때
+                            else
+			    				[ "$( echo "${var_name%%__*}" |grep -i path )" ] && GRN1 && echo "pwd: $(pwd)" && RST
+				    			printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
+					    		readv var_value < /dev/tty
+                            fi
                             # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
-                            eval flagof_${var_name%__*}=set
+                            eval flagof_${var_name%%__*}=set
 
 						 # 기본값에 쓸수 없는 문자가 들어올경우 종료
 						 elif [[ $var_name == *__[a-zA-Z0-9./]* ]] ;then
@@ -422,7 +432,7 @@ menufunc() {
 						 else
 							# $HOME/go.private.env 에 정의된 변수가 있을때
                             # 이전에 동일한 이름 변수에 값이 할당된 적이 있을때
-							if [ "${!var_name}" ] || [ "${!var_name%__*}" ] ;then
+							if [ "${!var_name}" ] || [ "${!var_name%%__*}" ] ;then
 								 dvar_value="${!var_name}"
                                  # 이미 설정한 변수는 pass
                                  #echo "set-> $(eval echo \${flagof_${var_name}})"
@@ -465,7 +475,7 @@ menufunc() {
 						 # 실행중 // 동일 이름 변수 재사용 export
 						 #[ "$var_value" ] && [[ $var_name != *__[a-zA-Z0-9.@-]* ]] && eval "export $var_name='${var_value}'"
 						 # 기본값이 주어진 변수도 재사용 export
-						 [ "$var_value" ] && eval "export ${var_name%__*}='${var_value}'"
+						 [ "$var_value" ] && eval "export ${var_name%%__*}='${var_value}'"
 
 						done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++' )
                         # end of while
@@ -637,7 +647,8 @@ ff() { declare -f $* ; }
 # colored ip (1 line multi ip apply)
 #cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=31+(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]==37){FC[IP]=36;}}TC++;}if(BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
 #cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
-cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' || awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
+cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null || \
+awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
 
 # 실시간 출력 tail -f 등에 즉각 반응
 cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g' ; }
@@ -686,7 +697,7 @@ cdiff() { local f1 f2 old new R Y N l ; f1="$1"; f2="$2"; [ "$f1" -nt "$f2" ] &&
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
 # cpipe -> courl && cip24 && cdir
-cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' || \
+cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' 2>/dev/null || \
           awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'  ; }
 #cpipe() { awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
 
@@ -942,9 +953,11 @@ for ((i=1; i<=10; i++)); do eval "awknr${i}() { awk 'NR >= '$i' '; }" ; done
 # 특정열이 없을경우 버그 나는것 수정
 for ((i=1; i<=10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print substr(\$0, index(\$0,\$$i))}' ; }" ; done
 
+# ssh handshake 과정중 오류로 접속이 안될때 ~/ssh/.config 에 설정후 재접속
+sshre() { output=$(ssh "$@" 2>&1); if [[ "$output" =~ "no matching host key type found" ]]; then algorithms=$(echo "$output" | grep -oP 'Their offer: \K.*?(?=\r|\n)' | sed 's/ /,/g'); printf "Host %s\n    HostKeyAlgorithms +%s\n" "$1" "$(echo "$algorithms" | tr ' ' ',')" | tee -a "$HOME/.ssh/config" >/dev/null; echo "HostKey config saved, reconnecting..."; ssh "$@"; elif [[ "$output" =~ "no matching key exchange method found" ]]; then algorithms=$(echo "$output" | grep -oP 'Their offer: \K.*?(?=\r|\n)' | sed 's/ /,/g'); printf "Host %s\n    KexAlgorithms +%s\n" "$1" "$(echo "$algorithms" | tr ' ' ',')" | tee -a "$HOME/.ssh/config" >/dev/null; echo "Kex config saved, reconnecting..."; ssh "$@"; else echo "$output"; fi; }
 
 
-
+# ssh auto connect
 idpw() { id="$1"; pw="$2"; host="${3:-$HOSTNAME}"; port="${4:-22}"; { expect -c "set timeout 3;log_user 0; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect -re \"password:\" { sleep 0.2 ; send \"$pw\r\" } -re \"key fingerprint\" { sleep 0.2 ; send \"yes\r\" ; expect -re \"password:\" ; sleep 0.2 ; send \"$pw\r\" }; expect \"*Last login*\" { exit 0 } \"*Welcome to *\" { exit 0 } timeout { exit 1 } eof { exit 1 };" ; } ; [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" ||echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"; }
 
 # assh id:pw@host:port  (pw 에 특수문자가 없는 경우에 한하여 이용)
@@ -1623,6 +1636,25 @@ services:
 
 EOF
 ;;
+nginx-proxy-manager.yml )
+cat > "$file_path" << 'EOF'
+version: '3.8'
+services:
+  app:
+    image: 'docker.io/jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+
+EOF
+;;
+
+
 
 
 npm.yml )
