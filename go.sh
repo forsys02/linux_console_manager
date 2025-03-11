@@ -5,10 +5,10 @@
 # 존재 하는 파일의 절대경로 출력 readlink -f
 #readlinkf() { local p="$1"; [ -L "$p" ] && p="$(dirname "$p")/$(readlink "$p")"; echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"; }
 readlinkf() { p="$1"; while [ -L "$p" ]; do lt="$(readlink "$p")"; if [[ $lt == /* ]]; then p="$lt"; else p="$(dirname "$p")/$lt"; fi; done; echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"; }
-realpathf() { while [ $# -gt 0 ]; do  echo $1 | sed -e 's/\/\.\//\//g' | awk -F'/' -v OFS="/" 'BEGIN{printf "/";}{top=1; for (i=2; i<=NF; i++) {if ($i == "..") {top--; delete stack[top];} else if ($i != "") {stack[top]=$i; top++;}} for (i=1; i<top; i++) {printf "%s", stack[i]; printf OFS;}}{print ""}' ; shift; done ; }
+realpathf() { while [ $# -gt 0 ]; do  echo "$1" | sed -e 's/\/\.\//\//g' | awk -F'/' -v OFS="/" 'BEGIN{printf "/";}{top=1; for (i=2; i<=NF; i++) {if ($i == "..") {top--; delete stack[top];} else if ($i != "") {stack[top]=$i; top++;}} for (i=1; i<top; i++) {printf "%s", stack[i]; printf OFS;}}{print ""}' ; shift; done ; }
 
-basefile="$( readlinkf $0 )"
-base="$( dirname $basefile )"
+basefile="$( readlinkf "$0" )"
+base="$( dirname "$basefile" )"
 
 gofile="$base/go.sh"
 envorg="$base/go.env"
@@ -16,30 +16,30 @@ envtmp="$base/.go.env"
 
 # go.env 환경파일이 없을경우 다운로드
 if [ ! -f "$envorg" ] ; then
-	echo "base: $base" ; chmod +x $gofile
-	echo -n ">>> go.env config file not found. Download? [y/n]: " && read down < /dev/tty
+	echo "base: $base" ; chmod +x "$gofile"
+	echo -n ">>> go.env config file not found. Download? [y/n]: " && read -r down < /dev/tty
 	#[ "$down" = "y" -o "$down" = "Y" ] && curl -m1 http://byus.net/go.env -o "$(cd "$(dirname "${0}")" ; echo $(pwd))"/go.env || exit 0
-	[ "$down" = "y" -o "$down" = "Y" ] && output_dir="$(cd "$(dirname "${0}")" ; pwd)" && ( command -v curl >/dev/null 2>&1 && curl -m1 http://byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://byus.net/go.env || exit 0 )
+	[ "$down" = "y" ] || [ "$down" = "Y" ] && output_dir="$(cd "$(dirname "${0}")" ; pwd)" && ( command -v curl >/dev/null 2>&1 && curl -m1 http://byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://byus.net/go.env || exit 0 )
 fi
 
 # /bin/gosh softlink
-[ ! -L /bin/go ] && [ ! -L /bin/gosh ] && ln -s $base/go.sh /bin/gosh && echo -ne "$(ls -al /bin/gosh) \n>>> Soft link created for /bin/gosh. Press [Enter] " && read x < /dev/tty
+[ ! -L /bin/go ] && [ ! -L /bin/gosh ] && ln -s "$base"/go.sh /bin/gosh && echo -ne "$(ls -al /bin/gosh) \n>>> Soft link created for /bin/gosh. Press [Enter] " && read -r x < /dev/tty
 
 # 개인 환경변수 파일 불러오기 // 스크립트가 돌동안 사용이 가능하며 // env 에서 확인 가능
-if [ -f $HOME/go.private.env ]; then
-	chmod 600 $HOME/go.private.env
+if [ -f "$HOME"/go.private.env ]; then
+	chmod 600 "$HOME"/go.private.env
     while IFS= read -r line; do
         if echo "$line" | grep -q -E '^[a-zA-Z_]+(=\"[^\"]*\"|=[^[:space:]]*)$'; then
             export "$line"
         fi
-    done < $HOME/go.private.env
+    done < "$HOME"/go.private.env
 fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
 if [ "$envko" ] ; then # 사용자 수동 설정 저장
-	[ "$envko" == "utf8" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
-	[ "$envko" == "euckr" ] && [ "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
-	[ "$envko" == "euckr" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
+	[ "$envko" == "utf8" ] && ! grep -q -i "utf" < "$envorg" && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	[ "$envko" == "euckr" ] && ! grep -q -i "utf" < "$envorg" && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
+	[ "$envko" == "euckr" ] && ! grep -q -i "utf" < "$envorg" && cp -a "$envorg" "$envtmp" ; sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp" ; env="$envtmp"
 else
 	if [ "$(echo $LANG|grep -i "utf" )" ] && [ ! "$(file $envorg|grep -i "utf")" ]  ; then
 		cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' > "$envtmp" ; env="$envtmp"
@@ -82,7 +82,7 @@ process_commands() {
 	#trap "echo ' Ctrl+C pressed; continuing with the script.';echo;exit 0" SIGINT
     local command="$1" ; local cfm=$2 ; local nodone=$3
 	[ "${command:0:1}" == "#" ] && return # 주석선택시 취소
-    if [ "$cfm" == "y" -o "$cfm" == "Y" -o ! "$cfm" ]; then
+    if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
 		[ "${command%% *}" != "cd" ] && echo && echo "=============================================="
 		#[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(printf "%q" "${command#* }")"
 		#[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(echo "${command#* }"|sed -e 's/(/\\(/g' -e 's/)/\\)/g')"
@@ -96,7 +96,7 @@ process_commands() {
 		echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
 		[ "$pipeitem" ] && echo "selected: $pipeitem"
 		if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then nodone=y && sleep 1 ; fi
-		[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read x ; }
+		[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -r x ; }
 	else
 		echo "Canceled..."
     fi   ; }
@@ -130,7 +130,7 @@ menufunc() {
     while true; do
 	clear || reset
 	# 서브메뉴 타이틀 변경
-	[ "$scut" ] && ooldcut=$oldcut && oldscut="$scut"
+	[ "$scut" ] && ooldscut=$oldscut && oldscut="$scut"
 	[ "$title_of_menu_sub" ] && { scut=$( echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}' ) ; title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m" ; } || { scut="" ;oldscut="" ; title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')" ; }
 	[ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow="" ; }
 
@@ -170,8 +170,7 @@ menufunc() {
 
 
 
-
-        local unset items ; menu_idx=0 ; shortcut_idx=0 ; unset keys ; declare -a keys ; unset idx_mapping ; declare -a idx_mapping
+        local items ; menu_idx=0 ; shortcut_idx=0 ; declare -a keys ; declare -a idx_mapping
 
 		# 메인 or 서브 메뉴 리스트 구성
         while read line; do
@@ -254,7 +253,7 @@ menufunc() {
 						pi="" ; if [ ${c_cmd:0:1} != "#" ]; then
 						    pi="${display_idx}."
 							# 배열 확장
-						    original_indices=("${original_indices[@]}" $i)
+						    original_indices=("${original_indices[@]}" "$i")
 						    display_idx=$((display_idx + 1))
 						fi
 
@@ -275,7 +274,7 @@ menufunc() {
 	    		    echo "=============================================="
 					#echo "original_indices -> ${original_indices}"
 					vx="" ; cmd_choice="" ; [ "$x" ] && [[ "$x" == [0-9] || "$x" == [1-9][0-9] ]] && vx=$x && x=""
-					[ "(tail -n1 $gotmp/go_history.txt | grep "vi2")" ] && [ "$vx" ] && echo "I won't discard the number you pressed." && sleep 0.5 && cmd_choice=$vx
+                    tail -n1 "$gotmp/go_history.txt" | grep -q "vi2" && [ "$vx" ] && echo "I won\'t discard the number you pressed." && sleep 0.5 && cmd_choice=$vx
 					[ ! "$vx" ] && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 ; } && vx=""
 
 					# 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
@@ -333,7 +332,7 @@ menufunc() {
 
 			# 선택한 줄번호의 타이틀 가져옴
 			[ ! "$choice" == 99 ] && 	title_of_menu="$( search_menulist | awk -v choice="$choice" 'NR==choice {print}' )"
-			#echo "$title_of_menu" && read x
+			#echo "$title_of_menu" && read -r x
 
 			# 선택한 줄번호의 타이틀에 맞는 리스트가져옴
 			listof_comm
@@ -363,7 +362,7 @@ menufunc() {
 				echo "error : num_commands->$num_commands" ; break
         	fi ### end of [ $num_commands -gt 1 ]
 
-			#echo "chosen_command:$chosen_command // title_of_menu:$title_of_menu" && read x
+			#echo "chosen_command:$chosen_command // title_of_menu:$title_of_menu" && read -r x
 
 
 
@@ -435,8 +434,7 @@ menufunc() {
 							if [ "${!var_name}" ] || [ "${!var_name%%__*}" ] ;then
 								 dvar_value="${!var_name}"
                                  # 이미 설정한 변수는 pass
-                                 #echo "set-> $(eval echo \${flagof_${var_name}})"
-                                 if [ "$(eval echo \${flagof_${var_name}})" == "set" ] ; then
+                                 if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ] ; then
                                     var_value="$dvar_value"
                                  else
                                     printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
@@ -495,7 +493,7 @@ menufunc() {
 						fi
 						(( count++ ))
 					done # end of for
-					#[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read x
+					#[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read -r x
 					unset cancel
 
                     # flagof 변수 초기화
@@ -830,7 +828,7 @@ readv() { bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && IFS="" read -rep $'
 bashcomm() {  echo;   local original_aliases=$(shopt -p expand_aliases);  shopt -s expand_aliases; source ~/.bashrc; unalias q 2> /dev/null ;  HISTFILE=$gotmp/go_history.txt; history -r "$HISTFILE"; while :; do      CYN;pwdv=$(pwd); echo "pwd: $([ -L $pwdv ] && ls -al $pwdv|awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)" ;RST; IFS="" read -rep 'BaSH_Command_[q] > ' cmd; if [[ "$cmd" == "q" || -z "$cmd" ]]; then eval "$original_aliases" && break; else { history -s "$cmd"; eval "process_commands \"$cmd\" y nodone"; history -a "$HISTFILE"; } fi; done; }
 
 # rbackup -> rollback
-rollback() { local d="$(dirname "$1")"; local base="$(basename "$1")"; local org="${base}.org.$(date +%Y%m%d)"; echo "$d / $base / $org" ;read x ; [ ! -f "$1" ] && { echo "오류: 파일 없음."; return 1; }; PS3="선택: "; select file in $(find "$d" -maxdepth 1 -name "${base}.[0-9]*.bak" -print0 | xargs -0 ls -lt | awk '{print $NF}' | head -n 5); do [ -n "$file" ] && { mv -n "$1" "$d/$org" && cp -f "$file" "$d/$base" && echo "복원됨: '$d/$base', 원래: '$d/$org'"; break; }; done;read x ; }
+rollback() { local d="$(dirname "$1")"; local base="$(basename "$1")"; local org="${base}.org.$(date +%Y%m%d)"; echo "$d / $base / $org" ;read -r x ; [ ! -f "$1" ] && { echo "오류: 파일 없음."; return 1; }; PS3="선택: "; select file in $(find "$d" -maxdepth 1 -name "${base}.[0-9]*.bak" -print0 | xargs -0 ls -lt | awk '{print $NF}' | head -n 5); do [ -n "$file" ] && { mv -n "$1" "$d/$org" && cp -f "$file" "$d/$base" && echo "복원됨: '$d/$base', 원래: '$d/$org'"; break; }; done;read -r x ; }
 
 # vi2 envorg && restart go.sh
 conf() { vi2a $envorg $scut ; [ -f /html/go.env ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env ; exec $gofile $scut; }
@@ -936,7 +934,7 @@ alarm() {
 
 # history view
 hh() { cat $gotmp/go_history.txt |grep -v "^eval "|lastseen|tail -10 |stripe; }
-gohistory() { echo ; echo "= go_history =================================" ; eval $( cat $gotmp/go_history.txt |grep -v "^eval "|lastseen|tail -n20| pipemenulistc|noansi );        echo && { echo -en "\033[1;34mDone...\033[0m [Enter] " && read x ; } ; }
+gohistory() { echo ; echo "= go_history =================================" ; eval $( cat $gotmp/go_history.txt |grep -v "^eval "|lastseen|tail -n20| pipemenulistc|noansi );        echo && { echo -en "\033[1;34mDone...\033[0m [Enter] " && read -r x ; } ; }
 
 # loadvar
 loadvar() { load=$(awk '{print $1}' /proc/loadavg 2>/dev/null); color="0"; int_load=${load%.*}; case 1 in $((int_load>=3)) ) color="1;33;41" ;; $((int_load==2)) ) color="1;31" ;; $((int_load==1)) ) color="1;35" ;; esac; echo -ne "\033[${color}m ${load} \033[0m " ; }
@@ -1060,11 +1058,12 @@ decrypt() {
 }
 
 # 중복 실행 방지 함수
-runlock() { local lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f $Lockfile ] && { P=$(cat $Lockfile); [ -n "$(ps --no-headers -f $P)" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > $Lockfile; trap 'rm -f "$Lockfile"' INT EXIT TERM; }
+runlock() { local lockfile_base; lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f "$Lockfile" ] && { P=$(cat "$Lockfile"); [ -n "$(ps --no-headers -f "$P")" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > "$Lockfile"; trap 'rm -f "$Lockfile"' INT EXIT TERM; }
 
 # runlock 함수를 스크립트 파일에 삽입하는 함수
 runlockadd() {
-  local f="$1" ;  local t="$(mktemp ${TMPDIR:=/tmp}/tmpfile_XXXXXX)"
+  local f="$1" ;  local t ; t="$(mktemp ${TMPDIR:=/tmp}/tmpfile_XXXXXX)"
+
   grep -q "runlock()" "$f" && { echo "runlock function already exists."; return ; }
   rbackup $f && sed -e '1a\runlock() { local lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f $Lockfile ] && { P=$(cat $Lockfile); [ -n "$(ps --no-headers -f $P)" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > $Lockfile; trap '\''rm -f "$Lockfile"'\'' INT TERM EXIT; }' -e '1a\runlock' "$f" > "$t" && { cat "$t" > "$f"; rm -f $t; diff ${f}.1 ${f}; ls -al ${f} ${f}.1; }; }
 
@@ -1078,13 +1077,13 @@ dfmonitor() { DF_INITIAL=$(df -m|grep -vE "udev|none|efi|fuse|tmpfs");DF_BEFORE=
 #explorer() { command -v ranger &> /dev/null && { ranger $1 ; } || { ~/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
 #explorer() { command -v ranger &> /dev/null && ranger "$1" || { explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }; }
 explorer() { command -v ranger &> /dev/null && { ranger "$1"; return; }; explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }
-exp() { explorer $* ; }
+exp() { explorer "$@" ; }
 
 pingcheck() { ping -c1 168.126.63.1 &> /dev/null && echo "y" || echo "n"; }
 pingtest() { echo; [ "$1" ] && ping -c3 $1 || ping -c3 168.126.63.1 ; }
 pingtesta() { echo; [ "$1" ] && ping $1 || ping 168.126.63.1 ; }
 pingtestg() { echo; ping -c3 $gateway ; }
-pp() { pingtest $* ; } ; ppa() { pingtesta $* ; } ; ppg() { pingtestg $* ; } ;
+pp() { pingtest "$@" ; } ; ppa() { pingtesta "$@" ; } ; ppg() { pingtestg "$@" ; } ;
 
 reconnect_down_veth_interfaces () {
     # 네트워크 재시작시 네트워크가 올라오지 않는 경우 발생
@@ -1175,13 +1174,13 @@ incremental_backup() {
   local backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
 
   # 조건에 따라 prefix를 설정합니다.
-  local prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {printf "/%s", $2}}}')
+  local prefix ; prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {printf "/%s", $2}}}')
 
-  cd "$prefix"
+  cd "$prefix" || return
   find "${backup_folder}/" -type f -newermt @$backup_timestamp > "$backup_dir/new_files.txt"
 
-  local base_backup="${backup_file%.*}"
-  local incremental_backup="${base_backup}_incremental_$(date +%Y-%m-%d-%H-%M-%S).tar.gz"
+  local base_backup ; base_backup="${backup_file%.*}"
+  local incremental_backup ; incremental_backup="${base_backup}_incremental_$(date +%Y-%m-%d-%H-%M-%S).tar.gz"
 
   tar -czvf "$incremental_backup" -C "$prefix" -T "$backup_dir/new_files.txt"
 
@@ -1191,19 +1190,19 @@ incremental_backup() {
 # 기존 백업 파일을 인수로 하여 업데이트된 파일만 추가로 백업 incremental backup
 # $1:backupfile.tgz [$2:path_prefix]
 ibackup() {
-  local backup_file="$1" ; local backup_filepath="$(readlinkf $1)" ; local custom_prefix="$2"
-  local backup_dir=$(dirname "$backup_file")
-  local backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
+  local backup_file ; backup_file="$1" ; local backup_filepath="$(readlinkf $1)" ; local custom_prefix="$2"
+  local backup_dir ; backup_dir=$(dirname "$backup_file")
+  local backup_folder ; backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
   # local backup_timestamp=$(date -r "$backup_file" '+%Y-%m-%d %H:%M:%S')
   # var/lib/mysql/ or account/ or root/ .. account 는 prefix 가 필요함
 
   # 압축파일이 경로형태면 /, 압축파일이 폴더하나면 $custom_prefix,
-  local prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {print "/" }}}')
+  local prefix ; prefix=$(echo "${backup_folder}" | awk -v prefix="$custom_prefix" -F/ '{if (NF > 2) {print "/"} else {if (length(prefix) > 0) {print prefix} else {print "/" }}}')
 
   echo "prefix $prefix backup_folder $backup_folder "
 
   if [ -d "${prefix}${backup_folder}" ] ; then
-    cd "$prefix"
+    cd "$prefix" || return
     find "${prefix}${backup_folder}" -type f -newer "$backup_filepath" > "$backup_dir/new_files.txt"
     tar -czvf "${backup_file}.update.$(date +%Y%m%d.%H%M%S).tgz" -C "$backup_dir" -T "$backup_dir/new_files.txt"
   fi
@@ -1299,7 +1298,7 @@ done
 
 template_copy() {
 local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
-local file_dir=$(dirname "$file_path") ; [ ! -d "$file_dir" ] && mkdir -p "$file_dir"
+local file_dir ; file_dir=$(dirname "$file_path") ; [ ! -d "$file_dir" ] && mkdir -p "$file_dir"
 
 case $template in
 
