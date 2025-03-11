@@ -2,7 +2,6 @@
 # bash2 하위 호환성 유지 (redhat7/oops1)
 
 # 존재 하는 파일의 절대경로 출력 readlink -f
-#readlinkf() { local p="$1"; [ -L "$p" ] && p="$(dirname "$p")/$(readlink "$p")"; echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"; }
 readlinkf() {
     p="$1"
     while [ -L "$p" ]; do
@@ -28,7 +27,6 @@ if [ ! -f "$envorg" ]; then
     echo "base: $base"
     chmod +x "$gofile"
     echo -n ">>> go.env config file not found. Download? [y/n]: " && read -r down </dev/tty
-    #[ "$down" = "y" -o "$down" = "Y" ] && curl -m1 http://byus.net/go.env -o "$(cd "$(dirname "${0}")" ; echo $(pwd))"/go.env || exit 0
     [ "$down" = "y" ] || [ "$down" = "Y" ] && output_dir="$(
         cd "$(dirname "${0}")"
         pwd
@@ -100,23 +98,15 @@ export "gateway"
 
 # 명령이 넘어오면 실행하는 함수
 process_commands() {
-    #trap 'sleep 0.5 ; echo "Abortd. Go CMDs.... ";cmds||exec $gofile' SIGINT
-    #trap 'echo "go [Enter] if you want...";exit 1' SIGINT
-    #trap "echo ' Ctrl+C pressed; continuing with the script.';echo;exit 0" SIGINT
     local command="$1"
     local cfm=$2
     local nodone=$3
     [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
-        #[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(printf "%q" "${command#* }")"
-        #[ "$(echo $command|awk1|grep -E "alarm" )" ] && command="${command%% *} $(echo "${command#* }"|sed -e 's/(/\\(/g' -e 's/)/\\)/g')"
         eval "$command"
         echo "$command" >>$gotmp/go_history.txt 2>/dev/null && chmod 600 $gotmp/go_history.txt 2>/dev/null || chown root.root $gotmp/go_history.txt 2>/dev/null
         [ "${command%% *}" != "cd" ] && echo "=============================================="
-        #echo "=============================================="
-        #eval "$command" > >( output=$(cat); [ -n "$output" ] && { echo "$output"; echo "=============================================="; } )
-        #echo "$command" >> $gotmp/go_history.txt ; chmod 600 $gotmp/go_history.txt
         unset var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
@@ -140,7 +130,6 @@ search_menulist() {
 
 # 메인 서비스 함수
 menufunc() {
-    #trap 'echo "Exitting menu...";exit 1' SIGINT
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     local chosen_command_sub=$1
     local title_of_menu_sub=$2
@@ -190,13 +179,7 @@ menufunc() {
         else
 
             # pre_commands 검출및 실행 (submenu 일때만)
-            #listof_comm_submain() {
-            #IFS=$'\n' allof_chosen_commands="$( cat "$env" | awk -v title_of_menu="%%% ${title_of_menu_sub}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag'  )"
-            #IFS=$'\n' pre_commands=( $(echo "${allof_chosen_commands}" | grep "^%% ") )
-            #}
-
             # listof_comm_submain
-
             # pre excute
             for items in "${pre_commands[@]}"; do
                 eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
@@ -241,12 +224,9 @@ menufunc() {
 
         if [ "$initvar" ]; then
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
-            # echo "$initvar"
             choice=$initvar && initvar=""
         else
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
-            #        printf ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): "
-            #        read choice
         fi
 
         #shortcut 이 중복되더라도 첫번째 키만 가져옴
@@ -257,7 +237,6 @@ menufunc() {
 
         # 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
         choice_list() {
-            #trap 'echo "Exitting menu...";exit 1' SIGINT
             echo
             oldscut="$scut" && scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}')
             [ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow=""; }
@@ -299,10 +278,8 @@ menufunc() {
                 processed_paths=""
                 for file_path in $file_paths; do
                     if ! echo "$processed_paths" | grep -q -F "$file_path"; then
-                        #[ "$file_path" ] && echo "file_path: $file_path"
                         [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
                         c_cmd="${c_cmd//$file_path/${file_marker}${file_path}${file_marker}}"
-                        #echo "c_cmd: $c_cmd"
                         processed_paths="${processed_paths}${file_path}"$'\n'
                     fi
                 done
@@ -332,7 +309,6 @@ menufunc() {
             done
 
             echo "=============================================="
-            #echo "original_indices -> ${original_indices}"
             vx=""
             cmd_choice=""
             [ "$x" ] && [[ $x == [0-9] || $x == [1-9][0-9] ]] && vx=$x && x=""
@@ -340,10 +316,7 @@ menufunc() {
             [ ! "$vx" ] && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; } && vx=""
 
             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
-            # [ ! "$cmd_choice" ] && choice_list $title_of_menu ${#chosen_commands[@]}
-            #[ ! "$cmd_choice" ] && bashcomm && cmds
             [ "$cmd_choice" ] && [[ $cmd_choice == [0-9] || $cmd_choice == [1-9][0-9] ]] && [ "$cmd_choice" -gt 0 ] && cmd_choice=${original_indices[$((cmd_choice - 1))]}
-            #echo "cmd_choice -> $cmd_choice" && readx
         } # end of choice_list()
 
         # 환경파일에서 명령문들 가져오는 함수
@@ -351,12 +324,9 @@ menufunc() {
         listof_comm() {
             # 선택한 메뉴가 서브메뉴인경우 ${chosen_command_sub}가 포함된 리스트 수집
             sub_menu="${chosen_command_sub-}"
-            #echo "sub_menu: $sub_menu" ; sleep 3 ; bell
             IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
-            #echo "title_of_menu: $title_of_menu" ; sleep 3 ; bell
             IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
             IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
-            #echo "${pre_commands}" ; sleep 3  ;bell
         }
 
         # 서브메뉴에 숨어있는 shortcut 호출이 있을때
@@ -366,7 +336,6 @@ menufunc() {
             for item in "${subkey[@]}"; do
                 # echo $item
                 if [ "$choice" == "${item%%|||*}" ]; then
-                    #chosen_command="$(echo $item| awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}' )"
                     chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
                     title_of_menu="${item#*\}}"
                     title_of_menu_sub="${item#*\}}"
@@ -374,15 +343,12 @@ menufunc() {
                     choice=99
                 fi
             done
-            #echo "$chosen_command ${title_of_menu_sub}" && sleep 3
         fi
 
         # 메인/서브 메뉴에서 정상 범위의 숫자가 입력된경우
-        #		if [ "$choice" ] && [[ "$choice" == [0-9] || "$choice" == [1-9][0-9] ]] && ( [ "$choice" -ge 1 -a "$choice" -le "$menu_idx" ] || [ "$choice" == 99 ] ) ; then
         if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
             # 선택한 줄번호의 타이틀 가져옴
             [ ! "$choice" == 99 ] && title_of_menu="$(search_menulist | awk -v choice="$choice" 'NR==choice {print}')"
-            #echo "$title_of_menu" && read -r x
 
             # 선택한 줄번호의 타이틀에 맞는 리스트가져옴
             listof_comm
@@ -399,7 +365,6 @@ menufunc() {
                         # 환경파일에서 가져온 명령문 출력 && read cmd_choice
                         choice_list
 
-                        #if [ "$cmd_choice" ] && [[ "$cmd_choice" == [0-9] || "$cmd_choice" == [1-9][0-9] ]] && [ "$cmd_choice" -ge 1 -a "$cmd_choice" -le $num_commands ]; then
                         if [ -n "$cmd_choice" ] && { case "$cmd_choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && [ "$cmd_choice" -ge 1 ] && [ "$cmd_choice" -le "$num_commands" ]; then
                             chosen_command=${chosen_commands[$((cmd_choice - 1))]}
                         fi
@@ -410,7 +375,6 @@ menufunc() {
                         break
                     fi ### end of [ $num_commands -gt 1 ]
 
-                    #echo "chosen_command:$chosen_command // title_of_menu:$title_of_menu" && read -r x
 
                     if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
                         menufunc $chosen_command ${title_of_menu}
@@ -423,7 +387,6 @@ menufunc() {
                             echo
                             printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
                         else
-                            # echo -e "--> \x1b[1;36;40m$chosen_command\x1b[0m"
                             echo
                             cfm=y
                         fi
@@ -440,7 +403,6 @@ menufunc() {
                             echo -e "--> \x1b[1;36;40m$cmd\x1b[0m"
 
                             # 동일한 var 는 제외하고 read // awk '!seen[$0]++'
-                            # echo "$(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++' )"
 
                             if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
 
@@ -451,7 +413,6 @@ menufunc() {
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
-                                        #echo "var_name: $var_name"
                                         dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@@/\/}"
                                         dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
 
@@ -506,7 +467,6 @@ menufunc() {
                                     echo
                                     # 변수에 read 수신값 할당
                                     if [ ! "$var_value" ] && [ "$dvar_value" ]; then
-                                        #echo "input type a"
                                         # 변수의 기본값을 지정 (varABC__22) 기본값은 숫자와영문자만 가능
                                         if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
                                             var_value="$dvar_value"
@@ -514,17 +474,13 @@ menufunc() {
                                             var_value="$dvar_value"
                                         fi
                                     elif [ -z "$var_value" ]; then
-                                        #echo "input type b null"
                                         { cancel=yes && echo "Canceled..." && break; }
                                     elif [ "$var_value" == "c" ] || [ "$var_value" == "q" ] || [ "$var_value" == "." ]; then
-                                        #echo "input type c cancel"
                                         { cancel=yes && echo "Canceled..." && break; }
                                     fi
                                     cmd=${cmd//$var_name/$var_value}
-                                    #echo "var_name: $var_name // var_value: ->$var_value<-"
 
                                     # 실행중 // 동일 이름 변수 재사용 export
-                                    #[ "$var_value" ] && [[ $var_name != *__[a-zA-Z0-9.@-]* ]] && eval "export $var_name='${var_value}'"
                                     # 기본값이 주어진 변수도 재사용 export
                                     [ "$var_value" ] && eval "export ${var_name%%__*}='${var_value}'"
 
@@ -545,7 +501,6 @@ menufunc() {
                             fi
                             ((count++))
                         done # end of for
-                        #[ ! "$cancel" == "yes" ] && [ "$cmd_choice" != "0" ] && echo && echo -en "\033[1;34mDone...\033[0m [Enter] " && read -r x
                         unset cancel
 
                         # flagof 변수 초기화
@@ -706,7 +661,6 @@ ff() { declare -f "$@"; }
 
 # colored ip (1 line multi ip apply)
 #cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=31+(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]==37){FC[IP]=36;}}TC++;}if(BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
-#cip() { awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' ;}
 cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null ||
     awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}'; }
 
@@ -724,7 +678,6 @@ cip24() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
 cip16() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
 
 # 검색문자열들 색칠(red)
-#cgrep() { pattern=$(echo "$*" | sed 's/ /|/g'); awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}' ; }
 cgrep() {
     for word in "$@"; do awk_cmd="${awk_cmd}{gsub(/$word/, \"\033[1;31m&\033[0m\")}"; done
     awk "${awk_cmd}{print}"
@@ -1022,7 +975,6 @@ eip4() { eipf 4; }
 eip5() { eipf 5; }
 
 # proxmox vmslist
-#vmslist() { pvesh get /cluster/resources -type vm 2>/dev/null| grep -E "qemu|lxc" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9a-zA-Z]+/) printf ("%s ", $i); print ""}' |awk '{print $1,$13,$15}'|awk '{if($2=="") print $1,"cluster down"; else print $0}' ; }
 #vmslist() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$13,$15}' |awk '{if($2=="") print $1,"cluster down"; else print $0}' ; }
 vmslist() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
 vmslistview() {
@@ -1030,8 +982,6 @@ vmslistview() {
     vmslistcount=$(echo "$output" | wc -l)
     ((vmslistcount > 10)) && echo "$output" | s3cols || echo "$output" | s2cols
 }
-# 변수 재사용 (5초 이내)
-#vmslistview() { [ -z "$vmslistoutput" ] || (( $(date +%s) - ${vmslistoutput:0:10} >= 5 )) && export vmslistoutput="$(date +%s)$(vmslist)"; output_value=${vmslistoutput:10}; vmslistcount=$(echo "$output_value" | wc -l); (( $vmslistcount > 10 )) && echo "$output_value" | s3cols || echo "$output_value" | s2cols ;}
 
 # 긴줄을 2열로 13 24 36...
 s2cols() {
@@ -1064,7 +1014,6 @@ seen() { awk '!seen[$0]++'; }
 # not sort && uniq && lastseen print
 lastseen() { awk '{ records[$0] = NR } END { for (record in records) { sorted[records[record]] = record } for (i = 1; i <= NR; i++) { if (sorted[i]) { print sorted[i] } } }'; }
 
-#readv() { bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep $'\n>>> : ' $1 ; }
 readv() {
     bashver=${BASH_VERSINFO[0]}
     ((bashver < 3)) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep '' $1
@@ -1137,8 +1086,6 @@ bell() { echo -ne "\a"; }
 push() {
     local message
     message="$@"
-    #[ ! "$message" ] && message="$(timeout 0.1 cat)" 2>/dev/null # timeout 명령어 유무 제외
-    #[ ! "$message" ] && message="$(cat)" 2>/dev/null # timeout 불가하여 제외
     [ ! "$message" ] && IFS='' read -d '' -t1 message
     # 인수도 파이프값도 없을때 기본값 hostname 으로 지정
     [ ! "$message" ] && message="$HOSTNAME"
@@ -1282,10 +1229,8 @@ for ((i = 1; i <= 10; i++)); do eval "awk${i}() { awk '{print \$$i}'; }"; done
 awk99() { awk '{print $NF}'; }
 awk98() { awk '(NF>1){print $(NF-1)}'; }
 # awk NR pass awknr2 -> 2행부터 끝까지 출력
-#for ((i=1; i<=10; i++)); do eval "awknr${i}() { awk 'NR > $(( $i -1 )) '; }" ; done
 for ((i = 1; i <= 10; i++)); do eval "awknr${i}() { awk 'NR >= '$i' '; }"; done
 # awk NF pass awknf8 -> 8열부터 끝까지 출력
-#for ((i=1; i<=10; i++)); do eval "awknf${i}() { awk '{print substr(\$0, index(\$0,\$$i))}' ; }" ; done
 # 특정열이 없을경우 버그 나는것 수정
 for ((i = 1; i <= 10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print substr(\$0, index(\$0,\$$i))}' ; }"; done
 
@@ -1317,7 +1262,6 @@ idpw() {
 
 # assh id:pw@host:port  (pw 에 특수문자가 없는 경우에 한하여 이용)
 # assh id pw host port  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
-#assh() { local input="$1"; if [[ $input == *":"* ]] && [[ $input == *"@"* ]]; then IFS='@:' read -r id pw host port < <(echo "$input"); else IFS=' ' read -r id pw host port < <(echo "$*"); fi; local port="${port:-22}"; echo "id:$id pw:$pw host:$host port:$port" ; expect -c "set timeout 3; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect \"password:\" { sleep 0.2; send [exec echo \"$pw\"]\r } \"key fingerprint\" { sleep 0.2; send \"yes\r\"; expect \"password:\"; sleep 0.2; send [exec echo \"$pw\"]\r }; interact"; }
 assh() {
     local input="$1"
     local id pw host port
@@ -1378,7 +1322,6 @@ ncpzip() {
 }
 
 # ncpzip 이후 업데이트된 파일이 있을때 업데이트
-#ncpzipupdate() { local h r l p i dir b uf ts fn; h=$(get_input "$1"); r=$(get_input "$2"); l=$(get_input "$3"); p=$( [[ ! -z "$4" ]] && echo "-p $4" || echo "" ); i=$(basename "$r"); b="${l}/${h}.${i}"; ts=$(date +%Y%m%d.%H%M%S); if [ -f "${b}.tar.zst" ]; then last_modified=$(date -r "${b}.tar.zst" +%s); elif [ -f "${b}.tgz" ]; then last_modified=$(date -r "${b}.tgz" +%s); else echo "No backup files found for $i."; return; fi; uf=$(ssh $p $h "find $r -type f -newermt @${last_modified}"); if [ "$uf" ]; then echo "$i updating..."; fn="${b}.update.${ts}.txt"; echo "$uf" > "$fn"; if [ -f "${b}.tar.zst" ]; then ssh $p $h "tar -cf - -T /dev/stdin" < "$fn" | zstd | (pv 2>/dev/null|| cat) > "${b}.update.${ts}.tar.zst"; elif [ -f "${b}.tgz" ]; then ssh $p $h "tar -czf - -T /dev/stdin" < "$fn" | (pv 2>/dev/null|| cat) > "${b}.update.${ts}.tgz"; fi; else echo "$i skipped..."; fi; }
 ncpzipupdate() {
     local h r l p i dir b uf ts fn
     h=$(get_input "$1")
@@ -1469,7 +1412,6 @@ unsetvar varl
 readx() { read -p "[Enter] " x </dev/tty; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
-#sleepdot(){ echo -n "sleepdot $1 " ; bashver=${BASH_VERSINFO[0]} ; (( bashver < 3 )) && real1sec=1 || real1sec=0.01  ; c=1; [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "; while [ -z "$x" ]; do sleep 1; echo -n "."; [ $((c%5)) -eq 0 ] && echo -n " "; [ $((c % 30)) -eq 0 ] && echo $c ; [ $((c%300)) -eq 0 ] && echo ;  c=$((c+1)); [ "$1" ] && [ $c -gt $1 ] && break; [ -z "$1" ] && IFS=z read -t$real1sec -n1 x; done; echo; }
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
 sleepdot() {
     echo -n "sleepdot $1 "
@@ -1492,11 +1434,9 @@ sleepdot() {
 }
 
 # backup & vi
-#vi2() { rbackup $1 ; [ -f $1 ] && { vim $1 || vi $1 ; } ; }
-#vi2() { rbackup $1 ; { vim $1 || vi $1 ; } ; }
 vi2() {
     rbackup "$1"
-    if [ -n "$2" ]; then vim "$1" -c "autocmd VimEnter * silent! | /$2"; else vim "$1" || vi "$1"; fi
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
 }
 vi2e() {
     rbackup $1
@@ -1506,15 +1446,13 @@ vi2u() {
     rbackup $1
     vim -c "set fileencoding=utf-8" $1
 }
-#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; } ; [ "$2" ] && vim -c "/^%%% .*\[$2\]" $1 || vim $1  ; }
 vi2a() {
     rbackup $1 && [ ! "$(file -i $1 | grep "utf")" ] && {
         iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null
         mv $1.utf8 $1
     }
-    [ "$2" ] && vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" $1 || vim $1
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
 }
-#vi2a() { rbackup $1 && [ ! "$(file -i $1 |grep "utf" )" ] && { iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null ; mv $1.utf8 $1 ; vim $1 ; } || vim $1  ; }
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status; }
 
@@ -1525,7 +1463,6 @@ utt() { if ! file -i "$1" | grep -qi utf-8; then
 fi; }
 
 # update
-#update() { rbackup $gofile $envorg ; echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && curl -m3 http://byus.net/go.sh -o $gofile && chmod 700 $gofile && [ -f "$envorg" ] && curl -m3 http://byus.net/go.env -o $envorg && chmod 600 $envorg && exec $gofile $scut ; }
 update() {
     rbackup "$gofile" "$envorg"
     echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
@@ -1653,7 +1590,6 @@ decrypt() {
     [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" #echo "k: $k";
     IFS='' read -d '' -t1 encrypted_message
     [ "$2" ] && encrypted_message="$encrypted_message $(echo "${*:1:$(($# - 1))}")"
-    #echo "enc_msg: $encrypted_message";
     echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null
 }
 
@@ -1692,7 +1628,6 @@ runlockadd() {
 }
 
 # 카피나 압축등 df -m  에 변동이 있을경우 모니터링용
-#dfmonitor() { DF_BEFORE=$(df -m|grep -vE "tmpfs"); while true; do clear; echo -e "System Uptime:\n--------------"; uptime; echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"; ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep ; echo -e "\033[0m\n\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n\n"; DF_AFTER=$(df -m|grep -vE "tmpfs"); DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER")); echo -e "New df -m output with changes highlighted:\n------------------------------------------"; echo "${DF_AFTER}" | while IFS= read -r line; do if [[ "${DIFF}" == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done; echo -e "\033[0m"; DF_BEFORE=$DF_AFTER; echo -n ">>> Quit -> [Anykey] " ; for i in $(seq 1 4); do read -p"." -t1 -n1 x && break ; done; [ "$x" ] && break ; echo; done; }
 
 dfmonitor() {
     DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs")
@@ -1719,9 +1654,6 @@ dfmonitor() {
 }
 
 # explorer.sh
-#explorer() { $base/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o $base/explorer.sh && chmod 755 $base/explorer.sh && $base/explorer.sh $1 ) ; }
-#explorer() { command -v ranger &> /dev/null && { ranger $1 ; } || { ~/explorer.sh $1 || ( curl -m1 http://byus.net/explorer.sh -o ~/explorer.sh && chmod 755 ~/explorer.sh && ~/explorer.sh $1 ); }; }
-#explorer() { command -v ranger &> /dev/null && ranger "$1" || { explorer="$HOME/explorer.sh"; [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }; }; }
 explorer() {
     command -v ranger &>/dev/null && {
         ranger "$1"
@@ -1867,7 +1799,6 @@ ibackup() {
     backup_dir=$(dirname "$backup_file")
     local backup_folder
     backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
-    # local backup_timestamp=$(date -r "$backup_file" '+%Y-%m-%d %H:%M:%S')
     # var/lib/mysql/ or account/ or root/ .. account 는 prefix 가 필요함
 
     # 압축파일이 경로형태면 /, 압축파일이 폴더하나면 $custom_prefix,
