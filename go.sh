@@ -424,10 +424,10 @@ menufunc() {
 
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
-                                            { select dvar_value in "${dvar_value_array[@]}"; do
+                                            { ps3=$PS3 ; PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): " ; select dvar_value in "${dvar_value_array[@]}"; do
                                                 reply=$REPLY
                                                 break
-                                            done; } </dev/tty
+                                            done;PS3=ps3 ; } </dev/tty
                                             dvar_value="${dvar_value_array[$((reply - 1))]}"
                                         # 기본값이 하나일때
                                         else
