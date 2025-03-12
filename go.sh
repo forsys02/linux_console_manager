@@ -48,7 +48,7 @@ if [ -f "$HOME"/go.private.env ]; then
 fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
-if [ "$envko" ]; then # 사용자 수동 설정 저장
+if [ "$envko" ]; then # 사용자 수동 설정 [ko] 선택
     [ "$envko" == "utf8" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
     [ "$envko" == "euckr" ] && [ "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
@@ -57,9 +57,11 @@ if [ "$envko" ]; then # 사용자 수동 설정 저장
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
 else
+    # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
     if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file $envorg | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
         env="$envtmp"
+    # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
     elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file $envorg | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
         env="$envtmp"
@@ -69,7 +71,9 @@ else
         env="$envtmp"
     fi
 fi
+
 # not kr
+# english menu tilte set
 if (($(locale | grep -ci "kr") == 0)); then
     sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' $envtmp
 else
@@ -77,8 +81,9 @@ else
 fi
 
 # tmp 폴더 set
-if touch /tmp/go_history.txt; then
+if touch /tmp/go_history.txt 2>/dev/null ; then
     gotmp="/tmp"
+    chmod 600 /tmp/go_history.txt
 else
     gotmp="$HOME/tmp"
     mkdir -p $gotmp
@@ -425,16 +430,20 @@ menufunc() {
 
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
+                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
                                             { ps3=$PS3 ; PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): " ; select dvar_value in "${dvar_value_array[@]}"; do
                                                 reply=$REPLY
                                                 break
                                             done;PS3=ps3 ; } </dev/tty
+                                            trap - INT
                                             dvar_value="${dvar_value_array[$((reply - 1))]}"
                                         # 기본값이 하나일때
                                         else
+                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
+                                            trap - INT
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
                                         eval flagof_${var_name%%__*}=set
@@ -453,15 +462,19 @@ menufunc() {
                                             if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
                                             else
+                                                trap 'stty sane ; exec "$gofile" "$scut"' INT
                                                 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
+                                                trap - INT
                                                 eval flagof_${var_name}=set
                                             fi
 
                                         else
+                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
+                                            trap - INT
                                             eval flagof_${var_name}=set
                                         fi
                                     fi
