@@ -110,7 +110,12 @@ process_commands() {
     [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
-        eval "$command"
+            if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f'; then
+                # 탈출코드가 ctrlc 만 가능한 경우
+                ( trap 'stty sane' SIGINT ; eval "$command" ) ; trap - SIGINT
+            else
+              eval "$command"
+            fi
         echo "$command" >>$gotmp/go_history.txt 2>/dev/null && chmod 600 $gotmp/go_history.txt 2>/dev/null || chown root.root $gotmp/go_history.txt 2>/dev/null
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
@@ -446,7 +451,7 @@ menufunc() {
                                             trap - INT
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
-                                        eval flagof_${var_name%%__*}=set
+                                        eval flagof_"${var_name%%__*}"=set
 
                                     # 기본값에 쓸수 없는 문자가 들어올경우 종료
                                     elif [[ $var_name == *__[a-zA-Z0-9./]* ]]; then
@@ -466,7 +471,7 @@ menufunc() {
                                                 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
                                                 trap - INT
-                                                eval flagof_${var_name}=set
+                                                eval flagof_"${var_name}"=set
                                             fi
 
                                         else
@@ -475,7 +480,7 @@ menufunc() {
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
-                                            eval flagof_${var_name}=set
+                                            eval flagof_"${var_name}"=set
                                         fi
                                     fi
                                     echo
