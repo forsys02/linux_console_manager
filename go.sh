@@ -37,6 +37,7 @@ fi
 [ ! -L /bin/go ] && [ ! -L /bin/gosh ] && ln -s "$base"/go.sh /bin/gosh && echo -ne "$(ls -al /bin/gosh) \n>>> Soft link created for /bin/gosh. Press [Enter] " && read -r x </dev/tty
 
 # 개인 환경변수 파일 불러오기 // 스크립트가 돌동안 사용이 가능하며 // env 에서 확인 가능
+# ex) mydomain=ismee.net
 if [ -f "$HOME"/go.private.env ]; then
     chmod 600 "$HOME"/go.private.env
     while IFS= read -r line; do
@@ -48,11 +49,11 @@ fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
 if [ "$envko" ]; then # 사용자 수동 설정 저장
-    [ "$envko" == "utf8" ] && ! grep -q -i "utf" <"$envorg" && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "utf8" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && ! grep -q -i "utf" <"$envorg" && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "euckr" ] && [ "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && ! grep -q -i "utf" <"$envorg" && cp -a "$envorg" "$envtmp"
+    [ "$envko" == "euckr" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
 else
@@ -1066,12 +1067,12 @@ rollback() {
 # vi2 envorg && restart go.sh
 conf() {
     vi2 $envorg $scut
-    [ -f /html/go.env ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env
+    [ -f /html/go.env 2>/dev/null ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env
     exec $gofile $scut
 }
 conff() {
     vi2 $gofile
-    [ -f /html/go.sh ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh
+    [ -f /html/go.sh 2>/dev/null ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh
     exec $gofile $scut
 }
 confc() { rollback $envorg; }
