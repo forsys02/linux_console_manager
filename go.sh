@@ -49,11 +49,11 @@ fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
 if [ "$envko" ]; then # 사용자 수동 설정 [ko] 선택
-    [ "$envko" == "utf8" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "utf8" ] && [ ! "$(file $envorg | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && [ "$(file $envorg|grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "euckr" ] && [ "$(file $envorg | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && [ ! "$(file $envorg|grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    [ "$envko" == "euckr" ] && [ ! "$(file $envorg | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
 else
@@ -81,7 +81,7 @@ else
 fi
 
 # tmp 폴더 set
-if touch /tmp/go_history.txt 2>/dev/null ; then
+if touch /tmp/go_history.txt 2>/dev/null; then
     gotmp="/tmp"
     chmod 600 /tmp/go_history.txt
 else
@@ -110,12 +110,16 @@ process_commands() {
     [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
-            if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f'; then
-                # 탈출코드가 ctrlc 만 가능한 경우
-                ( trap 'stty sane' SIGINT ; eval "$command" ) ; trap - SIGINT
-            else
-              eval "$command"
-            fi
+        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f'; then
+            # 탈출코드가 ctrlc 만 가능한 경우
+            (
+                trap 'stty sane' SIGINT
+                eval "$command"
+            )
+            trap - SIGINT
+        else
+            eval "$command"
+        fi
         echo "$command" >>$gotmp/go_history.txt 2>/dev/null && chmod 600 $gotmp/go_history.txt 2>/dev/null || chown root.root $gotmp/go_history.txt 2>/dev/null
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
@@ -386,7 +390,6 @@ menufunc() {
                         break
                     fi ### end of [ $num_commands -gt 1 ]
 
-
                     if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
                         menufunc $chosen_command ${title_of_menu}
 
@@ -436,10 +439,15 @@ menufunc() {
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
                                             trap 'stty sane ; exec "$gofile" "$scut"' INT
-                                            { ps3=$PS3 ; PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): " ; select dvar_value in "${dvar_value_array[@]}"; do
-                                                reply=$REPLY
-                                                break
-                                            done;PS3=ps3 ; } </dev/tty
+                                            {
+                                                ps3=$PS3
+                                                PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                select dvar_value in "${dvar_value_array[@]}"; do
+                                                    reply=$REPLY
+                                                    break
+                                                done
+                                                PS3=ps3
+                                            } </dev/tty
                                             trap - INT
                                             dvar_value="${dvar_value_array[$((reply - 1))]}"
                                         # 기본값이 하나일때
@@ -1085,12 +1093,12 @@ rollback() {
 # vi2 envorg && restart go.sh
 conf() {
     vi2 $envorg $scut
-    [ -f /html/go.env 2>/dev/null ] && cp -a $envorg /html/go.env && chmod 644 /html/go.env
+    [ -f /html/go.env ] 2>/dev/null && cp -a $envorg /html/go.env && chmod 644 /html/go.env
     exec $gofile $scut
 }
 conff() {
     vi2 $gofile
-    [ -f /html/go.sh 2>/dev/null ] && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh
+    [ -f /html/go.sh ] 2>/dev/null && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh
     exec $gofile $scut
 }
 confc() { rollback $envorg; }
