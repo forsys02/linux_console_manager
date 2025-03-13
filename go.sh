@@ -110,7 +110,7 @@ process_commands() {
     [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
-        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f'; then
+        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top'; then
             # 탈출코드가 ctrlc 만 가능한 경우
             (
                 trap 'stty sane' SIGINT
@@ -317,9 +317,12 @@ menufunc() {
                     -e 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                     -e 's/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                     -e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
+                    -e 's/\(stop\|disable\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
+                    -e 's/\(restart\)/\x1b[1;33m\1\x1b[0m/g' `# restart yellow` \
+                    -e 's/\(start\|enable\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                     -e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
-                    -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
+                    -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷` \
 
             done
 
