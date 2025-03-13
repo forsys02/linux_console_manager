@@ -318,7 +318,7 @@ menufunc() {
                     -e 's/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                     -e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
                     -e 's/\(stop\|disable\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
-                    -e 's/\(restart\)/\x1b[1;33m\1\x1b[0m/g' `# restart yellow` \
+                    -e 's/\(restart\|status\)/\x1b[1;33m\1\x1b[0m/g' `# restart yellow` \
                     -e 's/\(start\|enable\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                     -e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
@@ -856,7 +856,7 @@ pipemenu() {
     IFS=$' \n'
     export pipeitem=""
     items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty ; }
     IFS=$OLD_IFS
     unset PS3
 }
@@ -3400,6 +3400,27 @@ EOF
 
 EOF
         ;;
+
+teldrive-config.toml)
+        cat >"$file_path" <<'EOF'
+[db]
+  data-source = "postgres://teldrive:teldrive@teldrive-postgres:5432/teldrive" # Docker PostgreSQL 접속 주소 
+  prepare-stmt = false
+  [db.pool]
+    enable = false
+    max-idle-connections = 25
+    max-lifetime = "10m"
+    max-open-connections = 25
+
+[jwt]
+  secret = "sslkey" #openssl key
+
+[tg]
+  app-id = "telegram-app-id"
+  app-hash = "telegram-app-pw" 
+EOF
+        ;;
+
 
     .yml)
         cat >"$file_path" <<'EOF'
