@@ -86,7 +86,7 @@ if touch /tmp/go_history.txt 2>/dev/null; then
     chmod 600 /tmp/go_history.txt
 else
     gotmp="$HOME/tmp"
-    mkdir -p $gotmp
+    mkdir -p "$gotmp"
 fi
 
 #export publicip="$(curl -m1 -ks icanhazip.com 2>/dev/null || curl -m1 -ks checkip.amazonaws.com 2>/dev/null)"
@@ -120,7 +120,7 @@ process_commands() {
         else
             eval "$command"
         fi
-        echo "$command" >>$gotmp/go_history.txt 2>/dev/null && chmod 600 $gotmp/go_history.txt 2>/dev/null || chown root.root $gotmp/go_history.txt 2>/dev/null
+        echo "$command" >> "$gotmp"/go_history.txt 2>/dev/null && chmod 600 "$gotmp"/go_history.txt 2>/dev/null || chown root.root "$gotmp"/go_history.txt 2>/dev/null
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
@@ -150,7 +150,7 @@ menufunc() {
     local title_of_menu_sub=$2
 
     # 히스토리 파일 정의하고 불러옴
-    HISTFILE=$gotmp/go_history.txt
+    HISTFILE="$gotmp/go_history.txt"
     history -r "$HISTFILE"
 
     # 탈출코드 또는 ctrlc 가 입력되지 않는 경우 루프
@@ -449,7 +449,7 @@ menufunc() {
                                                     reply=$REPLY
                                                     break
                                                 done
-                                                PS3=ps3
+                                                PS3=$ps3
                                             } </dev/tty
                                             trap - INT
                                             dvar_value="${dvar_value_array[$((reply - 1))]}"
@@ -958,7 +958,7 @@ able() { command -v "$1" &>/dev/null && return 0 || return 1; }
 
 # 명령어 이름 출력후 결과 출력
 eval0() {
-    local c="$@"
+    local c="$*"
     echo -n "$c: "
     eval "$c"
 }
@@ -988,12 +988,12 @@ gip5() { awk 'match($5, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($5, RSTA
 gfind() { awk -v search="$2" -v f="$1" 'match($f, search) {print $0}'; }
 
 # exceptip filter
-eip() { [ -s $gotmp/go_exceptips_grep.txt ] && grep -vEf $gotmp/go_exceptips_grep.txt || cat; }
+eip() { [ -s "$gotmp"/go_exceptips_grep.txt ] && grep -vEf "$gotmp"/go_exceptips_grep.txt || cat; }
 
 # field except // grep -v 은 줄전체를 기준으로 하지만 eip5 는 5번째 필드를 기준으로 세분화함
 eipf() {
     field="$1"
-    if [ -s $gotmp/go_exceptips_grep.txt ]; then
+    if [ -s "$gotmp"/go_exceptips_grep.txt ]; then
 
         awk -v field="$field" -v gotmp="$gotmp" 'BEGIN { while (getline < (gotmp "/go_exceptips_grep.txt")) exceptips[$0] = 1 } { ma = 0; for (except in exceptips) { if (index($field, except) == 1) { ma = 1; break } } if (ma == 0) print }' -
     else cat; fi
@@ -1055,9 +1055,9 @@ bashcomm() {
     local original_aliases
     original_aliases=$(shopt -p expand_aliases)
     shopt -s expand_aliases
-    source ~/.bashrc
+    source ${HOME}/.bashrc
     unalias q 2>/dev/null
-    HISTFILE=$gotmp/go_history.txt
+    HISTFILE="$gotmp/go_history.txt"
     history -r "$HISTFILE"
     while :; do
         CYN
@@ -1115,7 +1115,7 @@ bell() { echo -ne "\a"; }
 # telegram push
 push() {
     local message
-    message="$@"
+    message="$*"
     [ ! "$message" ] && IFS='' read -d '' -t1 message
     # 인수도 파이프값도 없을때 기본값 hostname 으로 지정
     [ ! "$message" ] && message="$HOSTNAME"
@@ -1177,7 +1177,7 @@ alarm() {
         CYN
         atqq
         RST
-        ps -ef | grep [a]larm_task | awknf8 | cgrep "alarm_task_$input" | grep -v "awk"
+        ps -ef | grep "[a]larm_task" | awknf8 | cgrep "alarm_task_$input" | grep -v "awk"
     fi
     if [[ ${input:0:4} == "0000" ]]; then
         [ ! "${input:4:2}" ] && input="$input$(echo "$telegram_msg" | awk1)" && telegram_msg="$(echo "$telegram_msg" | awknf2)" # && echo "input: $input // msg: $telegram_msg"
@@ -1186,7 +1186,7 @@ alarm() {
         local days="${input:8:2}"
         [ -z "$days" ] && days=0
         telegram_msg="${time_in_hours}:${time_in_minutes}-Alarm ${telegram_msg}"
-        echo ": alarm_task_$input && curl -m1 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at $time_in_hours:$time_in_minutes $( ((days > 0)) && echo "today + $days" days) &>/dev/null
+        echo ": alarm_task_$input && curl -m1 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at "$time_in_hours":"$time_in_minutes" "$( ((days > 0)) && echo "today + $days" days)" &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
@@ -1236,11 +1236,11 @@ alarm() {
 }
 
 # history view
-hh() { cat $gotmp/go_history.txt | grep -v "^eval " | lastseen | tail -10 | stripe; }
+hh() { cat "$gotmp"/go_history.txt | grep -v "^eval " | lastseen | tail -10 | stripe; }
 gohistory() {
     echo
     echo "= go_history ================================="
-    eval $(cat $gotmp/go_history.txt | grep -v "^eval " | lastseen | tail -n20 | pipemenulistc | noansi)
+    eval "$(cat "$gotmp"/go_history.txt | grep -v "^eval " | lastseen | tail -n20 | pipemenulistc | noansi)"
     echo && { echo -en "\033[1;34mDone...\033[0m [Enter] " && read -r x; }
 }
 
@@ -1353,7 +1353,7 @@ ncpzip() {
 
 # ncpzip 이후 업데이트된 파일이 있을때 업데이트
 ncpzipupdate() {
-    local h r l p i dir b uf ts fn
+    local h r l p i dir b uf ts
     h=$(get_input "$1")
     r=$(get_input "$2")
     l=$(get_input "$3")
@@ -1369,11 +1369,9 @@ ncpzipupdate() {
     if [ "$uf" ]; then
         echo "$i updating..."
         if [ -f "${b}.tar.zst" ]; then
-            fn="${b}.tar.zst.update.${ts}.txt"
             echo "$uf" >"${b}.tar.zst.update.${ts}.txt"
             ssh $p $h "tar -cf - -T /dev/stdin" <"${b}.tar.zst.update.${ts}.txt" | zstd | (pv 2>/dev/null || cat) >"${b}.tar.zst.update.${ts}.tar.zst"
         elif [ -f "${b}.tgz" ]; then
-            fn="${b}.tgz.update.${ts}.txt"
             echo "$uf" >"${b}.tgz.update.${ts}.txt"
             ssh $p $h "tar -czf - -T /dev/stdin" <"${b}.tgz.update.${ts}.txt" | (pv 2>/dev/null || cat) >"${b}.tgz.update.${ts}.tgz"
         fi
@@ -1388,7 +1386,7 @@ rbackup() {
     while [ $# -gt 0 ]; do
         d="${1%/}"
         base="${d}"
-        if [ -f "$d" ] && [ "$(diff $d ${base}.1.bak 2>/dev/null)" -o ! -f ${base}.1.bak ]; then
+        if [ -f "$d" ] && [[ "$(diff $d ${base}.1.bak 2>/dev/null)" || ! -f ${base}.1.bak ]]; then
             d3=$(date -r ${base}.3.bak +%Y%m%d 2>/dev/null)
             d4=$(date -r ${base}.4.bak +%Y%m%d 2>/dev/null)
             if [ -f "${base}.4.bak" ] && [[ $t == "$d3" && $t != "$d4" ]]; then
@@ -1506,7 +1504,7 @@ yyay() {
         shift
     done
 }
-ayyy() { yyay $*; }
+ayyy() { yyay $@; }
 aptupup() {
     apt update -y
     apt upgrade -y
@@ -1758,7 +1756,7 @@ rrnet() {
                 return 0
             else
                 echo "Ping test failed for configuration from $file."
-                [ "$file" == "/etc/network/interfaces" ] && cp /etc/network/interfaces /etc/network/interfaces.err.$(date "+%Y%m%d_%H%M%S")
+                [ "$file" == "/etc/network/interfaces" ] && cp /etc/network/interfaces /etc/network/interfaces.err."$(date "+%Y%m%d_%H%M%S")"
 
             fi
 
@@ -1774,13 +1772,13 @@ rrnet() {
 dockersvcorg() { able docker && dockerps=$(docker ps | awknr2 2>/dev/null) && [ "${dockerps}" ] && echo "$dockerps" | grep "0.0.0.0" | awk '{split($2, arr, "/"); printf arr[1] " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; {print ""} ;  }'; }
 
 dockersvc() {
-    local output="$(dockersvcorg)"
+    local output ; output="$(dockersvcorg)"
     [ "$output" ] && while read -r line; do
         name=$(echo $line | awk '{print $1}')
         ip_port=$(echo $line | awk '{print $2}')
         ip_port2=$(echo $line | awk '{print $3}')
-        updated_line="$name -> ${localip1}:${ip_port##*:} ${publicip}:${ip_port##*:} $([ "$publicip" == $(hostname -i) ] && echo "$(hostname):${ip_port##*:}")"
-        [ -n "$ip_port2" ] && updated_line="$updated_line\n$name -> ${localip1}:${ip_port2##*:} ${publicip}:${ip_port2##*:} $([ "$publicip" == $(hostname -i) ] && echo "$(hostname):${ip_port2##*:}")"
+        updated_line="$name -> ${localip1}:${ip_port##*:} ${publicip}:${ip_port##*:} $([ "$publicip" == "$(hostname -i)" ] && echo "$(hostname):${ip_port##*:}")"
+        [ -n "$ip_port2" ] && updated_line="$updated_line\n$name -> ${localip1}:${ip_port2##*:} ${publicip}:${ip_port2##*:} $([ "$publicip" == "$(hostname -i)" ] && echo "$(hostname):${ip_port2##*:}")"
         result="${result}${updated_line}\n"
     done < <(echo "$output")
     echo -e "$result" | cip | chost | column -t
@@ -1796,10 +1794,10 @@ incremental_backup() {
     local backup_file="$1"
     local custom_prefix="$2"
 
-    local backup_dir=$(dirname "$backup_file")
-    local backup_timestamp=$(date -r "$backup_file" +%s)
+    local backup_dir; backup_dir=$(dirname "$backup_file")
+    local backup_timestamp; backup_timestamp=$(date -r "$backup_file" +%s)
 
-    local backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
+    local backup_folder; backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
 
     # 조건에 따라 prefix를 설정합니다.
     local prefix
@@ -1823,7 +1821,7 @@ incremental_backup() {
 ibackup() {
     local backup_file
     backup_file="$1"
-    local backup_filepath="$(readlinkf $1)"
+    local backup_filepath; backup_filepath="$(readlinkf $1)"
     local custom_prefix="$2"
     local backup_dir
     backup_dir=$(dirname "$backup_file")
