@@ -110,7 +110,7 @@ process_commands() {
     [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
-        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top'; then
+        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
             # 탈출코드가 ctrlc 만 가능한 경우
             (
                 trap 'stty sane' SIGINT
@@ -3419,6 +3419,7 @@ teldrive-config.toml)
 [tg]
   app-id = "telegram-app-id"
   app-hash = "telegram-app-pw"
+  uploads-encryption-key = "sslkey"
 EOF
         ;;
 
