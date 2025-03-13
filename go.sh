@@ -1928,6 +1928,7 @@ EOF
 
 ############## template copy sample
 
+template_view() { template_copy $1 /dev/stdout ; }
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -3404,7 +3405,7 @@ EOF
 teldrive-config.toml)
         cat >"$file_path" <<'EOF'
 [db]
-  data-source = "postgres://teldrive:teldrive@teldrive-postgres:5432/teldrive" # Docker PostgreSQL 접속 주소 
+  data-source = "postgres://teldrive:teldrive@teldrive-postgres:5432/teldrive" # Docker PostgreSQL 접속 주소
   prepare-stmt = false
   [db.pool]
     enable = false
@@ -3417,7 +3418,7 @@ teldrive-config.toml)
 
 [tg]
   app-id = "telegram-app-id"
-  app-hash = "telegram-app-pw" 
+  app-hash = "telegram-app-pw"
 EOF
         ;;
 
