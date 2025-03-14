@@ -49,20 +49,20 @@ fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
 if [ "$envko" ]; then # 사용자 수동 설정 [ko] 선택
-    [ "$envko" == "utf8" ] && [ ! "$(file $envorg | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && [ "$(file $envorg | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+    [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
     env="$envtmp"
-    [ "$envko" == "euckr" ] && [ ! "$(file $envorg | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    [ "$envko" == "euckr" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
 else
     # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
-    if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file $envorg | grep -i "utf")" ]; then
+    if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
         env="$envtmp"
     # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
-    elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file $envorg | grep -i "utf")" ]; then
+    elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
         env="$envtmp"
     else
@@ -75,9 +75,9 @@ fi
 # not kr
 # english menu tilte set
 if (($(locale | grep -ci "kr") == 0)); then
-    sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' $envtmp
+    sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' "$envtmp"
 else
-    sed -i '/^%%%e /d' $envtmp
+    sed -i '/^%%%e /d' "$envtmp"
 fi
 
 # tmp 폴더 set
@@ -120,7 +120,7 @@ process_commands() {
         else
             eval "$command"
         fi
-        echo "$command" >> "$gotmp"/go_history.txt 2>/dev/null && chmod 600 "$gotmp"/go_history.txt 2>/dev/null || chown root.root "$gotmp"/go_history.txt 2>/dev/null
+        echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null && chmod 600 "$gotmp"/go_history.txt 2>/dev/null || chown root.root "$gotmp"/go_history.txt 2>/dev/null
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
@@ -318,11 +318,11 @@ menufunc() {
                     -e 's/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                     -e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
                     -e 's/\(stop\|disable\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
-                    -e 's/\(restart\|status\)/\x1b[1;33m\1\x1b[0m/g' `# restart yellow` \
-                    -e 's/\(start\|enable\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
+                    -e 's/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
+                    -e 's/\(restart\|start\|enable\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                     -e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
-                    -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷` \
+                    -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
 
             done
 
@@ -534,7 +534,9 @@ menufunc() {
                         unset cancel
 
                         # flagof 변수 초기화
-                        unset $(compgen -v | grep '^flagof_')
+                        compgen -v | grep '^flagof_' | while IFS= read -r var_name; do
+                            unset "$var_name"
+                        done
 
                     fi
                     # direct command sub_menu
@@ -602,7 +604,7 @@ menufunc() {
             # hangul encoding chg
             if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "utf chg" && sleep 1
-                if [[ "$(file $envorg | grep -i "utf")" ]]; then
+                if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
                     cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
                     env="$envtmp"
                 else
@@ -610,7 +612,7 @@ menufunc() {
                     env="$envtmp"
                 fi
                 [ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
-            elif [[ "$(file $envorg | grep -i "utf")" && "$(file $env | grep -i "utf")" && -s $env ]]; then
+            elif [[ "$(file "$envorg" | grep -i "utf")" && "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "euc-kr chg" && sleep 1
                 cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
                 env="$envtmp"
@@ -856,7 +858,7 @@ pipemenu() {
     IFS=$' \n'
     export pipeitem=""
     items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
-    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty ; }
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     IFS=$OLD_IFS
     unset PS3
 }
@@ -1095,17 +1097,17 @@ rollback() {
 
 # vi2 envorg && restart go.sh
 conf() {
-    vi2 $envorg $scut
-    [ -f /html/go.env ] 2>/dev/null && cp -a $envorg /html/go.env && chmod 644 /html/go.env
-    exec $gofile $scut
+    vi2 "$envorg" $scut
+    [ -f /html/go.env ] 2>/dev/null && cp -a "$envorg" /html/go.env && chmod 644 /html/go.env
+    exec "$gofile" $scut
 }
 conff() {
-    vi2 $gofile
-    [ -f /html/go.sh ] 2>/dev/null && cp -a $gofile /html/go.sh && chmod 755 /html/go.sh
-    exec $gofile $scut
+    vi2 "$gofile"
+    [ -f /html/go.sh ] 2>/dev/null && cp -a "$gofile" /html/go.sh && chmod 755 /html/go.sh
+    exec "$gofile" $scut
 }
-confc() { rollback $envorg; }
-conffc() { rollback $gofile; }
+confc() { rollback "$envorg"; }
+conffc() { rollback "$gofile"; }
 
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env; }
@@ -1197,7 +1199,7 @@ alarm() {
         local time_in_minutes="${input:2}"
         time_in_minutes="${time_in_minutes#0}"
         telegram_pre="${time_in_minutes}분 카운트 완료."
-        [ ! "$(file $gofile | grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" | iconv -f EUC-KR -t UTF-8)"
+        [ ! "$(file "$gofile" | grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" | iconv -f EUC-KR -t UTF-8)"
         [ ! "$(echo $LANG | grep -i "utf")" ] && telegram_msg="$(echo "$telegram_msg" | iconv -f EUC-KR -t UTF-8)"
         telegram_msg="${telegram_pre}${telegram_msg}"
 
@@ -1219,7 +1221,7 @@ alarm() {
         local time_in_seconds="${input:1}"
         time_in_seconds="${time_in_seconds#0}"
         telegram_pre="${time_in_seconds}초 카운트 완료."
-        [ ! "$(file $gofile | grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" | iconv -f EUC-KR -t UTF-8)"
+        [ ! "$(file "$gofile" | grep -i "utf")" ] && telegram_pre="$(echo "$telegram_pre" | iconv -f EUC-KR -t UTF-8)"
         [ ! "$(echo $LANG | grep -i "utf")" ] && telegram_msg="$(echo "$telegram_msg" | iconv -f EUC-KR -t UTF-8)"
         telegram_msg="${telegram_pre}${telegram_msg}"
 
@@ -1493,7 +1495,7 @@ fi; }
 # update
 update() {
     rbackup "$gofile" "$envorg"
-    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
+    echo "update file: "$gofile" $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
 }
 
 # install
@@ -1772,7 +1774,8 @@ rrnet() {
 dockersvcorg() { able docker && dockerps=$(docker ps | awknr2 2>/dev/null) && [ "${dockerps}" ] && echo "$dockerps" | grep "0.0.0.0" | awk '{split($2, arr, "/"); printf arr[1] " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; {print ""} ;  }'; }
 
 dockersvc() {
-    local output ; output="$(dockersvcorg)"
+    local output
+    output="$(dockersvcorg)"
     [ "$output" ] && while read -r line; do
         name=$(echo $line | awk '{print $1}')
         ip_port=$(echo $line | awk '{print $2}')
@@ -1794,10 +1797,13 @@ incremental_backup() {
     local backup_file="$1"
     local custom_prefix="$2"
 
-    local backup_dir; backup_dir=$(dirname "$backup_file")
-    local backup_timestamp; backup_timestamp=$(date -r "$backup_file" +%s)
+    local backup_dir
+    backup_dir=$(dirname "$backup_file")
+    local backup_timestamp
+    backup_timestamp=$(date -r "$backup_file" +%s)
 
-    local backup_folder; backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
+    local backup_folder
+    backup_folder=$(tar tvzf $backup_file | head -n1 | awk '{print $NF}')
 
     # 조건에 따라 prefix를 설정합니다.
     local prefix
@@ -1821,7 +1827,8 @@ incremental_backup() {
 ibackup() {
     local backup_file
     backup_file="$1"
-    local backup_filepath; backup_filepath="$(readlinkf $1)"
+    local backup_filepath
+    backup_filepath="$(readlinkf $1)"
     local custom_prefix="$2"
     local backup_dir
     backup_dir=$(dirname "$backup_file")
@@ -1926,7 +1933,7 @@ EOF
 
 ############## template copy sample
 
-template_view() { template_copy $1 /dev/stdout ; }
+template_view() { template_copy $1 /dev/stdout; }
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -3400,7 +3407,7 @@ EOF
 EOF
         ;;
 
-teldrive-config.toml)
+    teldrive-config.toml)
         cat >"$file_path" <<'EOF'
 [db]
   data-source = "postgres://teldrive:teldrive@teldrive-postgres:5432/teldrive" # Docker PostgreSQL 접속 주소
@@ -3420,7 +3427,6 @@ teldrive-config.toml)
   uploads-encryption-key = "sslkey"
 EOF
         ;;
-
 
     .yml)
         cat >"$file_path" <<'EOF'
