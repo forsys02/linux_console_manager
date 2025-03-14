@@ -534,10 +534,10 @@ menufunc() {
                         unset cancel
 
                         # flagof 변수 초기화
-                        unset $(compgen -v | grep '^flagof_')
-                        #ompgen -v | grep '^flagof_' | while IFS= read -r var_name; do
-                        #   unset "$var_name"
-                        #one
+                        #unset $(compgen -v | grep '^flagof_')
+                        for flag in $(compgen -v | grep '^flagof_'); do
+                            unset "$flag"
+                        done
 
                     fi
                     # direct command sub_menu
