@@ -90,7 +90,7 @@ else
 fi
 
 #export publicip="$(curl -m1 -ks icanhazip.com 2>/dev/null || curl -m1 -ks checkip.amazonaws.com 2>/dev/null)"
-publicip="$(wget -q -O - http://icanhazip.com 2>/dev/null || wget -q -O - http://checkip.amazonaws.com 2>/dev/null)"
+publicip="$(wget --timeout=1 -q -O - http://icanhazip.com 2>/dev/null || wget --timeout 1 -q -O - http://checkip.amazonaws.com 2>/dev/null)"
 export "publicip"
 localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | tr '\n' ' ')
 export "localip"
@@ -1522,6 +1522,31 @@ yy() { [ "$(which yum)" ] && while [ $# -gt 0 ]; do
     yum install -y $1
     shift
 done; }
+
+# ip -> ip(hostinfo) /etc/hosts
+hostinfo() {
+  awk '
+  /^[0-9]+\./ {
+      ip=$1;
+      cmd="getent hosts " ip;
+      if ((cmd | getline line) > 0) {
+          split(line, hosts, " ");
+          host=hosts[2];  # IP 다음 첫 번째 호스트 이름 선택
+          if (host != "") {
+              sub($1, $1 " (\033[1m" host "\033[0m)", $0);
+          } else {
+              sub($1, $1 " (unknown)", $0);
+          }
+      } else {
+          sub($1, $1 " (unknown)", $0);
+      }
+      print
+  }
+  !/^[0-9]+\./ {
+      print
+  }
+  '
+}
 
 # ipban & ipallow
 ipcheck() { echo "$1" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
