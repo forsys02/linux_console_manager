@@ -554,7 +554,7 @@ menufunc() {
                     # gohistory history reselct
                     [[ $cmd_choice == "h" ]] && gohistory && cmds
                     # hh view history view
-                    [[ $cmd_choice == "hh" ]] && hi && read -rep "[Enter] " x && cmds
+                    [[ $cmd_choice == "hh" ]] && hh && read -rep "[Enter] " x && cmds
 
                     # explorer
                     [[ $cmd_choice == "e" ]] && { ranger $cmd_choice1 2>/dev/null || explorer; } && cmds
@@ -1765,6 +1765,8 @@ reconnect_down_veth_interfaces() {
 }
 
 rrnet() {
+    [ ! "$1" == "yes" ] && return
+
     if [ ! -f /etc/network/interfaces ]; then
         echo "Error: /etc/network/interfaces does not exist."
         exit 1
