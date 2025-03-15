@@ -90,7 +90,9 @@ else
 fi
 
 #export publicip="$(curl -m1 -ks icanhazip.com 2>/dev/null || curl -m1 -ks checkip.amazonaws.com 2>/dev/null)"
-publicip="$(wget --timeout=1 -q -O - http://icanhazip.com 2>/dev/null || wget --timeout 1 -q -O - http://checkip.amazonaws.com 2>/dev/null)"
+publicip="$(wget --timeout=1 -q -O - http://icanhazip.com 2>/dev/null || wget --timeout 1 -q -O - http://checkip.amazonaws.com 2>/dev/null || echo "offline")"
+[ "$publicip" == "offline" ] && offline="offline"
+
 export "publicip"
 localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | tr '\n' ' ')
 export "localip"
@@ -190,7 +192,15 @@ menufunc() {
                 hostname
                 RST
             )"
-            echo "=============================================="
+            if [ "$offline" == "offline" ]; then
+                echo -ne "==="
+                RED1
+                echo -ne " offline "
+                RST
+                echo "=================================="
+            else
+                echo "=============================================="
+            fi
         else
 
             # pre_commands 검출및 실행 (submenu 일때만)
@@ -317,9 +327,9 @@ menufunc() {
                     -e 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                     -e 's/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                     -e 's/\(!!!\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                    -e 's/\(stop\|disable\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
+                    -e 's/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                     -e 's/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
-                    -e 's/\(restart\|start\|enable\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
+                    -e 's/\(restart\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                     -e 's/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                     -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
@@ -1496,7 +1506,7 @@ fi; }
 # update
 update() {
     rbackup "$gofile" "$envorg"
-    echo "update file: "$gofile" $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
+    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
 }
 
 # install
@@ -1525,7 +1535,7 @@ done; }
 
 # ip -> ip(hostinfo) /etc/hosts
 hostinfo() {
-  awk '
+    awk '
   /^[0-9]+\./ {
       ip=$1;
       cmd="getent hosts " ip;
@@ -1778,7 +1788,8 @@ rrnet() {
     for file in "${files[@]}"; do
         if [ -f $file ]; then
             cp $file /etc/network/interfaces 2>/dev/null
-            systemctl restart networking.service
+            #systemctl restart networking.service
+            which ifreload && sudo ifreload -a || sudo systemctl restart networking.service
 
             if ping -c 4 8.8.8.8 >/dev/null; then
                 echo "Network configuration from $file is successful."
