@@ -215,5 +215,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Enjoy simplifying your server management with `go.sh`!** 🚀
 ```
-
-이제 이 텍스트를 사용하시면 모든 마크다운 기능이 제대로 적용될 거라고 확신합니다! 혹시 또 다른 문제가 생기거나 궁금한 점이 있으시면 언제든지 편하게 말씀해주세요. 😊
