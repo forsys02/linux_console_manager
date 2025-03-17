@@ -470,6 +470,7 @@ menufunc() {
                                             printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
+                                            [ "$var_value" == "c" ] && var_value="canceled"
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
                                         eval flagof_"${var_name%%__*}"=set
@@ -485,13 +486,14 @@ menufunc() {
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
                                             dvar_value="${!var_name}"
                                             # 이미 설정한 변수는 pass
-                                            if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ]; then
+                                            if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ] ; then
                                                 var_value="$dvar_value"
                                             else
                                                 trap 'stty sane ; exec "$gofile" "$scut"' INT
                                                 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
                                                 trap - INT
+                                                [ "$var_value" == "c" ] && var_value="canceled"
                                                 eval flagof_"${var_name}"=set
                                             fi
 
@@ -513,10 +515,9 @@ menufunc() {
                                         elif [ "${!var_name}" ]; then
                                             var_value="$dvar_value"
                                         fi
-                                    elif [ -z "$var_value" ]; then
-                                        { cancel=yes && echo "Canceled..." && break; }
-                                    elif [ "$var_value" == "c" ] || [ "$var_value" == "q" ] || [ "$var_value" == "." ]; then
-                                        { cancel=yes && echo "Canceled..." && break; }
+                                    #elif [ -z "$var_value" ] || [ "$var_value" == "c" ] || [ "$var_value" == "q" ] || [ "$var_value" == "." ]; then
+                                    elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ] ; then
+                                         { cancel=yes && echo "Canceled..." && eval flagof_"${var_name}"=set && break; }
                                     fi
                                     cmd=${cmd//$var_name/$var_value}
 
@@ -1268,9 +1269,27 @@ loadvar() {
 
 # awk NF select awk8 -> 8열 출력 // awk2
 for ((i = 1; i <= 10; i++)); do eval "awk${i}() { awk '{print \$$i}'; }"; done
-# awk nf nf-1 awk99 -> 끝열 출력
+# awk2c -> 2nd raw yellow colored
+for ((i = 1; i <= 10; i++)); do
+    eval "awk${i}c() { awk -v col=$i '{
+    for (j = 1; j <= NF; j++) {
+      if (j == col) {
+        printf \"\\033[1;33m%s\\033[0m \", \$j;
+      } else {
+        printf \"%s \", \$j;
+      }
+    }
+    printf \"\\n\";
+  }' \"\$@\"; }"
+done
+
+# awk nf nf-1 ( ex. awk99 -> last raw print )
 awk99() { awk '{print $NF}'; }
 awk98() { awk '(NF>1){print $(NF-1)}'; }
+# colored nf / nf-1
+awk99c() { awk '{ for (j=1; j<NF; j++) printf "%s ", $j; if (NF) printf "\033[1;33m%s\033[0m\n", $NF; else printf "\n"; }' "$@"; }
+awk98c() { awk '{ for (j=1; j<=NF; j++) { if (j == NF-1) printf "\033[1;33m%s\033[0m ", $j; else printf "%s ", $j; } printf "\n"; }' "$@"; }
+
 # awk NR pass awknr2 -> 2행부터 끝까지 출력
 for ((i = 1; i <= 10; i++)); do eval "awknr${i}() { awk 'NR >= '$i' '; }"; done
 # awk NF pass awknf8 -> 8열부터 끝까지 출력
@@ -1278,11 +1297,12 @@ for ((i = 1; i <= 10; i++)); do eval "awknr${i}() { awk 'NR >= '$i' '; }"; done
 for ((i = 1; i <= 10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print substr(\$0, index(\$0,\$$i))}' ; }"; done
 
 # ssh handshake 과정중 오류로 접속이 안될때 ~/ssh/.config 에 설정후 재접속
+# 정상 접속이 안될때만 함수 이용하여 접속 // 오히려 정상접속일 경우에는 output 변수관련 멈춤 발생
 sshre() {
     output=$(ssh "$@" 2>&1)
     if echo "$output" | grep -q "no matching host key type found"; then
         algorithms=$(echo "$output" | grep -oP 'Their offer: \K.*?(?=\r|\n)' | sed 's/ /,/g')
-        printf "Host %s\n HostKeyAlgorithms +%s\n" "$1" "$algorithms" | tee -a "$HOME/.ssh/config" >/dev/null
+        printf "Host %s\n    HostKeyAlgorithms +%s\n    PubkeyAcceptedKeyTypes +ssh-rsa\n" "$1" "$algorithms" | tee -a "$HOME/.ssh/config" >/dev/null
         echo "HostKey config saved, reconnecting..."
         ssh "$@"
     elif echo "$output" | grep -q "no matching key exchange method found"; then
@@ -1290,7 +1310,7 @@ sshre() {
         printf "Host %s\n    KexAlgorithms +%s\n" "$1" "$algorithms" | tee -a "$HOME/.ssh/config" >/dev/null
         echo "Kex config saved, reconnecting..."
         ssh "$@"
-    else echo "$output"; fi
+    fi
 }
 
 # ssh auto connect
