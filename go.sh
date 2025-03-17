@@ -736,7 +736,7 @@ cgrepl() {
 }
 cgrepline() {
     pattern=$(echo "$*" | sed 's/ /|/g')
-    awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}'
+    awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;33m&\033[0m"); print $0;}'
 }
 # 탈출코드를 특정색으로 지정
 cgrep3132() {
