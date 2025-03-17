@@ -486,7 +486,7 @@ menufunc() {
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
                                             dvar_value="${!var_name}"
                                             # 이미 설정한 변수는 pass
-                                            if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ] ; then
+                                            if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
                                             else
                                                 trap 'stty sane ; exec "$gofile" "$scut"' INT
@@ -516,8 +516,8 @@ menufunc() {
                                             var_value="$dvar_value"
                                         fi
                                     #elif [ -z "$var_value" ] || [ "$var_value" == "c" ] || [ "$var_value" == "q" ] || [ "$var_value" == "." ]; then
-                                    elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ] ; then
-                                         { cancel=yes && echo "Canceled..." && eval flagof_"${var_name}"=set && break; }
+                                    elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ]; then
+                                        { cancel=yes && echo "Canceled..." && eval flagof_"${var_name}"=set && break; }
                                     fi
                                     cmd=${cmd//$var_name/$var_value}
 
