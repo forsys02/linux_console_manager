@@ -95,10 +95,12 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 
 ## 🚀 Getting Started
 
-1. **Download `go.sh` and `go.env`:**
+## 🚀 Getting Started
+
+1. **Clone the `linux_console_manager` repository from GitHub:**
    ```bash
-   wget http://byus.net/go.sh
-   wget http://byus.net/go.env
+   git clone https://github.com/forsys02/linux_console_manager.git
+   cd linux_console_manager
    chmod +x go.sh
    chmod 600 go.env
    ```
