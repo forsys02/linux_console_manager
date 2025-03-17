@@ -1,4 +1,3 @@
-```markdown
 # go.sh: Your Command-Line Swiss Army Knife for Linux Server Management 🚀
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,84 +14,84 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 
 **System Information & Process Management:**
 
-* **Comprehensive System Overview:**  Quickly retrieve system information like hostname, IP addresses (local & public), uptime, kernel version, and resource usage.
-* **Process Monitoring & Control:**  Manage processes with tools like `top`, `htop`, `bashtop`, and `iftop` directly from the menu.
-* **Process Exploration:**  Dive deep into process trees (`pstree`) and find detailed information with `ps` and `lsof`.
-* **Process Termination:**  Easily kill processes by PID, user, or search criteria, with safety checks to prevent accidental system-critical process termination.
-* **Resource Optimization:**  Utilize `renice` and `ionice` to adjust process priorities.
-* **Login History & Network Stats:**  Review login history (`last`), monitor network connections (`netstat`, `nmap`).
+- **Comprehensive System Overview:**  Quickly retrieve system information like hostname, IP addresses (local & public), uptime, kernel version, and resource usage.
+- **Process Monitoring & Control:**  Manage processes with tools like `top`, `htop`, `bashtop`, and `iftop` directly from the menu.
+- **Process Exploration:**  Dive deep into process trees (`pstree`) and find detailed information with `ps` and `lsof`.
+- **Process Termination:**  Easily kill processes by PID, user, or search criteria, with safety checks to prevent accidental system-critical process termination.
+- **Resource Optimization:**  Utilize `renice` and `ionice` to adjust process priorities.
+- **Login History & Network Stats:**  Review login history (`last`), monitor network connections (`netstat`, `nmap`).
 
 **Server & Daemon Management:**
 
-* **Daemon Status & Control:**  List, start, stop, restart, enable, and disable systemd services.
-* **Service Exploration:**  Inspect service configurations and dependencies.
-* **Firewall Management:**  Open firewall ports for specific services.
-* **Daemon Management Utilities:**  Access classic daemon management tools like `sysv-rc-conf`, `systemctl-ui`, and `ntsysv`.
+- **Daemon Status & Control:**  List, start, stop, restart, enable, and disable systemd services.
+- **Service Exploration:**  Inspect service configurations and dependencies.
+- **Firewall Management:**  Open firewall ports for specific services.
+- **Daemon Management Utilities:**  Access classic daemon management tools like `sysv-rc-conf`, `systemctl-ui`, and `ntsysv`.
 
 **Package Management (Yum/Apt & More):**
 
-* **Package Detection:** Automatically detects available package managers (`yum`, `dnf`, `apt`, `pkginfo`, `dpkg`, `rpm`).
-* **Package Installation & Removal:**  Install and remove packages effortlessly.
-* **Package Updates & Upgrades:**  Keep your system up-to-date with package updates.
-* **Package Information:**  List installed packages, search for packages, and explore package contents.
-* **Repository Management:**  Easily edit repository configuration files (`sources.list`, `yum.conf`).
+- **Package Detection:** Automatically detects available package managers (`yum`, `dnf`, `apt`, `pkginfo`, `dpkg`, `rpm`).
+- **Package Installation & Removal:**  Install and remove packages effortlessly.
+- **Package Updates & Upgrades:**  Keep your system up-to-date with package updates.
+- **Package Information:**  List installed packages, search for packages, and explore package contents.
+- **Repository Management:**  Easily edit repository configuration files (`sources.list`, `yum.conf`).
 
 **User & Environment Management:**
 
-* **User & Group Administration:**  Add, modify, and delete users and groups.
-* **Password Management:**  Set and change user passwords, lock/unlock accounts.
-* **Permission & Ownership Control:**  Manage file and directory permissions and ownership (`chown`, `chmod`).
-* **Environment Variable Configuration:**  Easily view and modify environment variables.
-* **User Account Auditing:**  Identify system accounts, user accounts, and locked accounts.
+- **User & Group Administration:**  Add, modify, and delete users and groups.
+- **Password Management:**  Set and change user passwords, lock/unlock accounts.
+- **Permission & Ownership Control:**  Manage file and directory permissions and ownership (`chown`, `chmod`).
+- **Environment Variable Configuration:**  Easily view and modify environment variables.
+- **User Account Auditing:**  Identify system accounts, user accounts, and locked accounts.
 
 **Logging & File Management:**
 
-* **System Log Exploration:**  View system logs (`dmesg`, `journalctl`, `/var/log/messages`, etc.) with filtering and real-time monitoring.
-* **Open File Management:**  List open files and network connections (`lsof`).
-* **Log File Browsing:**  Quickly browse and tail recent log files.
-* **File System Utilities:**  Mount/unmount file systems, check disk space (`df`), test HDD speed (`hdparm`), and manage partitions (`fdisk`, `parted`).
+- **System Log Exploration:**  View system logs (`dmesg`, `journalctl`, `/var/log/messages`, etc.) with filtering and real-time monitoring.
+- **Open File Management:**  List open files and network connections (`lsof`).
+- **Log File Browsing:**  Quickly browse and tail recent log files.
+- **File System Utilities:**  Mount/unmount file systems, check disk space (`df`), test HDD speed (`hdparm`), and manage partitions (`fdisk`, `parted`).
 
 **Network Management & Security:**
 
-* **Network Information:**  Display network interfaces, IP addresses, routing tables, and connection statistics.
-* **Network Configuration:**  Edit network configuration files (`ifcfg-*`, `interfaces`, `netplan.yml`, `resolv.conf`).
-* **Network Restart:** Safely restart network services on Debian, CentOS, and Ubuntu systems, with backup and rollback capabilities.
-* **Firewall Management (Iptables/UFW):** Basic firewall control and rule management.
-* **DDoS Attack Mitigation:**  Tools to identify and block potential DDoS attackers based on connection counts, with IP whitelisting and blacklist management.
-* **Network Monitoring:**  Real-time network traffic monitoring with `iftop`.
+- **Network Information:**  Display network interfaces, IP addresses, routing tables, and connection statistics.
+- **Network Configuration:**  Edit network configuration files (`ifcfg-*`, `interfaces`, `netplan.yml`, `resolv.conf`).
+- **Network Restart:** Safely restart network services on Debian, CentOS, and Ubuntu systems, with backup and rollback capabilities.
+- **Firewall Management (Iptables/UFW):** Basic firewall control and rule management.
+- **DDoS Attack Mitigation:**  Tools to identify and block potential DDoS attackers based on connection counts, with IP whitelisting and blacklist management.
+- **Network Monitoring:**  Real-time network traffic monitoring with `iftop`.
 
 **Backup & Cloud Management:**
 
-* **Local & Remote Backup:**  Comprehensive backup solutions using `tar`, `rsync`, and `lftp` for local and remote backups.
-* **Incremental & Full Backups:**  Supports both incremental and full backup strategies.
-* **Database Backups:**  Easily dump all MySQL databases.
-* **Cloud Storage Integration:**  Seamlessly integrate with cloud storage providers using `rclone` for mounting and direct command-line access.
-* **Server-to-Server Transfers:**  Efficiently transfer files and folders between servers using `ncp`, `ncpr`, and compressed transfer options (`ncpzip`, `ncpzipupdate`).
+- **Local & Remote Backup:**  Comprehensive backup solutions using `tar`, `rsync`, and `lftp` for local and remote backups.
+- **Incremental & Full Backups:**  Supports both incremental and full backup strategies.
+- **Database Backups:**  Easily dump all MySQL databases.
+- **Cloud Storage Integration:**  Seamlessly integrate with cloud storage providers using `rclone` for mounting and direct command-line access.
+- **Server-to-Server Transfers:**  Efficiently transfer files and folders between servers using `ncp`, `ncpr`, and compressed transfer options (`ncpzip`, `ncpzipupdate`).
 
 **Virtualization & Containerization (Proxmox, KVM, Docker):**
 
-* **Proxmox Management:**  Extensive Proxmox VE management tools including VM/CT listing, starting, stopping, cloning, backup/restore, GPU passthrough, and more.
-* **KVM Hypervisor Management:** Basic KVM VM management using `virsh` and `virt-install`.
-* **Docker Management:**  Docker container and image management, `docker-compose` integration with pre-configured setups for popular applications (WordPress, Nextcloud, Rocket.Chat, etc.).
-* **Minecraft Server Management:**  Simplified setup and management of Minecraft servers (Paper, Forge, BungeeCord).
+- **Proxmox Management:**  Extensive Proxmox VE management tools including VM/CT listing, starting, stopping, cloning, backup/restore, GPU passthrough, and more.
+- **KVM Hypervisor Management:** Basic KVM VM management using `virsh` and `virt-install`.
+- **Docker Management:**  Docker container and image management, `docker-compose` integration with pre-configured setups for popular applications (WordPress, Nextcloud, Rocket.Chat, etc.).
+- **Minecraft Server Management:**  Simplified setup and management of Minecraft servers (Paper, Forge, BungeeCord).
 
 **Utilities & Tools:**
 
-* **File Explorers:**  Menu-driven access to powerful terminal file explorers like `ranger`, `lfm`, `mc`, `vifm`, and `nnn`.
-* **Screen & Tmux Session Management:**  Effortlessly manage `screen` and `tmux` sessions.
-* **Vim Configuration:**  Quickly access and customize your `.vimrc` configuration.
-* **Swap Space Management:**  Manage swap space (on/off, size adjustment).
-* **Cron & At Job Scheduling:**  Schedule tasks using `at` and `cron`.
-* **Fail2ban Management:**  Basic Fail2ban status and manual IP banning.
-* **MySQL Query Tools:**  Basic MySQL administration and query execution.
-* **Find & Search Utilities:** Powerful file searching and content searching tools.
-* **Device-Mapper Management:** Tools for managing device-mapper (LVM) devices.
-* **Emergency Recovery & Booting Tools:**  Utilities for system recovery, GRUB configuration, and boot management.
-* **Language & Timezone Settings:**  Easily configure system locale, timezone, and hostname.
-* **Security & Permission Hardening:**  Tools to enhance server security by adjusting file permissions and ownership.
-* **Web Management Solutions (Webmin/Cockpit):**  One-click installation for web-based server management panels.
-* **Network Tools (NFS, iSCSI, AutoFS, Open-vSwitch):**  Simplified configuration for network file sharing and virtualization technologies.
-* **And much more!**  See the `go.env` file for the full menu.
+- **File Explorers:**  Menu-driven access to powerful terminal file explorers like `ranger`, `lfm`, `mc`, `vifm`, and `nnn`.
+- **Screen & Tmux Session Management:**  Effortlessly manage `screen` and `tmux` sessions.
+- **Vim Configuration:**  Quickly access and customize your `.vimrc` configuration.
+- **Swap Space Management:**  Manage swap space (on/off, size adjustment).
+- **Cron & At Job Scheduling:**  Schedule tasks using `at` and `cron`.
+- **Fail2ban Management:**  Basic Fail2ban status and manual IP banning.
+- **MySQL Query Tools:**  Basic MySQL administration and query execution.
+- **Find & Search Utilities:** Powerful file searching and content searching tools.
+- **Device-Mapper Management:** Tools for managing device-mapper (LVM) devices.
+- **Emergency Recovery & Booting Tools:**  Utilities for system recovery, GRUB configuration, and boot management.
+- **Language & Timezone Settings:**  Easily configure system locale, timezone, and hostname.
+- **Security & Permission Hardening:**  Tools to enhance server security by adjusting file permissions and ownership.
+- **Web Management Solutions (Webmin/Cockpit):**  One-click installation for web-based server management panels.
+- **Network Tools (NFS, iSCSI, AutoFS, Open-vSwitch):**  Simplified configuration for network file sharing and virtualization technologies.
+- **And much more!**  See the `go.env` file for the full menu.
 
 ## 🚀 Getting Started
 
@@ -123,14 +122,14 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 
 The power of `go.sh` lies in its customizable configuration file, `go.env`.  Here's how you can tailor it to your needs:
 
-* **Menu Structure:**  Define your main menu and submenus using `%%%` to start a menu section and blank lines to separate menu items. Submenus are created by nesting menu sections.
-* **Comments:** Lines starting with `#` are treated as comments and are ignored by the script. Use these to add notes and explanations within your `go.env`.
-* **Commands:**  Each menu item executes the commands listed below it (until the next `%%%` or blank line).  Use standard bash commands.
-* **Variables:** Use `varVARIABLE_NAME__default_value` to define variables that users can input directly from the menu.  Default values are provided for convenience.
-* **Submenus:** Create nested menus using `%%% {submenu_shortcut}Menu Title [shortcut]` and `%%%e {submenu_shortcut}English Menu Title [shortcut]` for multilingual support.
-* **English Menu:**  Use `%%%e` for menu titles and commands that should be displayed when the system locale is not Korean.
-* **Custom Functions:**  Extend `go.sh` by adding your own bash functions at the end of the `go.sh.txt` file and calling them from your menu items.
-* **`conf` Command:**  From the main menu or any submenu, type `conf` and press Enter to directly edit the `go.env` file using `vi`.
+- **Menu Structure:**  Define your main menu and submenus using `%%%` to start a menu section and blank lines to separate menu items. Submenus are created by nesting menu sections.
+- **Comments:** Lines starting with `#` are treated as comments and are ignored by the script. Use these to add notes and explanations within your `go.env`.
+- **Commands:**  Each menu item executes the commands listed below it (until the next `%%%` or blank line).  Use standard bash commands.
+- **Variables:** Use `varVARIABLE_NAME__default_value` to define variables that users can input directly from the menu.  Default values are provided for convenience.
+- **Submenus:** Create nested menus using `%%% {submenu_shortcut}Menu Title [shortcut]` and `%%%e {submenu_shortcut}English Menu Title [shortcut]` for multilingual support.
+- **English Menu:**  Use `%%%e` for menu titles and commands that should be displayed when the system locale is not Korean.
+- **Custom Functions:**  Extend `go.sh` by adding your own bash functions at the end of the `go.sh.txt` file and calling them from your menu items.
+- **`conf` Command:**  From the main menu or any submenu, type `conf` and press Enter to directly edit the `go.env` file using `vi`.
 
 **Example `go.env` Snippets:**
 
@@ -157,25 +156,25 @@ The power of `go.sh` lies in its customizable configuration file, `go.env`.  Her
 
 ## ⌨️ Usage
 
-* **Navigation:** Use number keys (1, 2, 3...) or shortcut letters (`[a]`, `[b]`, `[c]`, etc.) to select menu items.
-* **Submenus:** Navigate deeper into submenus using their shortcut letters.
-* **Command Execution:**  Selected menu items execute the commands defined in `go.env`.
-* **Variable Input:** When a menu item with variables is selected, you'll be prompted to enter values for each variable.  Press Enter to use the default value.
-* **Confirmation:** For "dangerous" commands (marked with `!!!`), you'll be asked for confirmation before execution.
-* **Easter Egg:** Type `..` in the main menu to access a direct command-line interface with your `.bashrc` aliases loaded.
-* **`conf` Command:** Type `conf` to edit `go.env` directly.
-* **Exit:** Type `0` or `q` in the main menu to exit `go.sh`.
+- **Navigation:** Use number keys (1, 2, 3...) or shortcut letters (`[a]`, `[b]`, `[c]`, etc.) to select menu items.
+- **Submenus:** Navigate deeper into submenus using their shortcut letters.
+- **Command Execution:**  Selected menu items execute the commands defined in `go.env`.
+- **Variable Input:** When a menu item with variables is selected, you'll be prompted to enter values for each variable.  Press Enter to use the default value.
+- **Confirmation:** For "dangerous" commands (marked with `!!!`), you'll be asked for confirmation before execution.
+- **Easter Egg:** Type `..` in the main menu to access a direct command-line interface with your `.bashrc` aliases loaded.
+- **`conf` Command:** Type `conf` to edit `go.env` directly.
+- **Exit:** Type `0` or `q` in the main menu to exit `go.sh`.
 
 ## ⚙️ Variables: Customize Your Commands
 
 `go.sh` uses a simple variable system to make commands more dynamic and reusable.
 
-* **Syntax:** `varVARIABLE_NAME__default_value`
-    * `var`:  Indicates a variable.
-    * `VARIABLE_NAME`:  The name of your variable (e.g., `PACKAGE`, `PORT`, `HOST`).
-    * `__default_value`: (Optional) A default value that will be used if you don't provide input. Use `@@` for `/` in default paths.
+- **Syntax:** `varVARIABLE_NAME__default_value`
+    - `var`:  Indicates a variable.
+    - `VARIABLE_NAME`:  The name of your variable (e.g., `PACKAGE`, `PORT`, `HOST`).
+    - `__default_value`: (Optional) A default value that will be used if you don't provide input. Use `@@` for `/` in default paths.
 
-* **Example:**
+- **Example:**
    ```txt
    %%% 패키지 설치 [i]
    %%%e Install Package [i]
@@ -185,28 +184,28 @@ The power of `go.sh` lies in its customizable configuration file, `go.env`.  Her
 
 ## 💡 Tips and Tricks
 
-* **Multilingual Support:** `go.sh` intelligently detects your locale and displays menus in Korean or English based on your system settings. You can force a language by setting the `envko` variable in `~/go.private.env` to `utf8` or `euckr`.
-* **Hidden Menus:**  Create hidden submenus using `%%% {submenu_hidden}`. These menus won't be directly listed in the main menu but can be accessed via their shortcut keys or by calling them from other menu items.
-* **Command History:**  `go.sh` keeps a history of your executed commands in `/tmp/go_history.txt`. Use the `h` shortcut in menus to view and re-execute recent commands.
-* **Direct Command Input (Easter Egg):**  Type `..` in the main menu to enter a direct command-line mode where you can type any bash command and utilize your `.bashrc` aliases.
-* **Custom Functions:**  Extend `go.sh` by adding your own bash functions to the `go.sh.txt` file. You can then call these functions directly from your menu items, creating powerful and specialized tools.
-* **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env` directly from the menu. This is much faster than manually opening the file in `vi`.
+- **Multilingual Support:** `go.sh` intelligently detects your locale and displays menus in Korean or English based on your system settings. You can force a language by setting the `envko` variable in `~/go.private.env` to `utf8` or `euckr`.
+- **Hidden Menus:**  Create hidden submenus using `%%% {submenu_hidden}`. These menus won't be directly listed in the main menu but can be accessed via their shortcut keys or by calling them from other menu items.
+- **Command History:**  `go.sh` keeps a history of your executed commands in `/tmp/go_history.txt`. Use the `h` shortcut in menus to view and re-execute recent commands.
+- **Direct Command Input (Easter Egg):**  Type `..` in the main menu to enter a direct command-line mode where you can type any bash command and utilize your `.bashrc` aliases.
+- **Custom Functions:**  Extend `go.sh` by adding your own bash functions to the `go.sh.txt` file. You can then call these functions directly from your menu items, creating powerful and specialized tools.
+- **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env` directly from the menu. This is much faster than manually opening the file in `vi`.
 
 ## 🤝 Contributing
 
 `go.sh` is a labor of love, and contributions are always welcome!  If you have ideas for new features, improvements, bug fixes, or want to add more menu items, please feel free to:
 
-* **Fork this repository.**
-* **Create a branch for your changes.**
-* **Submit a pull request.**
-* **Report issues and suggest enhancements in the "Issues" tab.**
+- **Fork this repository.**
+- **Create a branch for your changes.**
+- **Submit a pull request.**
+- **Report issues and suggest enhancements in the "Issues" tab.**
 
 Your feedback and contributions are highly appreciated!
 
 ## 🧑‍💻 Author & Contact
 
-* **Author:** 손희태 (Son Heetae) - Byus.net
-* **Contact:** forsys02@gmail.com, KakaoTalk: byusnet
+- **Author:** 손희태 (Son Heetae) - Byus.net
+- **Contact:** forsys02@gmail.com, KakaoTalk: byusnet
 
 ## 📜 License
 
@@ -217,3 +216,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Enjoy simplifying your server management with `go.sh`!** 🚀
 ```
 
+이제 이 텍스트를 사용하시면 모든 마크다운 기능이 제대로 적용될 거라고 확신합니다! 혹시 또 다른 문제가 생기거나 궁금한 점이 있으시면 언제든지 편하게 말씀해주세요. 😊
