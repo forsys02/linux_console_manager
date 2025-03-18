@@ -322,6 +322,7 @@ menufunc() {
                 # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정
                 printf "\e[1m%-3s\e[0m " ${pi}
                 echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
+                    -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
                     -e 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
@@ -440,7 +441,10 @@ menufunc() {
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
-                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@@/\/}"
+                                        # @@ -> / 치환
+                                        dvar_value="${ar_name#*__}" && dvar_value="${dvar_value//@@/\/}"
+                                        # @space@ -> 공백 치환
+                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@space@/ }"
                                         dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
 
                                         # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
