@@ -441,10 +441,10 @@ menufunc() {
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
-                                        # @@ -> / 치환
-                                        dvar_value="${ar_name#*__}" && dvar_value="${dvar_value//@@/\/}"
                                         # @space@ -> 공백 치환
-                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@space@/ }"
+                                        # @@ -> / 치환
+                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@@/\/}"
+                                        # __ 를 구분으로 배열생성
                                         dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
 
                                         # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
