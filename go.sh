@@ -244,7 +244,7 @@ menufunc() {
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
         done < <(search_menulist) # %%% 모음 가져와서 파싱
 
-        echo "0.  Exit [q] // Hangul_Crash ??? --> [ko] "
+        echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
         echo "=============================================="
 
         if [ "$initvar" ]; then
@@ -616,7 +616,7 @@ menufunc() {
             if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
                 which jfbterm 2>/dev/null && jfbterm || (yum install -y jfbterm && jfbterm)
             fi
-        elif [ "$choice" ] && [ "$choice" == "ko" ]; then
+        elif [ "$choice" ] && [ "$choice" == "kr" ]; then
             # hangul encoding chg
             if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "utf chg" && sleep 1
