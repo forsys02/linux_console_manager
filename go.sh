@@ -959,6 +959,10 @@ pipemenulistc() {
     unset PS3
 }
 
+oneline() {
+  tr '\n' ' '
+}
+
 # blkid -> fstab ex) blkid2fstab /dev/sdd1 /tmp
 blkid2fstab() {
     d=${2/\/\///}
@@ -3486,6 +3490,28 @@ EOF
   uploads-encryption-key = "sslkey"
 EOF
         ;;
+
+fail2ban_filter_proxmox.conf)
+        cat >"$file_path" <<'EOF'
+[Definition]
+failregex = pvedaemon\[.*authentication failure; rhost=<HOST> user=.* msg=.*
+ignoreregex =
+EOF
+        ;;
+
+fail2ban_jail_proxmox.conf)
+        cat >"$file_path" <<'EOF'
+[proxmox]
+enabled  = true
+port     = https,http,8006
+filter   = proxmox
+maxretry = 3
+bantime  = 3600
+findtime = 300
+EOF
+        ;;
+
+
 
     .yml)
         cat >"$file_path" <<'EOF'
