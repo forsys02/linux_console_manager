@@ -641,7 +641,8 @@ menufunc() {
                 if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
                 [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
             fi
-            menufunc
+           # menufunc
+           exec "$gofile" "$scut"
         elif [ "$choice" ] && [ "$choice" == "conf" ]; then
             conf
         elif [ "$choice" ] && [ "$choice" == "confc" ]; then
