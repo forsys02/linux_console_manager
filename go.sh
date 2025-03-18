@@ -960,7 +960,7 @@ pipemenulistc() {
 }
 
 oneline() {
-  tr '\n' ' '
+    tr '\n' ' '
 }
 
 # blkid -> fstab ex) blkid2fstab /dev/sdd1 /tmp
@@ -1740,6 +1740,26 @@ dfmonitor() {
         for i in $(seq 1 4); do read -p"." -t1 -n1 x && break; done
         [ "$x" ] && break
         echo
+    done
+}
+
+# proxmox vmid vnname ip print
+vmipscan() {
+    # MAC-IP 매핑
+    local IFS=$' \t\n'
+    local iface
+    [ "$1" ] && iface="$1" || iface="vmbr0"
+    declare -A mac_ip_map
+    while read -r ip mac; do
+        mac_ip_map["$(echo "$mac" | tr '[:upper:]' '[:lower:]')"]="$ip"
+    done < <(arp-scan -I $iface -l | awk '/^[0-9]/ {print $1, $2}')
+
+    # VM 정보 출력
+    for vmid in $(pvesh get /nodes/localhost/qemu --noborder --noheader | awk '/running/ {print $2}'); do
+        config=$(pvesh get /nodes/localhost/qemu/"$vmid"/config --noborder --noheader)
+        vmname=$(echo "$config" | awk '$1 == "name" {print $2}')
+        mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | grep -oP '(?<==)[0-9A-Fa-f:]+(?=,bridge=)')
+        [[ -n $mac ]] && ip="${mac_ip_map[$(echo "$mac" | tr '[:upper:]' '[:lower:]')]}" && [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
     done
 }
 
@@ -3491,7 +3511,7 @@ EOF
 EOF
         ;;
 
-fail2ban_filter_proxmox.conf)
+    fail2ban_filter_proxmox.conf)
         cat >"$file_path" <<'EOF'
 [Definition]
 failregex = pvedaemon\[.*authentication failure; rhost=<HOST> user=.* msg=.*
@@ -3499,7 +3519,7 @@ ignoreregex =
 EOF
         ;;
 
-fail2ban_jail_proxmox.conf)
+    fail2ban_jail_proxmox.conf)
         cat >"$file_path" <<'EOF'
 [proxmox]
 enabled  = true
@@ -3510,8 +3530,6 @@ bantime  = 3600
 findtime = 300
 EOF
         ;;
-
-
 
     .yml)
         cat >"$file_path" <<'EOF'
