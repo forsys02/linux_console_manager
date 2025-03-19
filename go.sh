@@ -49,10 +49,9 @@ fi
 
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
 if [ "$envko" ]; then # 사용자 수동 설정 [ko] 선택
-    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-    env="$envtmp"
-    [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-    env="$envtmp"
+    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
+    [ "$envko" == "utf8" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
     [ "$envko" == "euckr" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
@@ -509,6 +508,10 @@ menufunc() {
                                             trap - INT
                                             eval flagof_"${var_name}"=set
                                         fi
+
+                                        # 변수 이름에 nospace 가 있을때 ex) varVARnospace
+                                        # 들어온값 space -> , 로 치환
+                                        [[ ${var_name} == *nospace ]] && var_value="${var_value// /,}"
                                     fi
                                     echo
                                     # 변수에 read 수신값 할당
@@ -641,8 +644,8 @@ menufunc() {
                 if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
                 [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
             fi
-           # menufunc
-           exec "$gofile" "$scut"
+            # menufunc
+            exec "$gofile" "$scut"
         elif [ "$choice" ] && [ "$choice" == "conf" ]; then
             conf
         elif [ "$choice" ] && [ "$choice" == "confc" ]; then
@@ -848,16 +851,18 @@ selectmenu() { select item in $@; do echo $item; done; }
 
 # pipe 로 넘어온 줄의 첫번째 필드를 select
 pipemenu1() {
+    local prompt_message="$@"
     PS3="==============================================
- >>> Select No. : "
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done)
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
     unset PS3
 }
 pipemenu1cancel() {
+    local prompt_message="$@"
     PS3="==============================================
- >>> Select No. : "
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(
         while read -r line; do awk '{print $1}' < <(echo "$line"); done
@@ -869,8 +874,9 @@ pipemenu1cancel() {
 
 # pipe 로 넘어온 줄의 모든 필드를 select
 pipemenu() {
+    local prompt_message="$@"
     PS3="==============================================
->>> Select No. : "
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
     OLD_IFS=$IFS
     IFS=$' \n'
     export pipeitem=""
@@ -880,8 +886,9 @@ pipemenu() {
     unset PS3
 }
 pipemenucancel() {
+    local prompt_message="$@"
     PS3="==============================================
- >>> Select No. : "
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
     OLD_IFS=$IFS
     IFS=$' \n'
     items=$(
@@ -895,8 +902,9 @@ pipemenucancel() {
 
 # pipe 로 넘어온 라인별로 select
 pipemenulist() {
+    local prompt_message="$@"
     PS3="==============================================
->>> Select No. : "
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
     OLD_IFS=$IFS
     IFS=$'\n'
     export pipeitem=""
