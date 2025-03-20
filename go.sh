@@ -10,11 +10,8 @@ readlinkf() {
     done
     echo "$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)/$(basename "$p")"
 }
-realpathf() { while [ $# -gt 0 ]; do
-    echo "$1" | sed -e 's/\/\.\//\//g' | awk -F'/' -v OFS="/" 'BEGIN{printf "/";}{top=1; for (i=2; i<=NF; i++) {if ($i == "..") {top--; delete stack[top];} else if ($i != "") {stack[top]=$i; top++;}} for (i=1; i<top; i++) {printf "%s", stack[i]; printf OFS;}}{print ""}'
-    shift
-done; }
 
+# 실행중인 go.sh 파일의 절대경로 체크
 basefile="$(readlinkf "$0")"
 base="$(dirname "$basefile")"
 
@@ -47,15 +44,23 @@ if [ -f "$HOME"/go.private.env ]; then
     done <"$HOME"/go.private.env
 fi
 
+# 터미널 한글 환경이 2가지 -> 글자 깨짐 방지 인코딩 변환
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
-if [ "$envko" ]; then # 사용자 수동 설정 [ko] 선택
+if [ "$envko" ]; then
+    # 사용자 수동 설정 [kr] 입력시
+    # 터미널 utf8 / go.env !utf8
     [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
+    # 터미널 utf8 / go.env utf8
     [ "$envko" == "utf8" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    # 터미널 !utf8 / go.env utf8
     [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
+    # 터미널 !utf8 / go.evn !utf8
     [ "$envko" == "euckr" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    # cmd 라인뒤 주석제거
     sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
     env="$envtmp"
 else
+    # 터미널 자동감지
     # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
     if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
@@ -88,31 +93,36 @@ else
     mkdir -p "$gotmp"
 fi
 
-#export publicip="$(curl -m1 -ks icanhazip.com 2>/dev/null || curl -m1 -ks checkip.amazonaws.com 2>/dev/null)"
+# public_ip & offline check ( dns or ping err )
 publicip="$(wget --timeout=1 -q -O - http://icanhazip.com 2>/dev/null || wget --timeout 1 -q -O - http://checkip.amazonaws.com 2>/dev/null || echo "offline")"
 [ "$publicip" == "offline" ] && offline="offline"
-
 export "publicip"
+
 localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | tr '\n' ' ')
+[ ! "localip" ] && localip=$(ip -4 addr show | awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' | grep -vE "127.0.0.1|255$" | tr '\n' ' ')
 export "localip"
+
 localip1=${localip%% *}
 export "localip1"
+
 guestip=$(who am i | awk -F'[():]' '{print $3}')
 export "guestip"
+
 gateway="$(ip route | grep 'default' | awk '{print $3}')"
 export "gateway"
-[ ! "localip" ] && localip=$(ip -4 addr show | awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' | grep -vE "127.0.0.1|255$" | tr '\n' ' ')
 
-# 명령이 넘어오면 실행하는 함수
+############################################################
+# 최종 명령문을 실행하는 함수
+############################################################
 process_commands() {
     local command="$1"
     local cfm=$2
     local nodone=$3
-    [ "${command:0:1}" == "#" ] && return # 주석선택시 취소
-    if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
+    [ "${command:0:1}" == "#" ] && return                            # 주석선택시 취소
+    if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then # !!! check
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
+        # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
-            # 탈출코드가 ctrlc 만 가능한 경우
             (
                 trap 'stty sane' SIGINT
                 eval "$command"
@@ -121,11 +131,14 @@ process_commands() {
         else
             eval "$command"
         fi
+        # log
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null && chmod 600 "$gotmp"/go_history.txt 2>/dev/null || chown root.root "$gotmp"/go_history.txt 2>/dev/null
+        # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
+        # sleep 1 or [Enter]
         if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then nodone=y && sleep 1; fi
         [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -r x; }
     else
@@ -133,17 +146,19 @@ process_commands() {
     fi
 }
 
-# 환경파일에서 %%% 로 시작하는 메뉴 가져옴
-search_menulist() {
+# 환경파일에서 %%% 로 시작하는 메뉴 출력
+print_menulist() {
     if [ -z "$chosen_command_sub" ]; then
         # mainmenu list
         cat "$env" | grep -E '^%%%' | grep -vE '\{submenu' | sed -r 's/%%% //'
     else
         # submenu list
+        # {submenu} 빼고 출력
         cat "$env" | grep -E '^%%%' | grep "$chosen_command_sub" | awk -F'}' '{print $2}'
     fi
 }
 
+# 최초 실행되는 함수
 # 메인 서비스 함수
 menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
@@ -160,9 +175,11 @@ menufunc() {
         # 서브메뉴 타이틀 변경
         [ "$scut" ] && oldscut="$scut"
         [ "$title_of_menu_sub" ] && {
+            # 서브메뉴
             scut=$(echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}')
             title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m"
         } || {
+            # 메인메뉴
             scut=""
             oldscut=""
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
@@ -171,14 +188,16 @@ menufunc() {
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         if [ ! "$chosen_command_sub" ]; then
-            IFS=$'\n' allof_sub_shortcut_item="$(cat "$env" | grep "%%% {submenu_" | grep -E '\[.+\]$')"
-            subkey=()
+            # 모든 shortcut 배열로 가져옴
+            IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% {submenu_" | grep -E '\[.+\]$')"
+            shortcutarr=()
             idx=0
-            for items in $allof_sub_shortcut_item; do
+            for items in $allof_shortcut_item; do
                 shortcutname=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
-                subkey[$idx]="${shortcutname}|||${items}"
+                shortcutarr[$idx]="${shortcutname}|||${items}"
                 ((idx++))
             done
+            # printarr shortcutarr # debug
         fi
 
         echo
@@ -191,6 +210,7 @@ menufunc() {
                 hostname
                 RST
             )"
+            # offline print
             if [ "$offline" == "offline" ]; then
                 echo -ne "==="
                 RED1
@@ -202,7 +222,7 @@ menufunc() {
             fi
         else
 
-            # pre_commands 검출및 실행 (submenu 일때만)
+            # %% cmds -> pre_commands 검출및 실행 (submenu 일때만)
             # listof_comm_submain
             # pre excute
             for items in "${pre_commands[@]}"; do
@@ -241,7 +261,7 @@ menufunc() {
             }
 
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
-        done < <(search_menulist) # %%% 모음 가져와서 파싱
+        done < <(print_menulist) # %%% 모음 가져와서 파싱
 
         echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
         echo "=============================================="
@@ -259,7 +279,7 @@ menufunc() {
         #shortcut 을 참조하여 choice 번호 설정
         [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]}
 
-        # 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
+        # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
         choice_list() {
             echo
             oldscut="$scut" && scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}')
@@ -362,7 +382,7 @@ menufunc() {
         if [ '$choice' ] && ((!$choice > 0)) 2>/dev/null; then
             # subshortcut 을 참조하여 title_of_menu 설정
             # ex) chosen_command:{submenu_systemsetup} // title_of_menu:시스템 초기설정과 기타 (submenu) [i]
-            for item in "${subkey[@]}"; do
+            for item in "${shortcutarr[@]}"; do
                 # echo $item
                 if [ "$choice" == "${item%%|||*}" ]; then
                     chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
@@ -377,7 +397,7 @@ menufunc() {
         # 메인/서브 메뉴에서 정상 범위의 숫자가 입력된경우
         if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
             # 선택한 줄번호의 타이틀 가져옴
-            [ ! "$choice" == 99 ] && title_of_menu="$(search_menulist | awk -v choice="$choice" 'NR==choice {print}')"
+            [ ! "$choice" == 99 ] && title_of_menu="$(print_menulist | awk -v choice="$choice" 'NR==choice {print}')"
 
             # 선택한 줄번호의 타이틀에 맞는 리스트가져옴
             listof_comm
@@ -707,7 +727,11 @@ menufunc() {
     done # end of main while
 }
 
-# go.env 에서 사용가능한 한줄 함수 subfunc
+##############################################################################################################
+##############################################################################################################
+##############################################################################################################
+
+# go.env 에서 사용가능한 함수 subfunc
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
 ff() { declare -f "$@"; }
@@ -945,6 +969,12 @@ fdialogw() {
     choice=$(whiptail --clear --menu "Select option:" 22 76 16 "${options[@]}" 3>&1 1>&2 2>&3)
     echo "$choice"
 }
+
+# 경로 조정 /abc/de/.././fba/ -> /abc/fba/
+realpathf() { while [ $# -gt 0 ]; do
+    echo "$1" | sed -e 's/\/\.\//\//g' | awk -F'/' -v OFS="/" 'BEGIN{printf "/";}{top=1; for (i=2; i<=NF; i++) {if ($i == "..") {top--; delete stack[top];} else if ($i != "") {stack[top]=$i; top++;}} for (i=1; i<top; i++) {printf "%s", stack[i]; printf OFS;}}{print ""}'
+    shift
+done; }
 
 # 파이프로 들어온 각열을 dialog 메뉴로 파싱
 fdialog1() {
@@ -1265,6 +1295,22 @@ alarm() {
             at -c $j | tail -n2 | head -n1
         done | stripe | cgrep alarm_task_$input
     fi
+}
+
+# print array - debug (bash2)
+printarr() {
+    local arr_name=$1
+    local count
+    count=$(eval echo '${#'$arr_name'[@]}')
+
+    echo "count: $count"
+    local i=0
+    while [ $i -lt $count ]; do
+        local value
+        value=$(eval echo '${'"$arr_name"'['$i']}')
+        echo "${arr_name}[$i] = $value"
+        i=$((i + 1))
+    done
 }
 
 # history view
@@ -2028,9 +2074,14 @@ EOF
     [ "$INTERFACES" ] && echo "Files created successfully." || echo "INTERFACES not found"
 }
 
-############## template copy sample
+##############################################################################################################
+##############################################################################################################
+##############################################################################################################
+
+############## template copy/view func
 
 template_view() { template_copy $1 /dev/stdout; }
+
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -3545,14 +3596,25 @@ findtime = 300
 EOF
         ;;
 
-    .yml)
+    sample.yml)
         cat >"$file_path" <<'EOF'
-
+    sample
 EOF
         ;;
 
+        # reuse
+        #    .yml)
+        #        cat >"$file_path" <<'EOF'
+        #
+        #EOF
+        #        ;;
+
     esac
 }
+
+##############################################################################################################
+##############################################################################################################
+##############################################################################################################
 
 # !! P e e k a b o o !! go !!
 initvar=$1
