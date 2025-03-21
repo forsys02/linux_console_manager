@@ -629,7 +629,7 @@ menufunc() {
                     [[ $cmd_choice == "m" ]] && menufunc
                     [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.. [$ooldscut]" && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $ooldscut
                     [[ $cmd_choice == "bb" ]] && echo "Back to the previous menu.. [$oooldscut]" && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $oooldscut
-                    [[ $cmd_choice == "chat" || $cmd_choice == "ai" ]] && ollama run gemma3 2>/dev/null && cmds
+                    [[ $cmd_choice == "chat" || $cmd_choice == "ai" || $cmd_choice == "hi" || $cmd_choice == "hello" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
                     [[ $cmd_choice == "conf" ]] && conf && cmds
@@ -741,7 +741,7 @@ menufunc() {
             export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $oooldscut # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
-        elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" ]]; then
+        elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
             ollama run gemma3 2>/dev/null
         elif [ "$choice" ] && [ "$choice" == "h" ]; then
             gohistory
