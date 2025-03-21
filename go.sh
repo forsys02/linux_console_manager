@@ -619,6 +619,7 @@ menufunc() {
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
                     [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.." && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "chat" || $cmd_choice == "ai" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
                     [[ $cmd_choice == "conf" ]] && conf && cmds
@@ -727,6 +728,8 @@ menufunc() {
             export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
+        elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" ]]; then
+            ollama run gemma3 2>/dev/null
         elif [ "$choice" ] && [ "$choice" == "h" ]; then
             gohistory
         elif [ "$choice" ] && [ "$choice" == "hi" ]; then
