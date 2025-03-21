@@ -618,8 +618,7 @@ menufunc() {
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
-                    # back to previous menu
-                    [[ $cmd_choice == "b" ]] && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.." && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut
 
                     # 환경파일 수정 및 재시작
                     [[ $cmd_choice == "conf" ]] && conf && cmds
@@ -724,6 +723,7 @@ menufunc() {
         elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
             conffc # rollback go.sh
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
+            echo "Back to the previous menu.." && sleep 1
             export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
