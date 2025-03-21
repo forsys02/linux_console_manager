@@ -140,6 +140,9 @@ process_commands() {
             eval "$command"
         fi
         # log
+        #lastarg="" ; lastarg="$(echo "$command" | awk99 | sed 's/^\([^"]*\)"$/\1/' )" # 마지막 인수 재사용시 # 끝에만 남아있는" 제거
+        lastarg=""
+        lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 # 끝에만 남아있는" 제거
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
@@ -430,10 +433,10 @@ menufunc() {
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                                    -e '/^#/! s/^: [^;]*/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(restart\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
+                                    -e '/^#/! s/\(restart\|reload\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
@@ -500,6 +503,8 @@ menufunc() {
                                     var_value=""
                                     dvar_value=""
                                     var_name="var${var#var}"
+                                    # 변수조정 varVAR.conf -> varVAR
+                                    if [[ $value != *__* ]]; then var_name="${var_name%.*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
@@ -730,7 +735,8 @@ menufunc() {
         elif [ "$choice" ] && [ "$choice" == "confc" ]; then
             confc # rollback go.env
         elif [ "$choice" ] && [ "$choice" == "conff" ]; then
-            conff # vi go.sh
+            [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
+            #conff # vi go.sh
         elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
             conffc # rollback go.sh
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
@@ -1245,7 +1251,7 @@ conf() {
     export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" $scut
 }
 conff() {
-    vi2 "$gofile"
+    [ $1 ] && vi22 "$gofile" "$1" || vim "$gofile"
     [ -f /html/go.sh ] 2>/dev/null && cp -a "$gofile" /html/go.sh && chmod 755 /html/go.sh
     export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" $scut
 }
@@ -1643,6 +1649,10 @@ sleepdot() {
 }
 
 # backup & vi
+vi22() {
+    rbackup "$1"
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /$2" "$1"; else vim "$1" || vi "$1"; fi
+}
 vi2() {
     rbackup "$1"
     if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
@@ -3680,7 +3690,25 @@ findtime = 300
 EOF
         ;;
 
-    sample.yml)
+    example.com.conf)
+        cat >"$file_path" <<'EOF'
+<VirtualHost *:80>
+    ServerName example.com
+    ServerAlias www.example.com
+    DocumentRoot /var/www/html
+
+    <Directory /var/www/html>
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/example.com_error.log
+    CustomLog ${APACHE_LOG_DIR}/example.com_access.log combined
+</VirtualHost>
+EOF
+        ;;
+
+    6yyP.7dw.sample.yml)
         cat >"$file_path" <<'EOF'
     sample
 EOF
