@@ -666,7 +666,7 @@ menufunc() {
                     # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행
                     [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && eval "$cmd_choice $cmd_choice1" && read -p 'You Win! Done... [Enter] ' x
                     # log
-                    echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+                    [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
                     # alarm
                     [ "$cmd_choice" ] && [ ! "${cmd_choice//[0-9]/}" ] && [ "${cmd_choice:0:1}" == "0" ] && echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1 && alarm "$cmd_choice" "$cmd_choice1" && {
@@ -793,7 +793,7 @@ menufunc() {
 
             [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && eval "$choice $choice1" && read -p 'You Win! Done... [Enter] ' x
             # log
-            echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+            [ "$choice" ] && [ "${choice//[0-9]/}" ] && echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
         fi
     done # end of main while
