@@ -117,6 +117,7 @@ export "gateway"
 scut=${scut-}
 oldscut=${oldscut-}
 ooldscut=${ooldscut-}
+oooldscut=${oooldscut-}
 
 ############################################################
 # 최종 명령문을 실행하는 함수
@@ -193,8 +194,12 @@ menufunc() {
             #oldscut=""
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
-        [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && { ooldscut=$oldscut && oldscut="$scut"; }
-        [ "$ooldscut" ] && flow="$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
+        [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+            oooldscut="$ooldscut"
+            ooldscut="$oldscut"
+            oldscut="$scut"
+        }
+        [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         if [ ${#shortcutarr[@]} -eq 0 ]; then
@@ -356,8 +361,12 @@ menufunc() {
                         choice_list() {
                             echo
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && readxx
-                            [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && { ooldscut=$oldscut && oldscut="$scut"; }
-                            [ "$ooldscut" ] && flow="$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
+                            [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+                                oooldscut="$ooldscut"
+                                ooldscut="$oldscut"
+                                oldscut="$scut"
+                            }
+                            [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
                             echo "=============================================="
                             echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
                             echo "=============================================="
@@ -618,7 +627,8 @@ menufunc() {
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
-                    [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.." && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.. [$ooldscut]" && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "bb" ]] && echo "Back to the previous menu.. [$oooldscut]" && sleep 1 && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $oooldscut
                     [[ $cmd_choice == "chat" || $cmd_choice == "ai" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
@@ -724,8 +734,11 @@ menufunc() {
         elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
             conffc # rollback go.sh
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
-            echo "Back to the previous menu.." && sleep 1
-            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut # back to previous menu
+            echo "Back to the previous menu.. [$ooldscut]" && sleep 1
+            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $ooldscut # back to previous menu
+        elif [ "$choice" ] && [ "$choice" == "bb" ]; then
+            echo "Back to the previous menu.. [$oooldscut]" && sleep 1
+            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut && exec $gofile $oooldscut # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
         elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" ]]; then
