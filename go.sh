@@ -669,7 +669,10 @@ menufunc() {
                     fi
 
                     # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행
-                    [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && eval "$cmd_choice $cmd_choice1" && read -p 'You Win! Done... [Enter] ' x
+                    [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && {
+                        eval "$cmd_choice $cmd_choice1"
+                        read -p 'You Win! Done... [Enter] ' x </dev/tty
+                    }
                     # log
                     [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
@@ -797,7 +800,10 @@ menufunc() {
             export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $choice
         else
 
-            [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && eval "$choice $choice1" && read -p 'You Win! Done... [Enter] ' x
+            [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && {
+                eval "$choice $choice1"
+                read -p 'You Win! Done... [Enter] ' x </dev/tty
+            }
             # log
             [ "$choice" ] && [ "${choice//[0-9]/}" ] && echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
