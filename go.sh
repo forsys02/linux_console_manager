@@ -91,6 +91,8 @@ if touch /tmp/go_history.txt 2>/dev/null; then
 else
     gotmp="$HOME/tmp"
     mkdir -p "$gotmp"
+    touch "$gotmp"/go_history.txt
+    chmod 600 /tmp/go_history.txt
 fi
 
 # public_ip & offline check ( dns or ping err )
@@ -110,6 +112,11 @@ export "guestip"
 
 gateway="$(ip route | grep 'default' | awk '{print $3}')"
 export "gateway"
+
+# exported flow get
+scut=${scut-}
+oldscut=${oldscut-}
+ooldscut=${ooldscut-}
 
 ############################################################
 # 최종 명령문을 실행하는 함수
@@ -132,7 +139,7 @@ process_commands() {
             eval "$command"
         fi
         # log
-        echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null && chmod 600 "$gotmp"/go_history.txt 2>/dev/null || chown root.root "$gotmp"/go_history.txt 2>/dev/null
+        echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
@@ -176,18 +183,18 @@ menufunc() {
     while true; do
         clear || reset
         # 서브메뉴 타이틀 변경
-        [ "$scut" ] && [ "$scut" = "m" ] && ooldscut=$oldscut && oldscut="$scut"
         [ "$title_of_menu_sub" ] && {
             # 서브메뉴
             scut=$(echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}')
             title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m"
         } || {
             # 메인메뉴
-            scut=""
-            oldscut=""
+            scut="m"
+            #oldscut=""
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
-        [ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow=""; }
+        [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && { ooldscut=$oldscut && oldscut="$scut"; }
+        [ "$ooldscut" ] && flow="$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         #if [ ! "$chosen_command_sub" ]; then
@@ -350,10 +357,12 @@ menufunc() {
                         # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
                         choice_list() {
                             echo
-                            oldscut="$scut" && scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}')
-                            [ "$oldscut" ] && flow="$oldscut->$scut" || { [ "$scut" ] && flow="m->$scut" || flow=""; }
+                            #                     [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {  ooldscut=$oldscut && oldscut="$scut" ; }
+                            scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && readxx
+                            [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && { ooldscut=$oldscut && oldscut="$scut"; }
+                            [ "$ooldscut" ] && flow="$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
                             echo "=============================================="
-                            echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "$flow \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
+                            echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
                             echo "=============================================="
                             # pre excute
                             for items in "${pre_commands[@]}"; do
@@ -502,7 +511,7 @@ menufunc() {
 
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
-                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
+                                            trap 'stty sane ; export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"' INT
                                             {
                                                 ps3=$PS3
                                                 PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
@@ -516,7 +525,7 @@ menufunc() {
                                             dvar_value="${dvar_value_array[$((reply - 1))]}"
                                         # 기본값이 하나일때
                                         else
-                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
+                                            trap 'stty sane ; export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
@@ -540,7 +549,7 @@ menufunc() {
                                             if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
                                             else
-                                                trap 'stty sane ; exec "$gofile" "$scut"' INT
+                                                trap 'stty sane ; export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"' INT
                                                 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
                                                 trap - INT
@@ -549,7 +558,7 @@ menufunc() {
                                             fi
 
                                         else
-                                            trap 'stty sane ; exec "$gofile" "$scut"' INT
+                                            trap 'stty sane ; export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
@@ -612,7 +621,8 @@ menufunc() {
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
-                    [[ $cmd_choice == "b" ]] && { echo "oo: $ooldscut // o: $oldscut // s: $scut " && readx; }
+                    # back to previous menu
+                    [[ $cmd_choice == "b" ]] && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut
 
                     # 환경파일 수정 및 재시작
                     [[ $cmd_choice == "conf" ]] && conf && cmds
@@ -627,6 +637,7 @@ menufunc() {
 
                     # explorer
                     [[ $cmd_choice == "e" ]] && { ranger $cmd_choice1 2>/dev/null || explorer; } && cmds
+                    [[ $cmd_choice == "df" ]] && [[ ! $cmd_choice1 ]] && { df -h | cper; } && readx && cmds
                     [[ $cmd_choice == "t" ]] && { htop 2>/dev/null || top; } && cmds
                     [[ $cmd_choice == "tt" ]] && { iftop -t 2>/dev/null || (yyay iftop && iftop -t); } && cmds
                     [[ $cmd_choice == "ttt" || $cmd_choice == "dfm" ]] && { dfmonitor; } && cmds
@@ -642,11 +653,13 @@ menufunc() {
                         break
                     #
                     elif [[ -n $cmd_choice ]] && [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q -w " $cmd_choice "; then
-                        exec $gofile $cmd_choice
+                        export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $cmd_choice
                     fi
 
                     # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행
                     [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && eval "$cmd_choice $cmd_choice1" && read -p 'You Win! Done... [Enter] ' x
+                    # log
+                    echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
                     # alarm
                     [ "$cmd_choice" ] && [ ! "${cmd_choice//[0-9]/}" ] && [ "${cmd_choice:0:1}" == "0" ] && echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1 && alarm "$cmd_choice" "$cmd_choice1" && {
@@ -705,7 +718,7 @@ menufunc() {
             fi
             # menufunc
             # 환경파일 수정으로 새로시작
-            exec "$gofile" "$scut"
+            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"
 
         # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
 
@@ -717,6 +730,10 @@ menufunc() {
             conff # vi go.sh
         elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
             conffc # rollback go.sh
+        elif [ "$choice" ] && [ "$choice" == "b" ]; then
+            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $ooldscut # back to previous menu
+        elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
+            /bin/df -h | cper && readx
         elif [ "$choice" ] && [ "$choice" == "h" ]; then
             gohistory
         elif [ "$choice" ] && [ "$choice" == "hi" ]; then
@@ -762,10 +779,12 @@ menufunc() {
                 readx
             }
         elif [[ -n $choice ]] && [[ -z $choice1 ]] && echo "$shortcutstr" | grep -q -w " $choice "; then
-            exec $gofile $choice
+            export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec $gofile $choice
         else
 
             [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && eval "$choice $choice1" && read -p 'You Win! Done... [Enter] ' x
+            # log
+            echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
         fi
     done # end of main while
@@ -1191,7 +1210,7 @@ rollback() {
         echo "오류: 파일 없음."
         return 1
     }
-    trap 'stty sane ; exec "$gofile" "$scut"' INT
+    trap 'stty sane ; export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"' INT
     PS3="시간순 정렬 - 복구할 파일 선택: "
     select file in $(find "$d" -maxdepth 1 -name "${base}.[0-9]*.bak" -print0 | xargs -0 ls -lt | awk '{print $NF}' | head -n 5); do [ -n "$file" ] && {
         cdiff "$1" "$file"
@@ -1200,7 +1219,7 @@ rollback() {
         break
     }; done </dev/tty
     trap - INT
-    exec "$gofile" $scut
+    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" $scut
 }
 
 # shortcut view
@@ -1216,12 +1235,12 @@ scr() {
 conf() {
     vi2 "$envorg" $scut
     [ -f /html/go.env ] 2>/dev/null && cp -a "$envorg" /html/go.env && chmod 644 /html/go.env
-    exec "$gofile" $scut
+    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" $scut
 }
 conff() {
     vi2 "$gofile"
     [ -f /html/go.sh ] 2>/dev/null && cp -a "$gofile" /html/go.sh && chmod 755 /html/go.sh
-    exec "$gofile" $scut
+    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" $scut
 }
 confc() { rollback "$envorg"; }
 conffc() { rollback "$gofile"; }
@@ -1648,7 +1667,7 @@ fi; }
 # update
 update() {
     rbackup "$gofile" "$envorg"
-    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && exec "$gofile" "$scut"
+    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && export scut=$scut oldscut=$oldscut ooldscut=$ooldscut && exec "$gofile" "$scut"
 }
 
 # install
