@@ -329,7 +329,7 @@ menufunc() {
                     fi
                     # chosen_command_sub 의 한줄위 shortcut 가져옴
                     # chosen_command_sub_shortcut="$(awk -v cc="$chosen_command_sub" '$0 == cc && NR > 1 && prev ~ /\[([^]]+)\]/ {match(prev, /\[([^]]+)\]/); print substr(prev, RSTART+1, RLENGTH-2); exit} {prev=$0}' "$envtmp")"
-                    #echo "debug: $chosen_command_sub // $chosen_command_sub_shortcut" ; readxx
+                    #echo "debug: $chosen_command_sub // $chosen_command_sub_shortcut" ; #readxx
                     # choice 99 로 아래 메뉴 진입 시도
                     choice=99
                 fi
@@ -349,7 +349,7 @@ menufunc() {
                 # 선택한 메뉴가 서브메뉴인경우 ${chosen_command_sub}가 포함된 리스트 수집
                 # 선택한 메뉴가 메인메뉴인경우 ${chosen_command_sub} -> 공백처리
                 sub_menu="${chosen_command_sub-}"
-                # echo "title_of_menu: $title_of_menu" && readxx
+                # echo "title_of_menu: $title_of_menu" && #readxx
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
                 IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
                 IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
@@ -371,7 +371,7 @@ menufunc() {
                         # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
                         choice_list() {
                             echo
-                            scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && readxx
+                            scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
                             [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
                                 oooldscut="$ooldscut"
                                 ooldscut="$oldscut"
@@ -456,7 +456,7 @@ menufunc() {
                             cmd_choice=""
                             [ "$x" ] && [[ $x == [0-9] || $x == [1-9][0-9] ]] && vx=$x && x=""
                             tail -n1 "$gotmp/go_history.txt" | grep -q "vi2" && [ "$vx" ] && echo "I won\'t discard the number you pressed." && sleep 0.5 && cmd_choice=$vx
-                            [ ! "$vx" ] && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; } && vx=""
+                            [ ! "$vx" ] && old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; } && vx=""
 
                             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
                             # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
@@ -668,8 +668,11 @@ menufunc() {
                     if [[ $cmd_choice == "0" || $cmd_choice == "q" || $cmd_choice == "." ]]; then
                         # 환경변수 초기화 // varVAR save
                         # shortcut 으로 이동한후 q 로 이동시 상위 메뉴 타이틀 가져오기
-                        # readxx $env $chosen_command_sub $title_of_menu_sub $title_of_menu
-                        title_of_menu_sub="$(cat "$env" | grep -B1 "^${chosen_command_sub}" | head -n1 | sed -e 's/^%%% //g')"
+                        # title_of_menu_sub="$(cat "$env" | grep -B1 "^${chosen_command_sub}" | head -n1 | sed -e 's/^%%% //g')"
+                        #readxx $choice $cmd_choice $old_cmd_choice $env $chosen_command_sub $title_of_menu_sub $title_of_menu
+                        [ "$choice" == "99" ] && title_of_menu_sub="$(cat "$env" | grep -B1 "^${chosen_command_sub}" | head -n1 | sed -e 's/^%%% //g' -e 's/.*}//')"
+                        #readxx $cmd_choice $old_cmd_choice $env $chosen_command_sub $title_of_menu_sub $title_of_menu
+                        #readxx $env $chosen_command_sub $title_of_menu_sub $title_of_menu
                         title_of_menu=$title_of_menu_sub
                         unsetvar varl
                         saveVAR
@@ -1661,7 +1664,7 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-readxx() { read -p "Debug Here!! 1:"$1"   2:"$2"   3:"$3"   4:"$4" [Enter] " x </dev/tty; }
+readxx() { read -p "Debug Here!! 1:"$1"   2:"$2"   3:"$3"   4:"$4"   5:"$5"   6:"$6" [Enter] " x </dev/tty; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
