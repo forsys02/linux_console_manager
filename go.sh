@@ -316,9 +316,13 @@ menufunc() {
                 if [ "$choice" == "${item%%|||*}" ]; then
                     # chosen_command_sub 는 중괄호 포함 내용 {command_value} 저장
                     chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
-                    # 줄괄호 시작 메뉴 아닐때 빈변수 반환 title 조정
+                    # 중괄호 시작 메뉴 아닐때 빈변수 반환 title 조정
                     if [[ $chosen_command_sub == "{}" ]]; then
-                        chosen_command_sub="" && title_of_menu="${item#*\%\%\% }"
+                        #old_title_of_menu=$title_of_menu
+                        #old_chosen_command_sub=$chosen_command_sub
+                        #readxx $env $chosen_command_sub $title_of_menu_sub $title_of_menu
+                        chosen_command_sub="$(cat "$env" | grep -FA1 "%%% $title_of_menu" | tail -n1)"
+                        title_of_menu="${item#*\%\%\% }"
                     else
                         title_of_menu="${item#*\}}"
                         title_of_menu_sub="${item#*\}}"
@@ -437,7 +441,7 @@ menufunc() {
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|cat\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(restart\|reload\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
@@ -594,7 +598,6 @@ menufunc() {
                                         elif [ "${!var_name}" ]; then
                                             var_value="$dvar_value"
                                         fi
-                                    #elif [ -z "$var_value" ] || [ "$var_value" == "c" ] || [ "$var_value" == "q" ] || [ "$var_value" == "." ]; then
                                     elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ]; then
                                         { cancel=yes && echo "Canceled..." && eval flagof_"${var_name}"=set && break; }
                                     fi
@@ -664,6 +667,10 @@ menufunc() {
                     # cancel exit 0
                     if [[ $cmd_choice == "0" || $cmd_choice == "q" || $cmd_choice == "." ]]; then
                         # 환경변수 초기화 // varVAR save
+                        # shortcut 으로 이동한후 q 로 이동시 상위 메뉴 타이틀 가져오기
+                        # readxx $env $chosen_command_sub $title_of_menu_sub $title_of_menu
+                        title_of_menu_sub="$(cat "$env" | grep -B1 "^${chosen_command_sub}" | head -n1 | sed -e 's/^%%% //g')"
+                        title_of_menu=$title_of_menu_sub
                         unsetvar varl
                         saveVAR
                         # CMDs 루프종료 --> 상위 choice loop
@@ -789,7 +796,7 @@ menufunc() {
         elif [ "$choice" ] && [[ $choice == "0" || $choice == "q" || $choice == "." ]]; then
 
             # title_of_menu_sub=""
-            chosen_command_sub=""
+            # chosen_command_sub=""
             chosen_command=""
 
             # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
@@ -1654,7 +1661,7 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-readxx() { read -p "Debug Here!! [Enter] " x </dev/tty; }
+readxx() { read -p "Debug Here!! 1:"$1"   2:"$2"   3:"$3"   4:"$4" [Enter] " x </dev/tty; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
