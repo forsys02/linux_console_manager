@@ -144,9 +144,8 @@ process_commands() {
             eval "$command"
         fi
         # log
-        #lastarg="" ; lastarg="$(echo "$command" | awk99 | sed 's/^\([^"]*\)"$/\1/' )" # 마지막 인수 재사용시 # 끝에만 남아있는" 제거
         lastarg=""
-        lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 # 끝에만 남아있는" 제거
+        lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
@@ -161,7 +160,7 @@ process_commands() {
     fi
 }
 
-# 환경파일에서 %%% 로 시작하는 메뉴 출력
+# 환경파일에서 %%% 로 시작하는 메뉴 출력 함수 print_menulist
 print_menulist() {
     if [ -z "$chosen_command_sub" ]; then
         # mainmenu list
@@ -182,13 +181,14 @@ menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     local chosen_command_sub=$1
     local title_of_menu_sub=$2
-
+    local choiceloop=0
     # 히스토리 파일 정의하고 불러옴
     HISTFILE="$gotmp/go_history.txt"
     history -r "$HISTFILE"
 
     # 탈출코드 또는 ctrlc 가 입력되지 않는 경우 루프 loop
-    while true; do
+    while true; do # choice loop
+        choiceloop=$((choiceloop + 1))
         clear || reset
         # 서브메뉴 타이틀 변경
         [ "$title_of_menu_sub" ] && {
@@ -226,7 +226,9 @@ menufunc() {
         fi
 
         echo
-        echo "=============================================="
+        echo -n "=============================================="
+        echo -n " :$choiceloop"
+        echo ""
         echo -e "* $title $flow"
         echo "=============================================="
         if [ ! "$title_of_menu_sub" ]; then
@@ -238,7 +240,7 @@ menufunc() {
             # offline print
             if [ "$offline" == "offline" ]; then
                 echo -ne "==="
-                RED1
+                RED14
                 echo -ne " offline "
                 RST
                 echo "=================================="
@@ -272,7 +274,7 @@ menufunc() {
         declare -a keysarr
         declare -a idx_mapping
 
-        # 메인 or 서브 메뉴 리스트 구성
+        # 메인 or 서브 메뉴 리스트 구성 loop
         while read line; do
             menu_idx=$((menu_idx + 1))
             items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //')
@@ -297,6 +299,7 @@ menufunc() {
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
             choice=$initvar && initvar=""
         else
+            # readchoice
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
         fi
 
@@ -306,6 +309,10 @@ menufunc() {
         #shortcut 을 참조하여 choice 번호 설정
         [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]}
 
+        # choice 와 shortcut 이 동일한 경우 pass
+        if [[ $choice && "choice" == "scut" ]]; then
+            continue
+        fi
         # 눈에 보이지 않는 메뉴 호출시
         # 서브메뉴에 숨어있는 shortcut 호출이 있을때 (숫자가 아닐때)
         if [ "$choice" ] && ((!$choice > 0)) 2>/dev/null; then
@@ -348,6 +355,14 @@ menufunc() {
             listof_comm() {
                 # 선택한 메뉴가 서브메뉴인경우 ${chosen_command_sub}가 포함된 리스트 수집
                 # 선택한 메뉴가 메인메뉴인경우 ${chosen_command_sub} -> 공백처리
+                # 메뉴 3종류 메인단독 / 메인경유 / 서브경유 / 최종
+                # 1. %%% 서버 데몬 관리 [d]
+                # 2. %%% 시스템 초기설정과 기타 [i]
+                #    {submenu_sys}
+                # 3. %%% {submenu_sys}>히든메뉴 [hid]
+                #    {submenu_hidden}
+                # 4. %%% {submenu_hidden}원격 백업 관리 [rb]
+                #
                 sub_menu="${chosen_command_sub-}"
                 # echo "title_of_menu: $title_of_menu" && #readxx
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
@@ -360,12 +375,14 @@ menufunc() {
             # cmds 보여주는 loop func
             ###############################################################
             cmds() {
-
-                while true; do # 하부 메뉴 CMDs loop
-
+                local cmdloop=0
+                while true; do # 하부 메뉴 CMDs cmd_choice loop
+                    cmdloop=$((cmdloop + 1))
                     chosen_command=""
                     num_commands=${#chosen_commands[@]} # 줄길이 체크
 
+                    # 명령줄이 1줄 이상이면 리스트 출력
+                    # 1개면 바로 실행
                     if [ $num_commands -gt 1 ]; then
 
                         # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
@@ -378,7 +395,9 @@ menufunc() {
                                 oldscut="$scut"
                             }
                             [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
-                            echo "=============================================="
+                            echo -n "=============================================="
+                            echo -n " :: $cmdloop"
+                            echo
                             echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
                             echo "=============================================="
                             # pre excute
@@ -403,9 +422,9 @@ menufunc() {
                             display_idx=1
                             unset cmd_choice original_indices
                             original_indices=()
-                            for i in $(seq 1 ${#chosen_commands[@]}); do
+                            for item in $(seq 1 ${#chosen_commands[@]}); do
 
-                                c_cmd="${chosen_commands[$((i - 1))]}"
+                                c_cmd="${chosen_commands[$((item - 1))]}"
 
                                 # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로
                                 file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
@@ -428,7 +447,7 @@ menufunc() {
                                 if [ ${c_cmd:0:1} != "#" ]; then
                                     pi="${display_idx}."
                                     # 배열 확장
-                                    original_indices=("${original_indices[@]}" "$i")
+                                    original_indices=("${original_indices[@]}" "$item")
                                     display_idx=$((display_idx + 1))
                                 fi
 
@@ -449,7 +468,7 @@ menufunc() {
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
 
-                            done
+                            done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
                             echo "=============================================="
                             vx=""
@@ -472,15 +491,22 @@ menufunc() {
                     elif [ $num_commands -eq 1 ]; then
                         chosen_command=${chosen_commands[0]}
                     else
+                        # 명령줄을 한줄도 찾지 못한경우 -> 오류판정
                         echo "error : num_commands -> $num_commands // submenu: $sub_menu // debug: find -> chosen_commands="
                         break
-                    fi ### end of [ $num_commands -gt 1 ]
+                    fi ### end of [ $num_commands -gt 1 ] # 명령줄 출력 부분 완료
 
+                    ###################################################
+                    # 명령줄 판단 부분
+                    ###################################################
+                    # 명령줄이 {submenu_sys} 형태인경우 서브 메뉴 구성을 위해 다시 menufunc 부름
                     if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
                         menufunc $chosen_command ${title_of_menu}
 
+                    # 실졍 명령줄이 넘어온경우
                     elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]; then
                         echo
+                        # Danger 판단
                         if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
                             chosen_command=${chosen_command#* }
                             echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
@@ -492,6 +518,7 @@ menufunc() {
                             cfm=y
                         fi
                         # ;; 로 이어진 명령들은 순차적으로 실행 (앞의 결과를 보고 뒤의 변수를 입력 가능)
+                        # 명령즐을 ;; 기준으로 나누어 배열을 만듬
                         if [[ $chosen_command != *"case"* ]] && [[ $chosen_command != *"esac"* ]]; then
                             IFS=$'\n' cmd_array=($(echo "$chosen_command" | sed 's/;;/\n/g')) # 명령어 배열 생성
                         else
@@ -504,9 +531,10 @@ menufunc() {
                             echo -e "--> \x1b[1;36;40m$cmd\x1b[0m"
 
                             # 동일한 var 는 제외하고 read // awk '!seen[$0]++'
-
+                            # noDanger
                             if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
 
+                                # 명령줄에 varVAR 형태 기본값 지정을 위한 loop (ex. varA varB 등 한 명령줄에 여러개의 변수요청)
                                 while read -r var; do
                                     var_value=""
                                     dvar_value=""
@@ -627,6 +655,7 @@ menufunc() {
                         unset cancel
 
                         # flagof 변수 초기화
+                        # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정 -> 초기화
                         #unset $(compgen -v | grep '^flagof_')
                         for flag in $(compgen -v | grep '^flagof_'); do
                             unset ${flag}
@@ -636,6 +665,9 @@ menufunc() {
                     # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 // choice 변수는 메뉴(서브) 화면에서 수신값
                     # 참조) menu_shortcut 는 명령줄에서는 지원하지 않음
                     # direct command sub_menu
+                    #
+                    # 숫자 명령줄 번호가 선택이 안된 경우 이곳까지 내려옴
+                    #
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
@@ -678,26 +710,30 @@ menufunc() {
                         saveVAR
                         # CMDs 루프종료 --> 상위 choice loop
                         break
-                    #
+
+                    # shortcut menu 이동 요청이 들어온경우
+                    # shortcut 이름이 우연히 실제 리눅스 명령이랑 겹칠경우 shortcut 이동으로 실행
                     elif [[ -n $cmd_choice ]] && [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q -w " $cmd_choice "; then
                         savescut && exec $gofile $cmd_choice
                     fi
 
-                    # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행
+                    # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행 (ex. top cd)
                     [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && {
                         eval "$cmd_choice $cmd_choice1"
                         read -p 'You Win! Done... [Enter] ' x </dev/tty
-                    }
-                    # log
-                    [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
-                    # alarm
+                        # 직접 실행한 명령 log add ex.) h or hh reuse
+                        [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+                    }
+
+                    # alarm ex.) 0 으로 시작하는 숫자입력 (0빼고) 003 3분알람
                     [ "$cmd_choice" ] && [ ! "${cmd_choice//[0-9]/}" ] && [ "${cmd_choice:0:1}" == "0" ] && echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1 && alarm "$cmd_choice" "$cmd_choice1" && {
                         echo
                         readx
                         cmds
                     }
 
+                    # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                     [ $num_commands -eq 1 ] && break
 
                 done #        end of      while true ; do # 하부 메뉴 loop 끝 command list
@@ -713,12 +749,13 @@ menufunc() {
             # 메뉴중에 정상범위 숫자도 아니고 메인쇼트컷도 아닌 예외 메뉴 할당
 
         elif [ "$choice" ] && [ "$choice" == "krr" ]; then
-            # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty)
+            # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
             if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
                 which jfbterm 2>/dev/null && jfbterm || (yum install -y jfbterm && jfbterm)
             fi
         elif [ "$choice" ] && [ "$choice" == "kr" ]; then
-            # hangul encoding chg
+            # hangul encoding force chg
+            # ssh 로 이곳 저곳 서버로 이동할때 terminal 클라이언트 한글 환경과 서버 한글 환경이 다르면 한글이 깨짐
             if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "utf chg" && sleep 1
                 if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
@@ -769,8 +806,6 @@ menufunc() {
             ollama run gemma3 2>/dev/null
         elif [ "$choice" ] && [ "$choice" == "h" ]; then
             gohistory
-        elif [ "$choice" ] && [ "$choice" == "hi" ]; then
-            hi && read -rep "[Enter] " x
         elif [ "$choice" ] && [ "$choice" == "e" ]; then
             { ranger $choice1 2>/dev/null || explorer; }
         elif [ "$choice" ] && [ "$choice" == "t" ]; then
@@ -793,7 +828,7 @@ menufunc() {
         # alias 를 쓸수 있는 bash
         elif [ "$choice" ] && [[ $choice == "..." || $choice == "," || $choice == "bash" ]]; then
             /bin/bash
-            # 메인/서브 메뉴 탈출
+        # 메인/서브 메뉴 탈출
         elif [ "$choice" ] && [[ $choice == "m" ]]; then
             menufunc
         elif [ "$choice" ] && [[ $choice == "0" || $choice == "q" || $choice == "." ]]; then
@@ -814,16 +849,18 @@ menufunc() {
                 echo
                 readx
             }
+        # shortcut 이동 명령시
         elif [[ -n $choice ]] && [[ -z $choice1 ]] && echo "$shortcutstr" | grep -q -w " $choice "; then
             savescut && exec $gofile $choice
+        # 실제 리눅스 명령이 들어온 경우 실행
         else
 
             [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && {
                 eval "$choice $choice1"
                 read -p 'You Win! Done... [Enter] ' x </dev/tty
+                # log
+                echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
             }
-            # log
-            [ "$choice" ] && [ "${choice//[0-9]/}" ] && echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
 
         fi
     done # end of main while
