@@ -46,7 +46,7 @@ fi
 
 # varVAR reuse -> saveVAR -> autoloadVAR
 # loadVAR
-[ -f ~/.go.private.var ] && source ~/.go.private.var
+[ -f ~/.go.private.var ] && awk '!seen[$0]++' ~/.go.private.var >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var && source ~/.go.private.var
 
 # 터미널 한글 환경이 2가지 -> 글자 깨짐 방지 인코딩 변환
 # 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
@@ -209,17 +209,24 @@ menufunc() {
         [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
+        # 쇼트컷 배열생성
         if [ ${#shortcutarr[@]} -eq 0 ]; then
 
             # 모든 shortcut 배열로 가져옴 shortcutarr
-            IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% " | grep -E '\[.+\]')"
+            # 연계메뉴의 불러올 하부메뉴 포함되도록 개선 awk
+            # IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% " | grep -E '\[.+\]')"
+            # i@@@%%% 시스템 초기설정과 기타 [i] -----> i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
+            # shortcut 있는 항목만 배열화
+            IFS=$'\n' allof_shortcut_item="$(cat "$env" | cat .go.env | grep -E "^%%%|^{submenu.*}" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+
             shortcutarr=()
-            shortcut_keys_str=" "
+            shortcutstr="@@@"
             idx=0
+            # 쇼트컷네임,%%%제목줄,relaymenu
             for items in $allof_shortcut_item; do
                 shortcutname=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
-                shortcutarr[$idx]="${shortcutname}|||${items}"
-                shortcutstr="${shortcutstr} ${shortcutname} "
+                shortcutarr[$idx]="${shortcutname}@@@${items}"
+                shortcutstr="${shortcutstr}${shortcutname}@@@"
                 ((idx++))
             done
             # printarr shortcutarr # debug
@@ -299,7 +306,7 @@ menufunc() {
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
             choice=$initvar && initvar=""
         else
-            # readchoice
+            # readchoice read choice
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
         fi
 
@@ -307,36 +314,61 @@ menufunc() {
         key_idx=$(echo "${keysarr[*]}" | tr ' ' '\n' | awk -v target="$choice" '$0 == target {print(NR-1); exit}')
 
         #shortcut 을 참조하여 choice 번호 설정
-        [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]}
+        [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]} # && #readxx key $key_idx
 
         # choice 와 shortcut 이 동일한 경우 pass
-        if [[ $choice && "choice" == "scut" ]]; then
-            continue
-        fi
+        #if [[ $choice && "choice" == "scut" ]]; then
+        #    readxx $LINENO choice $choice shortcut $scut
+        #    continue
+        #fi
         # 눈에 보이지 않는 메뉴 호출시
         # 서브메뉴에 숨어있는 shortcut 호출이 있을때 (숫자가 아닐때)
+        # 경유메뉴에서 호출시 작동오류 check
         if [ "$choice" ] && ((!$choice > 0)) 2>/dev/null; then
             # subshortcut 을 참조하여 title_of_menu 설정
             # ex) chosen_command:{submenu_systemsetup} // title_of_menu:시스템 초기설정과 기타 (submenu) [i]
             for item in "${shortcutarr[@]}"; do
                 # echo $item
-                if [ "$choice" == "${item%%|||*}" ]; then
+                if [ "$choice" == "${item%%@@@*}" ]; then
+                    # 형태 -> v@@@%%% proxmox / kvm / minecraft [v]@@@{submenu_virt}
+                    itema2=$(echo "$item" | awk -F'@@@' '{print $2}')
                     # chosen_command_sub 는 중괄호 포함 내용 {command_value} 저장
-                    chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
+                    #chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
+                    chosen_command_sub="$(echo "$itema2" | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
+                    #chosen_command_relay="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $4 "}"}')"
+                    chosen_command_relay="$(echo "$item" | awk -F'@@@' '{print $3}' | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
+                    readxx $LINENO chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
+                    #readxx $LINENO item ${item}
                     # 중괄호 시작 메뉴 아닐때 빈변수 반환 title 조정
+
+                    # mainmenu
                     if [[ $chosen_command_sub == "{}" ]]; then
-                        #old_title_of_menu=$title_of_menu
-                        #old_chosen_command_sub=$chosen_command_sub
-                        #readxx $env $chosen_command_sub $title_of_menu_sub $title_of_menu
-                        chosen_command_sub="$(cat "$env" | grep -FA1 "%%% $title_of_menu" | tail -n1)"
-                        title_of_menu="${item#*\%\%\% }"
+                        # ex) d@@@%%% 서버 데몬 관리 [d]
+                        #readxx $LINENO $env $chosen_command_sub $title_of_menu_sub $title_of_menu
+                        readxx $LINENO 중괄호없는메뉴 대표메뉴
+                        chosen_command_sub=""
+                        chosen_command_relay=""
+                        readxx $LINENO chosen_command_sub $chosen_command_sub
+                        title_of_menu="${itema2#*\%\%\% }"
+
+                    # relay {} .. {}
+                    elif [[ $chosen_command_relay != "{}" && $chosen_command_relay ]]; then
+                        # ex) shortcutarr[8] = i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
+                        # ex) shortcutarr[141] = hid@@@%%% {submenu_sys}>히든메뉴 [hid]@@@{submenu_hidden}
+                        title_of_menu="${itema2#*\}}"
+                        itema3=$(echo "$item" | awk -F'@@@' '{print $3}')
+                        chosen_command_relay_sub=$chosen_command_sub
+                        chosen_command_sub="${itema3#*\%\%\% }"
+                        readxx $LINENO 인계메뉴 chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
+
+                    # submenu
                     else
-                        title_of_menu="${item#*\}}"
-                        title_of_menu_sub="${item#*\}}"
+                        # ex) shortcutarr[123] = irc@@@%%% {submenu_com}irc chat [irc]
+                        chosen_command_relay=""
+                        readxx $LINENO 중괄호메뉴일때
+                        title_of_menu="${itema2#*\}}"
                     fi
-                    # chosen_command_sub 의 한줄위 shortcut 가져옴
-                    # chosen_command_sub_shortcut="$(awk -v cc="$chosen_command_sub" '$0 == cc && NR > 1 && prev ~ /\[([^]]+)\]/ {match(prev, /\[([^]]+)\]/); print substr(prev, RSTART+1, RLENGTH-2); exit} {prev=$0}' "$envtmp")"
-                    #echo "debug: $chosen_command_sub // $chosen_command_sub_shortcut" ; #readxx
+
                     # choice 99 로 아래 메뉴 진입 시도
                     choice=99
                 fi
@@ -364,7 +396,8 @@ menufunc() {
                 # 4. %%% {submenu_hidden}원격 백업 관리 [rb]
                 #
                 sub_menu="${chosen_command_sub-}"
-                # echo "title_of_menu: $title_of_menu" && #readxx
+                [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
+                readxx $LINENO title_of_menu: $title_of_menu sub_menu: $sub_menu
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
                 IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
                 IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
@@ -383,6 +416,7 @@ menufunc() {
 
                     # 명령줄이 1줄 이상이면 리스트 출력
                     # 1개면 바로 실행
+                    # readxx $LINENO chosen_command_sub $chosen_command_sub
                     if [ $num_commands -gt 1 ]; then
 
                         # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
@@ -713,7 +747,8 @@ menufunc() {
 
                     # shortcut menu 이동 요청이 들어온경우
                     # shortcut 이름이 우연히 실제 리눅스 명령이랑 겹칠경우 shortcut 이동으로 실행
-                    elif [[ -n $cmd_choice ]] && [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q -w " $cmd_choice "; then
+                    elif [[ -n $cmd_choice ]] && [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice@@@"; then
+                        # readxx cmd_choice
                         savescut && exec $gofile $cmd_choice
                     fi
 
@@ -747,7 +782,7 @@ menufunc() {
 
             # 서브 메뉴 쇼트컷 탈출시
             # 메뉴중에 정상범위 숫자도 아니고 메인쇼트컷도 아닌 예외 메뉴 할당
-
+            # readxx end cmds
         elif [ "$choice" ] && [ "$choice" == "krr" ]; then
             # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
             if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
@@ -850,11 +885,12 @@ menufunc() {
                 readx
             }
         # shortcut 이동 명령시
-        elif [[ -n $choice ]] && [[ -z $choice1 ]] && echo "$shortcutstr" | grep -q -w " $choice "; then
+        elif [[ -n $choice ]] && [[ -z $choice1 ]] && echo "$shortcutstr" | grep -q "@@@$choice@@@"; then
+            readxx $LINENO choice $choice
+            #menufunc $scut
             savescut && exec $gofile $choice
         # 실제 리눅스 명령이 들어온 경우 실행
         else
-
             [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null && echo && {
                 eval "$choice $choice1"
                 read -p 'You Win! Done... [Enter] ' x </dev/tty
@@ -1297,12 +1333,12 @@ rollback() {
 }
 
 # shortcut view
-sc() {
+st() {
     echo "$shortcutstr"
 }
 # shortcut array view
-scr() {
-    printarr shortcutarr | less -r
+str() {
+    printarr shortcutarr | cgrep1 @@@ | less -r
 }
 
 # flow save and exec go.sh
@@ -1328,7 +1364,7 @@ conf() {
     savescut && exec "$gofile" $scut
 }
 conff() {
-    [ $1 ] && vi22 "$gofile" "$1" || vim "$gofile"
+    [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
     [ -f /html/go.sh ] 2>/dev/null && cp -a "$gofile" /html/go.sh && chmod 755 /html/go.sh
     savescut && exec "$gofile" $scut
 }
@@ -1701,7 +1737,9 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-readxx() { read -p "Debug Here!! 1:"$1"   2:"$2"   3:"$3"   4:"$4"   5:"$5"   6:"$6" [Enter] " x </dev/tty; }
+#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read -t 1 x </dev/tty ; }
+#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read  x </dev/tty ; }
+readxx() { :; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
