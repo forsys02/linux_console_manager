@@ -271,7 +271,7 @@ menufunc() {
             # offline print
             if [ "$offline" == "offline" ]; then
                 echo -ne "==="
-                RED14
+                RED1
                 echo -ne " offline "
                 RST
                 echo "=================================="
@@ -311,7 +311,7 @@ menufunc() {
             items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //')
 
             # shortcut array keysarr make
-            # 노출된 메뉴만 shortcut 생성
+            # 노출된 메뉴 shortcut 생성 -> 번호와 연결
             key=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
             [ "$key" ] && {
                 keysarr[$shortcut_idx]="$key"
@@ -319,6 +319,9 @@ menufunc() {
                 ((shortcut_idx++))
             }
             # debug printarr keysarr
+
+            # title ansi
+            items=$(echo -e "$(echo "$items" | sed -E -e 's/^>/\\e[1;37;44m>\\e[0m/g')")
 
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
         done < <(print_menulist) # %%% 모음 가져와서 파싱
@@ -358,9 +361,7 @@ menufunc() {
                     # 형태 -> v@@@%%% proxmox / kvm / minecraft [v]@@@{submenu_virt}
                     itema2=$(echo "$item" | awk -F'@@@' '{print $2}')
                     # chosen_command_sub 는 중괄호 포함 내용 {command_value} 저장
-                    #chosen_command_sub="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
                     chosen_command_sub="$(echo "$itema2" | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
-                    #chosen_command_relay="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $4 "}"}')"
                     chosen_command_relay="$(echo "$item" | awk -F'@@@' '{print $3}' | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
                     readxx $LINENO chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
                     readxx $LINENO item ${item}
@@ -416,7 +417,7 @@ menufunc() {
             listof_comm() {
                 # 선택한 메뉴가 서브메뉴인경우 ${chosen_command_sub}가 포함된 리스트 수집
                 # 선택한 메뉴가 메인메뉴인경우 ${chosen_command_sub} -> 공백처리
-                # 메뉴 3종류 메인단독 / 메인경유 / 서브경유 / 최종
+                # 메뉴 4종류: 메인단독 / 메인경유 / 서브경유 / 최종
                 # 1. %%% 서버 데몬 관리 [d]
                 # 2. %%% 시스템 초기설정과 기타 [i]
                 #    {submenu_sys}
@@ -425,6 +426,7 @@ menufunc() {
                 # 4. %%% {submenu_hidden}원격 백업 관리 [rb]
                 #
                 sub_menu="${chosen_command_sub-}"
+                # 재하청 메뉴는 relay_sub 를 sub_menu 로 사용.
                 [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
                 #readxx $LINENO title_of_menu: $title_of_menu sub_menu: $sub_menu
                 # %%% 부터 빈줄까지 변수에
@@ -763,6 +765,9 @@ menufunc() {
                     ################ 실졍 명령줄이 넘어온경우 end
                     ################ 실졍 명령줄이 넘어온경우 end
 
+                    # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
+                    [ $num_commands -eq 1 ] && break
+
                     #
                     # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 // choice 변수는 메뉴(서브) 화면에서 수신값
                     # direct command sub_menu
@@ -774,8 +779,10 @@ menufunc() {
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
-                    [[ $cmd_choice == "b" ]] && echo "Back to the previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
-                    [[ $cmd_choice == "bb" ]] && echo "Back to the previous menu.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscut
+                    #[[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)"
+                    #[[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscut
+                    [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
                     [[ $cmd_choice == "chat" || $cmd_choice == "ai" || $cmd_choice == "hi" || $cmd_choice == "hello" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
@@ -837,9 +844,6 @@ menufunc() {
                         cmds
                     }
 
-                    # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
-                    [ $num_commands -eq 1 ] && break
-
                 done #        end of      while true ; do # 하부 메뉴 loop 끝 command list
 
             }
@@ -900,11 +904,14 @@ menufunc() {
         elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
             conffc # rollback go.sh
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
-            echo "Back to the previous menu.. [$ooldscut]" && sleep 1
-            savescut && exec $gofile $ooldscut # back to previous menu
+            echo "Back to previous menu.. [$ooldscut]" && sleep 1
+            #savescut && exec $gofile $ooldscut # back to previous menu
+            savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" # back to previous menu
         elif [ "$choice" ] && [ "$choice" == "bb" ]; then
-            echo "Back to the previous menu.. [$oooldscut]" && sleep 1
-            savescut && exec $gofile $oooldscut # back to previous menu
+            echo "Back two menus.. [$oooldscut]" && sleep 1
+            #savescut && exec $gofile $oooldscut # back to previous menu
+            savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" # back to previous menu
+            #echo "$(scutsub $oooldscut) // $(scuttitle $oooldscut)" && readx # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
         elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
@@ -1276,12 +1283,19 @@ scutall() {
 scuttitle() {
     scut=$1
     item="$(scutall $scut)"
-    echo "$item" | awk -F'%%% ' '{if (NF > 1) {gsub(/\{[^}]+\}/, "", $2); gsub(/\[[^]]+\]/, "", $2); gsub(/@@@.*/, "", $2); print $2}}'
+    echo "$item" | awk -F'%%% ' '{if (NF > 1) {gsub(/\{[^}]+\}/, "", $2); gsub(/@@@.*/, "", $2); print $2}}'
+
 }
 scutsub() {
     scut=$1
     item="$(scutall $scut)"
-    echo "$item" | awk -F'%%% ' '{if ($2 ~ /^\{[^}]+\}/) {print $2} else {print ""}}' | awk '{match($0, /\{[^}]+\}/); print substr($0, RSTART, RLENGTH)}'
+    scutrelayout="$(scutrelay $scut)"
+    if [ -n "scutrelayout" ]; then
+        echo "$scutrelayout"
+    else
+        scutsuboutput="$(echo "$item" | awk -F'%%% ' '{if ($2 ~ /^\{[^}]+\}/) {print $2} else {print ""}}' | awk '{match($0, /\{[^}]+\}/); print substr($0, RSTART, RLENGTH)}')"
+        [ -n "$scutsuboutput" ] && echo $scutsuboutput || echo "{}"
+    fi
 }
 scutrelay() {
     scut=$1
