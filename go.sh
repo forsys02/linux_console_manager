@@ -229,7 +229,7 @@ menufunc() {
         # 쇼트컷 배열생성
         if [ ${#shortcutarr[@]} -eq 0 ]; then
 
-            # 모든 shortcut 배열로 가져옴 shortcutarr
+            # 모든 shortcut 배열로 가져옴 shortcutarr array
             # 연계메뉴의 불러올 하부메뉴 포함되도록 개선 awk
             # IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% " | grep -E '\[.+\]')"
             # i@@@%%% 시스템 초기설정과 기타 [i] -----> i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
@@ -251,16 +251,7 @@ menufunc() {
             # printarr shortcutarr # debug
         fi
 
-        # shortcutarr 배열에서 값 추출
-        scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
-        scut_item="$([ -n "$scut_item_idx" ] && echo "${shortcutarr[$scut_item_idx]}")"   # 배열번호에 있는 값 추출
-
         # choice 가 없을때 선택 메뉴 출력
-        #  if :; then #
-        #readxx $LINENO initmenu-chosen_command_sub: $chosen_command_sub chosen_command: $chosen_command choice: $choice initvar: $initvar scut: $scut
-        #[[ -z "$choice" && -n "$initvar" ]] && choice=$initvar && initvar="" && echo "choice < initvar & removed"
-
-        #if [[ -z "$initvar" ]]; then
 
         ############## 메뉴 출력 ###############
 
@@ -371,8 +362,8 @@ menufunc() {
                     chosen_command_sub="$(echo "$itema2" | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
                     #chosen_command_relay="$(echo $item | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $4 "}"}')"
                     chosen_command_relay="$(echo "$item" | awk -F'@@@' '{print $3}' | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
-                    #readxx $LINENO chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
-                    #readxx $LINENO item ${item}
+                    readxx $LINENO chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
+                    readxx $LINENO item ${item}
                     # 중괄호 시작 메뉴 아닐때 빈변수 반환 title 조정
 
                     # mainmenu
@@ -403,7 +394,7 @@ menufunc() {
                     fi
 
                     # choice 99 로 아래 메뉴 진입 시도
-                    readxx choice fail??
+                    readxx choice fail?? $choice
                     choice=99
                 fi
             done
@@ -412,7 +403,8 @@ menufunc() {
         # 메인/서브 메뉴에서 정상 범위의 숫자가 입력된경우
         # 0 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
         # if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
-        if [[ $choice =~ ^[0-9]$ || $choice =~ ^[1-9][0-9]$ ]] && ((choice >= 1 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
+        # if (echo "$choice" | grep -Eq '^[1-9]$|^[1-9][0-9]$') && [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ] 2>/dev/null; then
+        if ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)); then
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
@@ -1268,6 +1260,35 @@ oneline() {
     tr '\n' ' '
 }
 
+# shortcutarr 배열에서 값 추출 // 메뉴 단축키를 입력하면 해당 단축키의 item 모두 출력
+# scutall i
+# 배열 값 4가지
+# d@@@%%% 서버 데몬 관리 [d]
+# i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
+# dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd]
+# lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp}
+scutall() {
+    scut=$1
+    scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
+    scut_item="$([ -n "$scut_item_idx" ] && echo "${shortcutarr[$scut_item_idx]}")"   # 배열번호에 있는 값 추출
+    echo "$scut_item"
+}
+scuttitle() {
+    scut=$1
+    item="$(scutall $scut)"
+    echo "$item" | awk -F'%%% ' '{if (NF > 1) {gsub(/\{[^}]+\}/, "", $2); gsub(/\[[^]]+\]/, "", $2); gsub(/@@@.*/, "", $2); print $2}}'
+}
+scutsub() {
+    scut=$1
+    item="$(scutall $scut)"
+    echo "$item" | awk -F'%%% ' '{if ($2 ~ /^\{[^}]+\}/) {print $2} else {print ""}}' | awk '{match($0, /\{[^}]+\}/); print substr($0, RSTART, RLENGTH)}'
+}
+scutrelay() {
+    scut=$1
+    item="$(scutall $scut)"
+    echo "$item" | awk '{if (match($0, /\{[^}]+\}$/)) print substr($0, RSTART, RLENGTH)}'
+}
+
 # blkid -> fstab ex) blkid2fstab /dev/sdd1 /tmp
 blkid2fstab() {
     d=${2/\/\///}
@@ -1825,11 +1846,10 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read -t 1 x </dev/tty ; }
-#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read  x </dev/tty ; }
-#readxx() { local arg1="${1-NULL}" arg2="${2-NULL}" arg3="${3-NULL}" arg4="${4-NULL}" arg5="${5-NULL}" arg6="${6-NULL}" arg7="${7-NULL}" arg8="${8-NULL}"; echo -e "Debug Here!!   \e[1;37;41mline:\e[0m $arg1  \e[1;37;41m 1:\e[0m $arg2 \e[1;37;41m 2:\e[0m $arg3 \e[1;37;41m 3:\e[0m $arg4  \e[1;37;41m 4:\e[0m $arg5 \e[1;37;41m 5:\e[0m $arg6 \e[1;37;41m 6:\e[0m $arg7  \e[1;37;41m 7:\e[0m $arg8 \e[1;37;41m 8:\e[0m ${9-NULL} \e[1;37;41m 9:\e[0m ${10-NULL}[Enter]"; read x </dev/tty; }
-
 readxx() { :; }
+# debug -> readxx
+#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read -t 1 x </dev/tty ; }
+#readxx() { local arg1="${1-NULL}" arg2="${2-NULL}" arg3="${3-NULL}" arg4="${4-NULL}" arg5="${5-NULL}" arg6="${6-NULL}" arg7="${7-NULL}" arg8="${8-NULL}"; echo -e "Debug Here!!   \e[1;37;41mline:\e[0m $arg1  \e[1;37;41m 1:\e[0m $arg2 \e[1;37;41m 2:\e[0m $arg3 \e[1;37;41m 3:\e[0m $arg4  \e[1;37;41m 4:\e[0m $arg5 \e[1;37;41m 5:\e[0m $arg6 \e[1;37;41m 6:\e[0m $arg7  \e[1;37;41m 7:\e[0m $arg8 \e[1;37;41m 8:\e[0m ${9-NULL} \e[1;37;41m 9:\e[0m ${10-NULL}[Enter]"; read x </dev/tty; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
