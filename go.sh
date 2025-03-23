@@ -122,6 +122,7 @@ scut=${scut-}
 oldscut=${oldscut-}
 ooldscut=${ooldscut-}
 oooldscut=${oooldscut-}
+ooooldscut=${ooooldscut-}
 
 ############################################################
 # 최종 명령문을 실행하는 함수
@@ -219,6 +220,7 @@ menufunc() {
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
         [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+            ooooldscut="$oooldscut"
             oooldscut="$ooldscut"
             ooldscut="$oldscut"
             oldscut="$scut"
@@ -405,7 +407,7 @@ menufunc() {
         # 0 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
         # if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
         # if (echo "$choice" | grep -Eq '^[1-9]$|^[1-9][0-9]$') && [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ] 2>/dev/null; then
-        if ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)); then
+        if ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
@@ -467,6 +469,7 @@ menufunc() {
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
                             [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+                                ooooldscut="$oooldscut"
                                 oooldscut="$ooldscut"
                                 ooldscut="$oldscut"
                                 oldscut="$scut"
@@ -781,8 +784,8 @@ menufunc() {
                     [[ $cmd_choice == "m" ]] && menufunc
                     #[[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
                     [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)"
-                    #[[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscut
                     [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
+                    [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)"
                     [[ $cmd_choice == "chat" || $cmd_choice == "ai" || $cmd_choice == "hi" || $cmd_choice == "hello" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
@@ -909,9 +912,10 @@ menufunc() {
             savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" # back to previous menu
         elif [ "$choice" ] && [ "$choice" == "bb" ]; then
             echo "Back two menus.. [$oooldscut]" && sleep 1
-            #savescut && exec $gofile $oooldscut # back to previous menu
             savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" # back to previous menu
-            #echo "$(scutsub $oooldscut) // $(scuttitle $oooldscut)" && readx # back to previous menu
+        elif [ "$choice" ] && [ "$choice" == "bbb" ]; then
+            echo "Back three menus.. [$ooooldscut]" && sleep 1
+            savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
         elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
@@ -1466,7 +1470,7 @@ str() {
 
 # flow save and exec go.sh
 savescut() {
-    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut
+    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut ooooldscut=$ooooldscut
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
