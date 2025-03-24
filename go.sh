@@ -253,12 +253,15 @@ menufunc() {
         # 쇼트컷 배열생성
         if [ ${#shortcutarr[@]} -eq 0 ]; then
 
+            readxx $LINENO shortcutarr.count.0: "${#shortcutarr[@]} 값없음체크"
             # 모든 shortcut 배열로 가져옴 shortcutarr array
             # 연계메뉴의 불러올 하부메뉴 포함되도록 개선 awk
             # IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% " | grep -E '\[.+\]')"
             # i@@@%%% 시스템 초기설정과 기타 [i] -----> i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
             # shortcut 있는 항목만 배열화
-            IFS=$'\n' allof_shortcut_item="$(cat "$env" | cat $envtmp | grep -E "^%%%|^{submenu.*}" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+            IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+
+            #echo "$allof_shortcut_item"
 
             shortcutarr=()
             shortcutstr="@@@"
@@ -373,10 +376,10 @@ menufunc() {
         # 눈에 보이지 않는 메뉴 호출시
         # 서브메뉴에 숨어있는 shortcut 호출이 있을때 (숫자가 아닐때)
         # 경유메뉴에서 호출시 작동오류 check
-        readxx you choice? $choice
+        readxx $LINENO you choice? $choice
         # if [ "$choice" ] && (( ! $choice > 0 )) 2>/dev/null; then choice 에 영어가 들어오면 참인데 오작동 가끔발생
         if [ "$choice" ] && { ! echo "$choice" | grep -Eq '^[1-9][0-9]*$' || echo "$choice" | grep -Eq '^[a-zA-Z]+$'; }; then
-            readxx you choice? yes $choice
+            readxx $LINENO you choice? yes $choice
             # subshortcut 을 참조하여 title_of_menu 설정
             # ex) chosen_command:{submenu_systemsetup} // title_of_menu:시스템 초기설정과 기타 (submenu) [i]
             for item in "${shortcutarr[@]}"; do
