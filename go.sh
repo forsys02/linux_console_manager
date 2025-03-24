@@ -184,16 +184,18 @@ process_commands() {
 }
 
 #############################################################
-# 환경파일에서 %%% 로 시작하는 메뉴 출력 함수 print_menulist
+# 환경파일에서 %%% 로 시작하는 모든 메뉴 출력 함수 print_menulist
 #############################################################
 
 print_menulist() {
-    if [ -n "$chosen_command_sub" ]; then
+    if [[ -n $chosen_command_sub ]] && [[ $chosen_command_sub != "{}" ]]; then
         # submenu list
-        # {submenu} 빼고 출력
+        # 서브 메뉴에 {...} 테그를 떼고 이름만 출력
+        # {submenu} 떼고 출력
         cat "$env" | grep -E '^%%%' | grep "$chosen_command_sub" | awk -F'}' '{print $2}'
     else
         # mainmenu list
+        # 메인 메뉴는 따로 테그가 없어서 바로 출력
         cat "$env" | grep -E '^%%%' | grep -vE '\{submenu' | sed -r 's/%%% //'
     fi
 }
@@ -207,7 +209,7 @@ declare -a shortcutarr shortcutstr
 menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
-    local chosen_command_sub=$1 # ex) {submenu_lamp}
+    local chosen_command_sub=$1 # ex) {submenu_lamp} or {}
     local title_of_menu_sub=$2  # ex) debian lamp set flow
     local choiceloop=0
     # 히스토리 파일 정의하고 불러옴
@@ -282,7 +284,7 @@ menufunc() {
 
         ############## 메뉴 출력 ###############
 
-        clear || reset
+        # clear || reset
         echo
         echo -n "=============================================="
         echo -n " :$choiceloop"
@@ -357,6 +359,7 @@ menufunc() {
         echo "=============================================="
 
         ############## 메뉴 출력 끝 ###############
+        [[ $chosen_command_sub == "{}" ]] && [[ "$cmd_choice_scut" ]] && choice="$cmd_choice_scut" && cmd_choice_scut=""
         if [[ -z $choice ]]; then
             # readchoice read choice
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
@@ -456,6 +459,7 @@ menufunc() {
                 # 4. %%% {submenu_hidden}원격 백업 관리 [rb]
                 #
                 sub_menu="${chosen_command_sub-}"
+                [[ $sub_menu == "{}" ]] && sub_menu=""
                 # 재하청 메뉴는 relay_sub 를 sub_menu 로 사용.
                 [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
                 #readxx $LINENO title_of_menu: $title_of_menu sub_menu: $sub_menu
@@ -612,7 +616,7 @@ menufunc() {
 
                     else
                         # 명령줄을 한줄도 찾지 못한경우 -> 오류판정
-                        echo "error : num_commands -> $num_commands // submenu: $sub_menu // debug: find -> chosen_commands="
+                        echo "error : num_commands -> $num_commands // sub_menu: $sub_menu // debug: find -> chosen_commands="
                         echo ":459"
                         readxx $LINENO submenu 옵션:$submenu title_of_menu 필수: $title_of_menu
                         break
@@ -858,8 +862,12 @@ menufunc() {
                     # shortcut menu 이동 요청이 들어온경우
                     # shortcut 이름이 우연히 실제 리눅스 명령이랑 겹칠경우 shortcut 이동으로 실행
                     elif [[ -n $cmd_choice ]] && [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
-                        readxx $LINENO cmd_choice shortcut moving
+                        readxx $LINENO cmd_choice:$cmd_choice shortcut_moving
+                        cmd_choice_scut=$cmd_choice
                         savescut && exec $gofile $cmd_choice
+                        readxx scutsub:"cmd_choice_scut:$cmd_choice_scut" "scutsub:$(scutsub $cmd_choice)" scuttitle:"$(scuttitle $cmd_choice)"
+                        # fix
+                        #menufunc "$(scutsub $cmd_choice)" "$(scuttitle $cmd_choice)"
                     fi
 
                     # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행 (ex. top cd)
@@ -1338,15 +1346,20 @@ scuttitle() {
 
 }
 scutsub() {
-    scut=$1
-    item="$(scutall $scut)"
+    scut="$1"
     scutrelayout="$(scutrelay $scut)"
-    if [ -n "scutrelayout" ]; then
+    if [ -n "$scutrelayout" ]; then
         echo "$scutrelayout"
     else
+        item="$(scutall $scut)"
         scutsuboutput="$(echo "$item" | awk -F'%%% ' '{if ($2 ~ /^\{[^}]+\}/) {print $2} else {print ""}}' | awk '{match($0, /\{[^}]+\}/); print substr($0, RSTART, RLENGTH)}')"
-        [ -n "$scutsuboutput" ] && echo $scutsuboutput || echo "{}"
+        if [ -n "$scutsuboutput" ]; then
+            echo "$scutsuboutput"
+        else
+            echo "{}"
+        fi
     fi
+    #readxx scutsubfunc scutsuboutput:"$scutsuboutput" scutrelayout:"$scutrelayout"
 }
 scutrelay() {
     scut=$1
