@@ -206,14 +206,15 @@ print_menulist() {
 # 메인 서비스 함수 menufunc
 ###############################################################
 declare -a shortcutarr shortcutstr
-# exec go.sh shortcut // or menufunc {submenu_sys} 제목
+# exec go.sh shortcut // or menufunc {submenu_sys} 제목 or menufunc {} 제목 choice
 
 menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
     readxx $LINENO menufunc input_value_input1:"$1" input2:"$2"
-    local chosen_command_sub=$1 # ex) {submenu_lamp} or {}
-    local title_of_menu_sub=$2  # ex) debian lamp set flow
+    local chosen_command_sub="$1"     # ex) {submenu_lamp} or {}
+    local title_of_menu_sub="$2"      # ex) debian lamp set flow
+    [ -n "$3" ] && local initvar="$3" # ex) 2 or scut
     local choiceloop=0
     # 히스토리 파일 정의하고 불러옴
     HISTFILE="$gotmp/go_history.txt"
@@ -645,7 +646,7 @@ menufunc() {
                     if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
 
                         readxx $LINENO relayrelay cmd_choice: $cmd_choice chosen_command $chosen_command
-                        menufunc $chosen_command ${title_of_menu}
+                        menufunc "$chosen_command" "${title_of_menu}"
 
                     ################ 실졍 명령줄이 넘어온경우
                     ################ 실졍 명령줄이 넘어온경우
@@ -830,7 +831,7 @@ menufunc() {
                     [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
                     [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
                     [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
-                    #[[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)"
+                    [[ $cmd_choice == "bm" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$ooldscut"
                     #[[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
                     #[[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)"
                     [[ $cmd_choice == "chat" || $cmd_choice == "ai" || $cmd_choice == "hi" || $cmd_choice == "hello" ]] && ollama run gemma3 2>/dev/null && cmds
@@ -976,7 +977,9 @@ menufunc() {
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
             echo "Back to previous menu.. [$ooldscut]" && sleep 1
             savescut && exec $gofile $ooldscut # back to previous menu
-            #savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" # back to previous menu
+        elif [ "$choice" ] && [ "$choice" == "bm" ]; then
+            echo "Back to previous menu.. [$ooldscut]" && sleep 1
+            savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$ooldscut" # back to previous menu
         elif [ "$choice" ] && [ "$choice" == "bb" ]; then
             echo "Back two menus.. [$oooldscut]" && sleep 1
             savescut && exec $gofile $oooldscut # back to previous menu
