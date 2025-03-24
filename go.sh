@@ -1,6 +1,8 @@
 #!/bin/bash
 # bash2 하위 호환성 유지 (redhat7/oops1)
 
+#debug="y"
+
 # 존재 하는 파일의 절대경로 출력 readlink -f
 readlinkf() {
     p="$1"
@@ -209,6 +211,7 @@ declare -a shortcutarr shortcutstr
 menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
+    readxx $LINENO menufunc input_value_input1:"$1" input2:"$2"
     local chosen_command_sub=$1 # ex) {submenu_lamp} or {}
     local title_of_menu_sub=$2  # ex) debian lamp set flow
     local choiceloop=0
@@ -284,7 +287,7 @@ menufunc() {
 
         ############## 메뉴 출력 ###############
 
-        clear || reset
+        [ -z "$debug" ] && { clear || reset; }
         echo
         echo -n "=============================================="
         echo -n " :$choiceloop"
@@ -360,6 +363,7 @@ menufunc() {
 
         ############## 메뉴 출력 끝 ###############
         [[ $chosen_command_sub == "{}" ]] && [[ "$cmd_choice_scut" ]] && choice="$cmd_choice_scut" && cmd_choice_scut=""
+        readxx $LINENO read "choice menu pre_choice:" $choice
         if [[ -z $choice ]]; then
             # readchoice read choice
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
@@ -369,7 +373,7 @@ menufunc() {
         key_idx=$(echo "${keysarr[*]}" | tr ' ' '\n' | awk -v target="$choice" '$0 == target {print(NR-1); exit}')
 
         #shortcut 을 참조하여 choice 번호 설정
-        [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]} # && #readxx key $key_idx
+        [ -n "$key_idx" ] && choice=${idx_mapping[$key_idx]} # && #readxx $LINENO key $key_idx
 
         # choice 와 shortcut 이 동일한 경우 pass
         #if [[ $choice && "choice" == "scut" ]]; then
@@ -379,10 +383,10 @@ menufunc() {
         # 눈에 보이지 않는 메뉴 호출시
         # 서브메뉴에 숨어있는 shortcut 호출이 있을때 (숫자가 아닐때)
         # 경유메뉴에서 호출시 작동오류 check
-        readxx $LINENO you choice? $choice
+        #readxx $LINENO you choice? $choice
         # if [ "$choice" ] && (( ! $choice > 0 )) 2>/dev/null; then choice 에 영어가 들어오면 참인데 오작동 가끔발생
         if [ "$choice" ] && { ! echo "$choice" | grep -Eq '^[1-9][0-9]*$' || echo "$choice" | grep -Eq '^[a-zA-Z]+$'; }; then
-            readxx $LINENO you choice? yes $choice
+            #readxx $LINENO you choice? yes $choice
             # subshortcut 을 참조하여 title_of_menu 설정
             # ex) chosen_command:{submenu_systemsetup} // title_of_menu:시스템 초기설정과 기타 (submenu) [i]
             for item in "${shortcutarr[@]}"; do
@@ -406,7 +410,7 @@ menufunc() {
                         chosen_command_relay=""
                         readxx $LINENO 중괄호없는메뉴 대표메뉴 chosen_command_sub 삭제 $chosen_command_sub
                         title_of_menu="${itema2#*\%\%\% }"
-                        readxx 필수 title_of_menu:$title_of_menu
+                        readxx $LINENO 필수 title_of_menu:$title_of_menu
 
                     # relay {} .. {}
                     elif [[ $chosen_command_relay != "{}" && $chosen_command_relay ]]; then
@@ -427,9 +431,9 @@ menufunc() {
                     fi
 
                     # choice 99 로 아래 메뉴 진입 시도
-                    readxx choice_fail_check: $choice
+                    readxx $LINENO choice_fail_check: $choice
                     choice=99
-                    readxx choice_fail_check: $choice
+                    readxx $LINENO choice_fail_check: $choice
                 fi
             done
         fi
@@ -591,12 +595,17 @@ menufunc() {
                             #vx=""
                             cmd_choice=""
 
-                            #[ "$x" ] && [[ $x == [0-9] || $x == [1-9][0-9] ]] && vx=$x && x=""
+                            ############ read cmd_choice
+                            ############ read cmd_choice
+                            #old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; }
+                            old_cmd_choice="$cmd_choice"
+                            while :; do
+                                IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1
+                                [[ -n $cmd_choice ]] && break # 값이 입력되었을 때만 루프 탈출
+                            done
 
-                            #tail -n1 "$gotmp/go_history.txt" | grep -q "vi2" && [ "$vx" ] && echo "I won\'t discard the number you pressed." && sleep 0.5 && cmd_choice=$vx
-                            #[ ! "$vx" ] && old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; } && vx=""
-                            #
-                            old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; } # && vx=""
+                            ############ read cmd_choice
+                            ############ read cmd_choice
 
                             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
                             # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
@@ -816,10 +825,12 @@ menufunc() {
                     [[ $cmd_choice == ".." || $cmd_choice == "sh" ]] && bashcomm && cmds
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
-                    #[[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
-                    [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)"
-                    [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
-                    [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)"
+                    [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
+                    [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
+                    [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
+                    #[[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)"
+                    #[[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
+                    #[[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)"
                     [[ $cmd_choice == "chat" || $cmd_choice == "ai" || $cmd_choice == "hi" || $cmd_choice == "hello" ]] && ollama run gemma3 2>/dev/null && cmds
 
                     # 환경파일 수정 및 재시작
@@ -1926,9 +1937,13 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-readxx() { :; }
+#readxx() { :; }
 # debug -> readxx
-#readxx() { local arg1="${1-NULL}" arg2="${2-NULL}" arg3="${3-NULL}" arg4="${4-NULL}" arg5="${5-NULL}" arg6="${6-NULL}" arg7="${7-NULL}" arg8="${8-NULL}"; echo -e "Debug Here!!   \e[1;37;41mline:\e[0m $arg1  \e[1;37;41m 1:\e[0m $arg2 \e[1;37;41m 2:\e[0m $arg3 \e[1;37;41m 3:\e[0m $arg4  \e[1;37;41m 4:\e[0m $arg5 \e[1;37;41m 5:\e[0m $arg6 \e[1;37;41m 6:\e[0m $arg7  \e[1;37;41m 7:\e[0m $arg8 \e[1;37;41m 8:\e[0m ${9-NULL} \e[1;37;41m 9:\e[0m ${10-NULL}[Enter]"; read x </dev/tty; }
+readxx() { [ -n "$debug" ] && {
+    local arg1="${1-NULL}" arg2="${2-NULL}" arg3="${3-NULL}" arg4="${4-NULL}" arg5="${5-NULL}" arg6="${6-NULL}" arg7="${7-NULL}" arg8="${8-NULL}"
+    echo -e "Debug Here!!   \e[1;37;41mline:\e[0m $arg1  \e[1;37;41m 1:\e[0m $arg2 \e[1;37;41m 2:\e[0m $arg3 \e[1;37;41m 3:\e[0m $arg4  \e[1;37;41m 4:\e[0m $arg5 \e[1;37;41m 5:\e[0m $arg6 \e[1;37;41m 6:\e[0m $arg7  \e[1;37;41m 7:\e[0m $arg8 \e[1;37;41m 8:\e[0m ${9-NULL} \e[1;37;41m 9:\e[0m ${10-NULL}[Enter]"
+    read x </dev/tty
+}; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
