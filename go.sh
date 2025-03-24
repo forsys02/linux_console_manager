@@ -26,7 +26,7 @@ envorg2="$base/go.my.env"
 [ ! -f "$envorg2" ] && touch "$base/go.my.env"
 
 # gofile +x perm
-echo "base: $base"
+#echo "base: $base"
 chmod +x "$gofile"
 
 # go.env 환경파일이 없을경우 다운로드
