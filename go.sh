@@ -284,7 +284,7 @@ menufunc() {
 
         ############## 메뉴 출력 ###############
 
-        # clear || reset
+        clear || reset
         echo
         echo -n "=============================================="
         echo -n " :$choiceloop"
