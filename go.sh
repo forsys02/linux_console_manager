@@ -211,6 +211,7 @@ declare -a shortcutarr shortcutstr
 menufunc() {
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
+    # $1 $2 $3 가 들어오면 $3(명령줄) 종속 메뉴로 바로 이동
     readxx $LINENO menufunc input_value_input1:"$1" input2:"$2"
     local chosen_command_sub="$1"     # ex) {submenu_lamp} or {}
     local title_of_menu_sub="$2"      # ex) debian lamp set flow
@@ -1109,6 +1110,10 @@ cgrepline() {
     pattern=$(echo "$*" | sed 's/ /|/g')
     awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;33m&\033[0m"); print $0;}'
 }
+cgrepline1() {
+    pattern=$(echo "$*" | sed 's/ /|/g')
+    awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}'
+}
 # 탈출코드를 특정색으로 지정
 cgrep3132() {
     pattern=$(echo "$*" | sed 's/ /|/g')
@@ -1130,9 +1135,40 @@ cgrep3136() {
     pattern=$(echo "$*" | sed 's/ /|/g')
     awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;36m"); print $0;}'
 }
+cgrep3336() {
+    pattern=$(echo "$*" | sed 's/ /|/g')
+    awk -v pat="${pattern}" '{gsub(pat, "\033[1;33m&\033[0;36m"); print $0;}'
+}
+cgrepline3136() {
+    pattern=$(echo "$*" | sed 's/ /|/g')
+    awk -v pat=".*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0;36m"); print $0;}'
+}
 cgrep3137() {
     pattern=$(echo "$*" | sed 's/ /|/g')
     awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;37m"); print $0;}'
+}
+
+cgrepn() {
+    local num_cols="${@: -1}"         # 마지막 인수를 색칠 범위로 사용
+    local search_strs=("${@:1:$#-1}") # 나머지는 검색어 목록
+
+    # 색칠 범위 기본값 설정 (숫자가 아니면 기본값 0)
+    [[ $num_cols =~ ^-?[0-9]+$ ]] || num_cols=0
+
+    perl -pe "
+        BEGIN {
+            \$color_red = \"\e[1;31m\";  # 빨간색
+            \$color_reset = \"\e[0m\";   # 색상 초기화
+            @search_words = qw(${search_strs[*]});
+            \$num = $num_cols;
+            if (\$num < 0) { \$before = -\$num; \$after = 0; }  # 음수: 앞쪽 강조
+            elsif (\$num > 0) { \$before = 0; \$after = \$num; }  # 양수: 뒤쪽 강조
+            else { \$before = 0; \$after = 0; }  # 0이면 해당 단어만
+        }
+        foreach my \$search (@search_words) {
+            s/((\\S+\\s+){0,\$before}\$search(\\s+\\S+){0,\$after})/\$color_red\$1\$color_reset/g;
+        }
+    "
 }
 
 # 줄긋기 draw line
@@ -1445,7 +1481,14 @@ eip4() { eipf 4; }
 eip5() { eipf 5; }
 
 # proxmox vmslist
-vmslist() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
+vmslistold() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
+vmslist() {
+    pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
+        awk '{print $1,$17,$23}' |
+        awk '{if($2=="") print $1,"unknown","cluster down"; else print $0}' |
+        awk -F'[ /]' '{print $2, $1, $3, $4}' |
+        column -t
+}
 
 vmslistview() {
     output=$(vmslist)
