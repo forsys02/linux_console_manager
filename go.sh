@@ -258,7 +258,7 @@ menufunc() {
             # IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep "%%% " | grep -E '\[.+\]')"
             # i@@@%%% 시스템 초기설정과 기타 [i] -----> i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
             # shortcut 있는 항목만 배열화
-            IFS=$'\n' allof_shortcut_item="$(cat "$env" | cat .go.env | grep -E "^%%%|^{submenu.*}" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+            IFS=$'\n' allof_shortcut_item="$(cat "$env" | cat $envtmp | grep -E "^%%%|^{submenu.*}" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
 
             shortcutarr=()
             shortcutstr="@@@"
@@ -367,7 +367,7 @@ menufunc() {
 
         # choice 와 shortcut 이 동일한 경우 pass
         #if [[ $choice && "choice" == "scut" ]]; then
-        readxx $LINENO what choice $choice shortcut $scut
+        readxx $LINENO what choice $choice current_shortcut_page $scut
         #    continue
         #fi
         # 눈에 보이지 않는 메뉴 호출시
@@ -384,10 +384,11 @@ menufunc() {
                 if [ "$choice" == "${item%%@@@*}" ]; then
                     # 형태 -> v@@@%%% proxmox / kvm / minecraft [v]@@@{submenu_virt}
                     itema2=$(echo "$item" | awk -F'@@@' '{print $2}')
+                    readxx $LINENO itema2: "$itema2"
                     # chosen_command_sub 는 중괄호 포함 내용 {command_value} 저장
                     chosen_command_sub="$(echo "$itema2" | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
                     chosen_command_relay="$(echo "$item" | awk -F'@@@' '{print $3}' | awk -F'[{}]' 'BEGIN{OFS="{"} {print OFS $2 "}"}')"
-                    readxx $LINENO chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
+                    readxx $LINENO 단축키판단후 chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
                     readxx $LINENO item ${item}
                     # 중괄호 시작 메뉴 아닐때 빈변수 반환 title 조정
 
@@ -397,8 +398,9 @@ menufunc() {
                         #readxx $LINENO $env $chosen_command_sub $title_of_menu_sub $title_of_menu
                         chosen_command_sub=""
                         chosen_command_relay=""
-                        readxx $LINENO 중괄호없는메뉴 대표메뉴 chosen_command_sub $chosen_command_sub
+                        readxx $LINENO 중괄호없는메뉴 대표메뉴 chosen_command_sub 삭제 $chosen_command_sub
                         title_of_menu="${itema2#*\%\%\% }"
+                        readxx 필수 title_of_menu:$title_of_menu
 
                     # relay {} .. {}
                     elif [[ $chosen_command_relay != "{}" && $chosen_command_relay ]]; then
@@ -419,8 +421,9 @@ menufunc() {
                     fi
 
                     # choice 99 로 아래 메뉴 진입 시도
-                    readxx choice fail?? $choice
+                    readxx choice_fail_check: $choice
                     choice=99
+                    readxx choice_fail_check: $choice
                 fi
             done
         fi
@@ -607,6 +610,8 @@ menufunc() {
                     else
                         # 명령줄을 한줄도 찾지 못한경우 -> 오류판정
                         echo "error : num_commands -> $num_commands // submenu: $sub_menu // debug: find -> chosen_commands="
+                        echo ":459"
+                        readxx $LINENO submenu 옵션:$submenu title_of_menu 필수: $title_of_menu
                         break
                     fi ### end of [ $num_commands -eq 1 ] # 명령줄 출력 부분 완료
 
@@ -857,7 +862,7 @@ menufunc() {
                     # 숫자를 선택하지 않고 직접 명령을 입력한 경우 그 명령이 존재하면 실행 (ex. top cd)
                     [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && command -v "$cmd_choice" &>/dev/null && echo && {
                         eval "$cmd_choice $cmd_choice1"
-                        read -p 'You Win! Done... [Enter] ' x </dev/tty
+                        read -p 'You Win! Done.... [Enter] ' x </dev/tty
 
                         # 직접 실행한 명령 log add ex.) h or hh reuse
                         [ "$cmd_choice" ] && [ "${cmd_choice//[0-9]/}" ] && echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
