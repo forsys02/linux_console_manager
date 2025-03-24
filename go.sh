@@ -575,6 +575,7 @@ menufunc() {
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
+                                    -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
@@ -684,14 +685,15 @@ menufunc() {
                                     var_value=""
                                     dvar_value=""
                                     var_name="var${var#var}"
-                                    # 변수조정 varVAR.conf -> varVAR
-                                    if [[ $value != *__* ]]; then var_name="${var_name%.*}"; fi
+                                    # 변수조정 varVAR.conf -> varVAR ( 변수에 점 사용 쩨한할경우 )
+                                    # if [[ $value != *__* ]]; then var_name="${var_name%.*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
                                         # @space@ -> 공백 치환
+                                        # @dot@ -. 점 치환
                                         # @@ -> / 치환
-                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@@/\/}"
+                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@dot@/.}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@@/\/}"
                                         # __ 를 구분으로 배열생성
                                         dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
 
