@@ -18,11 +18,19 @@ base="$(dirname "$basefile")"
 gofile="$base/go.sh"
 envorg="$base/go.env"
 envtmp="$base/.go.env"
+env="$envtmp"
+
+# 서버별로 별도의 추가 go.env 가 필요한 경우, 기본 go.env 와 추가로 불러오는 go.my.env
+# 메뉴구성전 cat go.my.env >> go.env 합쳐서 파싱
+envorg2="$base/go.my.env"
+[ ! -f "$envorg2" ] && touch "$base/go.my.env"
+
+# gofile +x perm
+echo "base: $base"
+chmod +x "$gofile"
 
 # go.env 환경파일이 없을경우 다운로드
 if [ ! -f "$envorg" ]; then
-    echo "base: $base"
-    chmod +x "$gofile"
     echo -n ">>> go.env config file not found. Download? [y/n]: " && read -r down </dev/tty
     [ "$down" = "y" ] || [ "$down" = "Y" ] && output_dir="$(
         cd "$(dirname "${0}")"
@@ -54,31 +62,45 @@ if [ "$envko" ]; then
     # 사용자 수동 설정 [kr] 입력시
     # 터미널 utf8 / go.env !utf8
     [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
+    echo >>"$envtmp"
+    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>$envtmp
     # 터미널 utf8 / go.env utf8
     [ "$envko" == "utf8" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
+    echo >>"$envtmp"
+    [ "$envko" == "utf8" ] && [ "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" >>"$envtmp"
     # 터미널 !utf8 / go.env utf8
     [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
+    echo >>"$envtmp"
+    [ "$envko" == "euckr" ] && [ "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>$envtmp
     # 터미널 !utf8 / go.evn !utf8
     [ "$envko" == "euckr" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
-    # cmd 라인뒤 주석제거
-    sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
-    env="$envtmp"
+    echo >>"$envtmp"
+    [ "$envko" == "euckr" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" >>"$envtmp"
 else
     # 터미널 자동감지
     # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
     if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-        env="$envtmp"
     # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
     elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
         cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-        env="$envtmp"
     else
         cp -a "$envorg" "$envtmp"
-        sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
-        env="$envtmp"
+    fi
+
+    # cat go.my.env >> go.env
+    echo >>"$envtmp"
+    if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ]; then
+        cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+    elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg2" | grep -i "utf")" ]; then
+        cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+    else
+        cat "$envorg2" >>"$envtmp"
     fi
 fi
+
+# cmd 라인뒤 주석제거
+sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
 
 # not kr
 # english menu tilte set
@@ -96,7 +118,7 @@ else
     gotmp="$HOME/tmp"
     mkdir -p "$gotmp"
     touch "$gotmp"/go_history.txt
-    chmod 600 /tmp/go_history.txt
+    chmod 600 "$gotmp"/go_history.txt
 fi
 
 # public_ip & offline check ( dns or ping err )
@@ -323,7 +345,7 @@ menufunc() {
             # debug printarr keysarr
 
             # title ansi
-            items=$(echo -e "$(echo "$items" | sed -E -e 's/^>/\\e[1;37;44m>\\e[0m/g')")
+            items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;37;44m>\o033[0m/g')")
 
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
         done < <(print_menulist) # %%% 모음 가져와서 파싱
@@ -535,7 +557,7 @@ menufunc() {
                                     display_idx=$((display_idx + 1))
                                 fi
 
-                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정
+                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 list ansi
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
@@ -790,6 +812,7 @@ menufunc() {
 
                     # 환경파일 수정 및 재시작
                     [[ $cmd_choice == "conf" ]] && conf && cmds
+                    [[ $cmd_choice == "confmy" ]] && confmy && cmds
                     [[ $cmd_choice == "confc" ]] && confc && cmds
                     [[ $cmd_choice == "conff" ]] && conff && cmds
                     [[ $cmd_choice == "conffc" ]] && conffc && cmds
@@ -872,24 +895,37 @@ menufunc() {
                 echo "utf chg" && sleep 1
                 if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
                     cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-                    env="$envtmp"
                 else
                     cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-                    env="$envtmp"
+                fi
+                echo >>"$envtmp"
+                if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
+                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                else
+                    cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
                 fi
                 [ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
-            elif [[ "$(file "$envorg" | grep -i "utf")" && "$(file $env | grep -i "utf")" && -s $env ]]; then
+            elif [[ "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "euc-kr chg" && sleep 1
-                cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-                env="$envtmp"
+                if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
+                    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                else
+                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                fi
+                echo >>"$envtmp"
+                if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
+                    cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                else
+                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                fi
+
                 [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
-            else
-                echo "euc-kr print" && sleep 1
-                cp -a "$envorg" "$envtmp"
-                sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
-                env="$envtmp"
-                if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
-                [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
+            #else
+            #    echo "euc-kr print" && sleep 1
+            #    cp -a "$envorg" "$envtmp"
+            #    sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
+            #    if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
+            #    [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
             fi
             # menufunc
             # 환경파일 수정으로 새로시작
@@ -899,6 +935,8 @@ menufunc() {
 
         elif [ "$choice" ] && [ "$choice" == "conf" ]; then
             conf # vi.go.env
+        elif [ "$choice" ] && [ "$choice" == "confmy" ]; then
+            confmy # vi.go.my.env
         elif [ "$choice" ] && [ "$choice" == "confc" ]; then
             confc # rollback go.env
         elif [ "$choice" ] && [ "$choice" == "conff" ]; then
@@ -1007,7 +1045,8 @@ cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[
     awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}'; }
 
 # 실시간 출력 tail -f 등에 즉각 반응
-cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g'; }
+#cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g'; }
+cipf() { sed -e 's/\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}/\o033[1;31m&\o033[0m/g'; }
 
 ipc() { ip a | cgrep DOWN | cgrep1 UP | cip; }
 ipa() { ip a | cgrep DOWN | cgrep1 UP | cip; }
@@ -1487,12 +1526,14 @@ loadVAR() {
 # vi2 envorg && restart go.sh
 conf() {
     vi2 "$envorg" $scut
-    [ -f /html/go.env ] 2>/dev/null && cp -a "$envorg" /html/go.env && chmod 644 /html/go.env
+    savescut && exec "$gofile" $scut
+}
+confmy() {
+    vi2 "$envorg2" $scut
     savescut && exec "$gofile" $scut
 }
 conff() {
     [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
-    [ -f /html/go.sh ] 2>/dev/null && cp -a "$gofile" /html/go.sh && chmod 755 /html/go.sh
     savescut && exec "$gofile" $scut
 }
 confc() { rollback "$envorg"; }
@@ -1866,7 +1907,6 @@ unsetvar varl
 readx() { read -p "[Enter] " x </dev/tty; }
 readxx() { :; }
 # debug -> readxx
-#readxx() { echo -e "Debug Here!!   line:$1 1:$2 2:$3 3:$4 4:$5 5:$6 6:$7   [Enter]" ;     read -t 1 x </dev/tty ; }
 #readxx() { local arg1="${1-NULL}" arg2="${2-NULL}" arg3="${3-NULL}" arg4="${4-NULL}" arg5="${5-NULL}" arg6="${6-NULL}" arg7="${7-NULL}" arg8="${8-NULL}"; echo -e "Debug Here!!   \e[1;37;41mline:\e[0m $arg1  \e[1;37;41m 1:\e[0m $arg2 \e[1;37;41m 2:\e[0m $arg3 \e[1;37;41m 3:\e[0m $arg4  \e[1;37;41m 4:\e[0m $arg5 \e[1;37;41m 5:\e[0m $arg6 \e[1;37;41m 6:\e[0m $arg7  \e[1;37;41m 7:\e[0m $arg8 \e[1;37;41m 8:\e[0m ${9-NULL} \e[1;37;41m 9:\e[0m ${10-NULL}[Enter]"; read x </dev/tty; }
 
 # sleepdot // ex) sleepdot 30 or sleepdot
