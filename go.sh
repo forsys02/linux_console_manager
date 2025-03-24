@@ -59,7 +59,7 @@ fi
 [ -f ~/.go.private.var ] && awk '!seen[$0]++' ~/.go.private.var >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var && source ~/.go.private.var
 
 # 터미널 한글 환경이 2가지 -> 글자 깨짐 방지 인코딩 변환
-# 환경 파일(한글euc-kr) 주석 제거 // 한글 인코딩 변환
+# 환경 파일에 # 주석 제거 -> #앞뒤에 모두 공백이 있을때 판정 // 한글 인코딩 변환
 if [ "$envko" ]; then
     # 사용자 수동 설정 [kr] 입력시
     # 터미널 utf8 / go.env !utf8
@@ -353,7 +353,7 @@ menufunc() {
             # debug printarr keysarr
 
             # title ansi
-            items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;37;44m>\o033[0m/g')")
+            items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
 
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
         done < <(print_menulist) # %%% 모음 가져와서 파싱
@@ -975,14 +975,16 @@ menufunc() {
             conffc # rollback go.sh
         elif [ "$choice" ] && [ "$choice" == "b" ]; then
             echo "Back to previous menu.. [$ooldscut]" && sleep 1
-            #savescut && exec $gofile $ooldscut # back to previous menu
-            savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" # back to previous menu
+            savescut && exec $gofile $ooldscut # back to previous menu
+            #savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" # back to previous menu
         elif [ "$choice" ] && [ "$choice" == "bb" ]; then
             echo "Back two menus.. [$oooldscut]" && sleep 1
-            savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" # back to previous menu
+            savescut && exec $gofile $oooldscut # back to previous menu
+            #savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" # back to previous menu
         elif [ "$choice" ] && [ "$choice" == "bbb" ]; then
             echo "Back three menus.. [$ooooldscut]" && sleep 1
-            savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" # back to previous menu
+            savescut && exec $gofile $ooooldscut # back to previous menu
+            #savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
             /bin/df -h | cper && readx
         elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
