@@ -1872,6 +1872,7 @@ for ((i = 1; i <= 10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print su
 
 # ssh handshake 과정중 오류로 접속이 안될때 ~/ssh/.config 에 설정후 재접속
 # 정상 접속이 안될때만 함수 이용하여 접속 // 오히려 정상접속일 경우에는 output 변수관련 멈춤 발생
+
 sshre() {
     output=$(ssh "$@" 2>&1)
     if echo "$output" | grep -q "no matching host key type found"; then
@@ -1899,14 +1900,18 @@ idpw() {
 
 # assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
-    local host id pw port encoding
+    local host id pw port
     local args=("$@")
     local arg_count=${#args[@]}
+    local client_charmap server_charmap server_charmap_output detect_ssh_cmd
+    local use_luit="false"
+    local encoding_info=""
+    local detect_exit_code
 
-    # 기본값 설정
+    # --- Argument Parsing ---
     id="root"
     port=22
-    encoding=""
+    local ignored_encoding=""
 
     case $arg_count in
     1) host="${args[0]}" ;;
@@ -1918,7 +1923,7 @@ assh() {
         host="${args[0]}"
         if [[ ${args[2]} == "ut" || ${args[2]} == "kr" ]]; then
             pw="${args[1]}"
-            encoding="${args[2]}"
+            ignored_encoding="${args[2]}"
         else
             id="${args[1]}"
             pw="${args[2]}"
@@ -1931,7 +1936,7 @@ assh() {
         if echo "${args[3]}" | grep -qE '^[0-9]+$'; then
             port="${args[3]}"
         else
-            encoding="${args[3]}"
+            ignored_encoding="${args[3]}"
         fi
         ;;
     5)
@@ -1939,28 +1944,153 @@ assh() {
         id="${args[1]}"
         pw="${args[2]}"
         port="${args[3]}"
-        encoding="${args[4]}"
+        ignored_encoding="${args[4]}"
+        ;;
+    *)
+        echo "Usage: assh <host> [id] [password] [port]"
+        echo "       assh <host> [password]"
+        echo "Note: Encoding parameter (ut/kr) is ignored; auto-detection is used."
+        return 1
         ;;
     esac
 
-    # 인코딩 설정 (ut: UTF-8, kr: EUC-KR)
-    if [[ $encoding == "kr" ]]; then
-        ssh_cmd="luit -encoding euc-kr ssh -tt -p $port -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host"
+    # --- 1. Get Client Locale ---
+    client_charmap=$(locale charmap 2>/dev/null)
+    if [[ -z $client_charmap ]]; then
+        echo "Warning: Could not determine client character map. Assuming UTF-8." >&2
+        client_charmap="UTF-8"
+    fi
+    echo "Client locale charmap: $client_charmap"
+
+    # --- 2. Detect Server Locale ---
+    local remote_cmd_path="/usr/bin/locale"
+    local remote_cmd_arg="charmap"
+    detect_ssh_cmd="ssh -p $port -o PreferredAuthentications=password -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $id@$host $remote_cmd_path $remote_cmd_arg"
+
+    echo "Attempting to detect server locale for $id@$host:$port..."
+
+    # --- Expect Script for Detection ---
+    server_charmap_output=$(expect -c "
+        set err_pattern \"\\\\(^bash:.*\\\\(no such file\\\\|command not found\\\\)\\\\)\\\\|\\\\(^/bin/sh:.*\\\\(not found\\\\)\\\\)\"
+        log_user 0 ;
+        set server_buffer \"\";
+        set stty_original [stty -g];
+        stty -echo ;
+        set timeout 10
+        spawn $detect_ssh_cmd
+        expect {
+            \"password:\" { sleep 0.2; send \"$pw\\r\"; exp_continue; }
+            \"yes/no)?\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\"; exp_continue } }
+            eof {
+                set server_buffer \$expect_out(buffer)
+                catch wait result;
+                set exit_status [lindex \$result 3];
+                if { \$exit_status == 0 } {
+                    puts \$server_buffer;
+                } else {
+                    puts stderr \"SSH command failed during locale detection (Exit: \$exit_status). Output:\";
+                    puts stderr \$server_buffer;
+                }
+                exit \$exit_status;
+            }
+            timeout { puts stderr \"Timeout during server locale detection.\"; exit 124; }
+            \"Permission denied\" { set server_buffer \$expect_out(buffer); puts stderr \"Authentication failed during locale detection. Output:\"; puts stderr \$server_buffer; exit 1; }
+            \"Connection refused\" { puts stderr \"Connection refused during locale detection.\"; exit 1; }
+            \"No route to host\" { puts stderr \"No route to host during locale detection.\"; exit 1; }
+            -re \$err_pattern {
+                set server_buffer \$expect_out(buffer);
+                puts stderr \"Error reported by remote shell during locale detection:\";
+                puts stderr \$server_buffer;
+                exit 127;
+            }
+            -re {\[#$%>\]\\s*$} {
+                 set server_buffer \$expect_out(buffer);
+                 puts stderr \"Unexpected prompt during non-interactive locale detection. Output:\";
+                 puts stderr \$server_buffer;
+                 exit 1;
+            }
+        }
+        stty \$stty_original ;
+    ")
+    detect_exit_code=$?
+    # --- End of Expect Script ---
+
+    # --- Process Captured Output ---
+    if [[ $detect_exit_code -eq 0 ]] && [[ -n $server_charmap_output ]]; then
+        server_charmap=$(echo "$server_charmap_output" | awk 'NF{last_non_empty=$0} END{print last_non_empty}' | tr -d '[:space:]')
+        # Added ANSI_X3.4-1968 as a common non-UTF8 case
+        if [[ -n $server_charmap ]] && [[ $server_charmap != *"command not found"* ]] && [[ $server_charmap != *"No such file"* ]]; then
+            echo "Server locale charmap detected: $server_charmap"
+            # --- 3. Conditional Logic ---
+            if [[ $client_charmap == "UTF-8" ]] && [[ $server_charmap != "UTF-8" ]]; then
+                # Use luit if client is UTF-8 and server is not. Assume euc-kr for luit.
+                if command -v luit >/dev/null 2>&1; then
+                    echo "Client is UTF-8, Server is $server_charmap. Using 'luit -encoding euc-kr'."
+                    use_luit="true"
+                    encoding_info="(auto: luit euc-kr)"
+                else
+                    echo "Warning: Client is UTF-8, Server is $server_charmap, but 'luit' command not found. Connecting directly." >&2
+                    encoding_info="(auto: direct, luit missing)"
+                fi
+            else
+                echo "Client ($client_charmap) and Server ($server_charmap) encodings compatible or non-UTF8 client. Using direct connection."
+                encoding_info="(auto: direct)"
+            fi
+        else
+            echo "Warning: Locale detection command succeeded but output seems invalid:" >&2
+            echo "$server_charmap_output" >&2
+            echo "Assuming compatible encoding (direct connection)." >&2
+            encoding_info="(auto: parse failed, direct)"
+            detect_exit_code=1
+        fi
     else
-        ssh_cmd="ssh -tt -p $port -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host"
+        echo "Warning: Failed to detect server locale (Detection script exit code: $detect_exit_code). Assuming compatible encoding (direct connection)." >&2
+        encoding_info="(auto: detection failed, direct)"
+        if [[ $detect_exit_code -eq 0 ]]; then detect_exit_code=1; fi
     fi
 
-    echo "host:$host id:$id pw:$pw port:$port encoding:$encoding"
+    # --- 4. Construct Final SSH Command ---
+    local final_ssh_base_cmd="ssh -tt -p $port -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host"
+    local final_ssh_cmd
 
+    if [[ $use_luit == "true" ]]; then
+        if command -v luit >/dev/null 2>&1; then
+            final_ssh_cmd="luit -encoding euc-kr $final_ssh_base_cmd"
+        else
+            echo "Error: luit selected but command not found. Cannot proceed." >&2
+            return 1
+        fi
+    else
+        final_ssh_cmd="$final_ssh_base_cmd"
+    fi
+
+    # --- 5. Execute Main Connection (Comment Removed) ---
+    echo "Connecting: host:$host id:$id port:$port $encoding_info"
     expect -c "
-        set timeout 3
-        spawn $ssh_cmd
+        set stty_original [stty -g];
+        stty raw -echo;
+        set timeout 5 ;
+        spawn $final_ssh_cmd
         expect {
-            \"password:\" { sleep 0.2; send \"$pw\\r\" }
-            \"key fingerprint\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } }
+            # Use standard decimal for sleep
+            \"password:\" { sleep 0.2; send \"$pw\\r\"; }
+            \"yes/no)?\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } }
+            timeout { puts stderr \"\nTimeout waiting for password prompt on final connection.\"; stty \$stty_original; exit 1; }
+            \"Permission denied\" { puts stderr \"\nAuthentication failed on final connection.\"; stty \$stty_original; exit 1; }
+            \"Connection refused\" { puts stderr \"\nConnection refused on final connection.\"; stty \$stty_original; exit 1; }
         }
-        interact
+        # *** Problematic comment removed from here ***
+        interact {
+            eof {
+                puts \"\nConnection closed.\"
+                stty \$stty_original
+            }
+            # Map Ctrl+C to send Ctrl+C to remote
+            \\003 { send \\003 }
+        }
     "
+    # Fallback restoration by bash
+    stty sane
 }
 
 # 인수 없을때 read -p
