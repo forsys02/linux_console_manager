@@ -101,8 +101,9 @@ else
     fi
 fi
 
-# cmd 라인뒤 주석제거
-sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
+# cmd 라인뒤 주석제거 // 빈줄은 그대로 // 공백이 들어간 빈줄은 삭제
+#sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
+sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$envtmp"
 
 # not kr
 # english menu tilte set
