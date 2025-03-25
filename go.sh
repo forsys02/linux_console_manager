@@ -710,15 +710,22 @@ menufunc() {
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             {
                                                 ps3=$PS3
-                                                PS3="Enter value for $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                PS3="Enter Func_name or No. $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 select dvar_value in "${dvar_value_array[@]}"; do
-                                                    reply=$REPLY
-                                                    break
+                                                    #[ -n "$dvar_value" ] && reply=$REPLY && break
+                                                    reply=$REPLY && break
                                                 done
                                                 PS3=$ps3
                                             } </dev/tty
                                             trap - INT
-                                            dvar_value="${dvar_value_array[$((reply - 1))]}"
+
+                                            # 객관식도 가능하고 주관식도 가능
+                                            if echo "$reply" | grep -q '^[0-9]\+$' && ((reply >= 1 && reply <= ${#dvar_value_array[@]})); then
+                                                dvar_value="${dvar_value_array[$((reply - 1))]}"
+                                            else
+                                                dvar_value="$reply"
+                                            fi
+
                                         # 기본값이 하나일때
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
