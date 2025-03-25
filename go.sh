@@ -2024,11 +2024,12 @@ sleepdot() {
 # backup & vi
 vi22() {
     rbackup "$1"
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /$2" "$1"; else vim "$1" || vi "$1"; fi
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
 }
 vi2() {
     rbackup "$1"
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
+    #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
 }
 vi2e() {
     rbackup $1
@@ -2043,7 +2044,7 @@ vi2a() {
         iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null
         mv $1.utf8 $1
     }
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
 }
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status; }
