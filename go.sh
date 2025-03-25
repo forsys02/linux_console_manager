@@ -671,6 +671,7 @@ menufunc() {
                         # 명령즐을 ;; 기준으로 나누어 배열을 만듬
                         if [[ $chosen_command != *"case"* ]] && [[ $chosen_command != *"esac"* ]]; then
                             IFS=$'\n' cmd_array=($(echo "$chosen_command" | sed 's/;;/\n/g')) # 명령어 배열 생성
+                            unset IFS
                         else
                             cmd_array=("$chosen_command")
                         fi
@@ -699,7 +700,16 @@ menufunc() {
                                         # @@ -> / 치환
                                         dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@dot@/.}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@@/\/}"
                                         # __ 를 구분으로 배열생성
-                                        dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
+                                        # dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
+
+                                        IFS=$'\n' # 개행(\n)을 기준으로만 나누도록 설정
+                                        dvar_value_array=()
+                                        while read -r item; do
+                                            dvar_value_array=("${dvar_value_array[@]}" "$item")
+                                        done < <(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}')
+                                        unset IFS # 원래 상태로 복구
+
+                                        #printarr dvar_value_array
 
                                         # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
                                         [ "$dvar_value" == "datetag" ] && dvar_value=$(datetag)
@@ -712,21 +722,34 @@ menufunc() {
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             {
                                                 ps3=$PS3
-                                                PS3="Enter Func_name or No. $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                PS3="Enter Func_name or Nums. $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                IFS='\n'
                                                 select dvar_value in "${dvar_value_array[@]}"; do
-                                                    #[ -n "$dvar_value" ] && reply=$REPLY && break
                                                     reply=$REPLY && break
                                                 done
+                                                unset IFS
                                                 PS3=$ps3
                                             } </dev/tty
                                             trap - INT
 
-                                            # 객관식도 가능하고 주관식도 가능
-                                            if echo "$reply" | grep -q '^[0-9]\+$' && ((reply >= 1 && reply <= ${#dvar_value_array[@]})); then
-                                                dvar_value="${dvar_value_array[$((reply - 1))]}"
+                                            # 객관식도 가능하고 주관식도 가능 // 그리고 취사선택 및 all 선택시 모든 요소 출력
+                                            if echo "$reply" | tr -d ' ' | grep -q '^[0-9]\+$'; then
+                                                selected_values=""
+                                                for num in $reply; do
+                                                    if echo "$num" | grep -q '^[0-9]\+$' && [ "$num" -ge 1 ] && [ "$num" -le "${#dvar_value_array[@]}" ]; then
+                                                        selected_values="$selected_values ${dvar_value_array[$((num - 1))]}"
+                                                    fi
+                                                done
+                                                dvar_value="$selected_values"
                                             else
                                                 dvar_value="$reply"
                                             fi
+                                            dvar_value=$(echo "$dvar_value" | sed 's/^ *//')
+
+                                            # "all"을 입력했을 경우 "all"을 제외하고 모든 값 출력
+                                            [ "$dvar_value" = "all" ] && dvar_value=$(printf "%s " "${dvar_value_array[@]}" | sed 's/\<all\>//g')
+
+                                            #echo "r:$dvar_value" && readx
 
                                         # 기본값이 하나일때
                                         else
@@ -751,7 +774,7 @@ menufunc() {
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
                                             dvar_value="${!var_name}"
                                             # 이미 설정한 변수는 pass
-                                            if [ "$(eval echo \"\${flagof_"${var_name}"}\")" == "set" ]; then
+                                            if [ "$(eval echo \"\${flagof_"${var_name%%__*}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
                                             else
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
@@ -759,7 +782,7 @@ menufunc() {
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="canceled"
-                                                eval flagof_"${var_name}"=set
+                                                eval flagof_"${var_name%%__*}"=set
                                             fi
 
                                         else
@@ -768,7 +791,7 @@ menufunc() {
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
-                                            eval flagof_"${var_name}"=set
+                                            eval flagof_"${var_name%%__*}"=set
                                         fi
 
                                         # 변수 이름에 nospace 가 있을때 ex) varVARnospace
@@ -785,7 +808,7 @@ menufunc() {
                                             var_value="$dvar_value"
                                         fi
                                     elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ]; then
-                                        { cancel=yes && echo "Canceled..." && eval flagof_"${var_name}"=set && break; }
+                                        { cancel=yes && echo "Canceled..." && eval flagof_"${var_name%%__*}"=set && break; }
                                     fi
                                     cmd=${cmd//$var_name/$var_value}
 
@@ -1265,26 +1288,24 @@ pipemenu() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    OLD_IFS=$IFS
     IFS=$' \n|'
     export pipeitem=""
     items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
     { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-    IFS=$OLD_IFS
+    unset IFS
     unset PS3
 }
 pipemenucancel() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    OLD_IFS=$IFS
     IFS=$' \n|'
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done
         echo ":_Cancel"
     )
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
-    IFS=$OLD_IFS
+    unset IFS
     unset PS3
 }
 
@@ -1316,7 +1337,6 @@ pipemenulist() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    OLD_IFS=$IFS
     IFS=$'\n'
     export pipeitem=""
     items=$(
@@ -1324,7 +1344,7 @@ pipemenulist() {
         echo ": Cancel"
     )
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
-    IFS=$OLD_IFS
+    unset IFS
     unset PS3
 }
 
@@ -1378,14 +1398,13 @@ fdialog1() {
 pipemenulistc() {
     PS3="==============================================
 >>> Select No. : "
-    OLD_IFS=$IFS
     IFS=$'\n'
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done | stripe
         echo ": Cancel"
     )
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break; done </dev/tty
-    IFS=$OLD_IFS
+    unset IFS
     unset PS3
 }
 
@@ -1618,6 +1637,9 @@ loadVAR() {
     [ -f ~/.go.private.var ] && tail -n10 ~/.go.private.var && source ~/.go.private.var
 }
 
+format() {
+    shfmt -i 4 -s -w $gofile
+}
 # vi2 envorg && restart go.sh
 conf() {
     vi2 "$envorg" $scut
