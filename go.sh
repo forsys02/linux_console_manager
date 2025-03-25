@@ -369,7 +369,9 @@ menufunc() {
         readxx $LINENO read "choice menu pre_choice:" $choice
         if [[ -z $choice ]]; then
             # readchoice read choice
+            trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
+            trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
         fi
 
         #shortcut 이 중복되더라도 첫번째 키만 가져옴
@@ -605,8 +607,11 @@ menufunc() {
                             ############ read cmd_choice
                             #old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; }
                             old_cmd_choice="$cmd_choice"
+                            # readcmd_choice
                             while :; do
+                                trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1
+                                trap - SIGINT SIGTERM EXIT    # 트랩 해제 (이후에는 기본 동작)
                                 [[ -n $cmd_choice ]] && break # 값이 입력되었을 때만 루프 탈출
                             done
 
@@ -791,6 +796,12 @@ menufunc() {
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
+                                            # ' quoting
+                                            #var_value=$(echo "$var_value" | sed "s/'/\\\\'/g")
+                                            if ! printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
+                                                var_value="$(printf %q "$var_value")"
+                                            fi
+                                            echo "$var_value" && readx
                                             trap - INT
                                             eval flagof_"${var_name%%__*}"=set
                                         fi
@@ -815,7 +826,10 @@ menufunc() {
 
                                     # 실행중 // 동일 이름 변수 재사용 export
                                     # 기본값이 주어진 변수도 재사용 export
-                                    [ "$var_value" ] && eval "export ${var_name%%__*}='${var_value}'"
+                                    # [ "$var_value" ] && eval "export ${var_name%%__*}='${var_value}'"
+                                    if ! printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
+                                        [ "$var_value" ] && export ${var_name%%__*}="$(printf %q "$var_value")"
+                                    fi
 
                                 done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++')
                             # end of while
@@ -863,8 +877,9 @@ menufunc() {
                     [[ $cmd_choice == "..." || $cmd_choice == "," || $cmd_choice == "bash" ]] && /bin/bash && cmds
                     [[ $cmd_choice == "m" ]] && menufunc
                     [[ $cmd_choice == "b" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && exec $gofile $ooldscut
-                    [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
-                    [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && exec $gofile $oooldscu
+                    [[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && exec $gofile $oooldscut
+                    [[ $cmd_choice == "restart" ]] && echo "Restat $gofile.. [$scut]" && sleep 1 && savescut && exec $gofile $scut
+                    [[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && exec $gofile $oooldscut
                     [[ $cmd_choice == "bm" ]] && echo "Back to previous menu.. [$ooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$ooldscut"
                     #[[ $cmd_choice == "bb" ]] && echo "Back two menus.. [$oooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)"
                     #[[ $cmd_choice == "bbb" ]] && echo "Back three menus.. [$ooooldscut]" && sleep 1 && savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)"
@@ -1632,12 +1647,19 @@ saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     chmod 600 ~/.go.private.var
 }
-sv() { saveVAR; }
-
 loadVAR() {
     [ -f ~/.go.private.var ] && tail -n10 ~/.go.private.var && source ~/.go.private.var
 }
+editVAR() {
+    [ -f ~/.go.private.var ] && vim ~/.go.private.var
+}
+initVAR() {
+    [ -f ~/.go.private.var ] && rm -f ~/.go.private.var
+    for var in $(compgen -v | grep -E "^var[A-Z]"); do
+        unset "$var"
+    done
 
+}
 format() {
     shfmt -i 4 -s -w $gofile
 }
@@ -1875,20 +1897,70 @@ idpw() {
     [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" || echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"
 }
 
-# assh id:pw@host:port  (pw 에 특수문자가 없는 경우에 한하여 이용)
-# assh id pw host port  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
+# assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
-    local input="$1"
-    local id pw host port
-    if [[ $input == *":"* ]] && [[ $input == *"@"* ]]; then IFS='@:' read -r id pw host port < <(echo "$input"); else
-        id="$1"
-        pw="$2"
-        host="$3"
-        port="$4"
+    local host id pw port encoding
+    local args=("$@")
+    local arg_count=${#args[@]}
+
+    # 기본값 설정
+    id="root"
+    port=22
+    encoding=""
+
+    case $arg_count in
+    1) host="${args[0]}" ;;
+    2)
+        host="${args[0]}"
+        pw="${args[1]}"
+        ;;
+    3)
+        host="${args[0]}"
+        if [[ ${args[2]} == "ut" || ${args[2]} == "kr" ]]; then
+            pw="${args[1]}"
+            encoding="${args[2]}"
+        else
+            id="${args[1]}"
+            pw="${args[2]}"
+        fi
+        ;;
+    4)
+        host="${args[0]}"
+        id="${args[1]}"
+        pw="${args[2]}"
+        if [[ ${args[3]} =~ ^[0-9]+$ ]]; then
+            port="${args[3]}"
+        else
+            encoding="${args[3]}"
+        fi
+        ;;
+    5)
+        host="${args[0]}"
+        id="${args[1]}"
+        pw="${args[2]}"
+        port="${args[3]}"
+        encoding="${args[4]}"
+        ;;
+    esac
+
+    # 인코딩 설정 (ut: UTF-8, kr: EUC-KR)
+    if [[ $encoding == "kr" ]]; then
+        ssh_cmd="luit -encoding euc-kr ssh -tt -p $port -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host"
+    else
+        ssh_cmd="ssh -tt -p $port -o PreferredAuthentications=password -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host"
     fi
-    port="${port:-22}"
-    echo "id:$id pw:$pw host:$host port:$port"
-    expect -c "set timeout 3; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } \"key fingerprint\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } }; interact"
+
+    echo "host:$host id:$id pw:$pw port:$port encoding:$encoding"
+
+    expect -c "
+        set timeout 3
+        spawn $ssh_cmd
+        expect {
+            \"password:\" { sleep 0.2; send \"$pw\\r\" }
+            \"key fingerprint\" { sleep 0.2; send \"yes\\r\"; expect \"password:\" { sleep 0.2; send \"$pw\\r\" } }
+        }
+        interact
+    "
 }
 
 # 인수 없을때 read -p
