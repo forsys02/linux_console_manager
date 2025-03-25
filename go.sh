@@ -566,7 +566,7 @@ menufunc() {
                                 # 주석 아닌경우 배열 순번에 줄번호를 할당 (주석은 번호할당 열외)
                                 # 시작하는 공백을 제거후 할당
                                 pi=""
-                                if [ "${c_cmd#"${c_cmd%%[![:space:]]*}"}" != "#" ]; then
+                                if [ "$(echo "$c_cmd" | xargs | cut -c1)" != "#" ]; then
 
                                     pi="${display_idx}." # 줄번호
                                     # 배열 확장
@@ -717,23 +717,23 @@ menufunc() {
                                         [ "$dvar_value" == "adatetag" ] && dvar_value=at_$(datetag)
                                         [ "$dvar_value" == "adatetag2" ] && dvar_value=at_$(datetag2)
 
-                                        # 기본값이 여러개 일때 select 로 선택진행 ex) aa_bb_cc select
+                                        # 기본값이 여러개 일때 select 로 선택진행 ex) aa__bb__cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             {
-                                                ps3=$PS3
-                                                PS3="Enter Func_name or Nums. $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                PS3="Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 IFS='\n'
                                                 select dvar_value in "${dvar_value_array[@]}"; do
                                                     reply=$REPLY && break
                                                 done
                                                 unset IFS
-                                                PS3=$ps3
+                                                unset PS3
                                             } </dev/tty
                                             trap - INT
 
                                             # 객관식도 가능하고 주관식도 가능 // 그리고 취사선택 및 all 선택시 모든 요소 출력
                                             if echo "$reply" | tr -d ' ' | grep -q '^[0-9]\+$'; then
+                                                # 객관식 (복수선택가능)
                                                 selected_values=""
                                                 for num in $reply; do
                                                     if echo "$num" | grep -q '^[0-9]\+$' && [ "$num" -ge 1 ] && [ "$num" -le "${#dvar_value_array[@]}" ]; then
@@ -742,14 +742,14 @@ menufunc() {
                                                 done
                                                 dvar_value="$selected_values"
                                             else
+                                                # 주관식
                                                 dvar_value="$reply"
                                             fi
+                                            # 시작공백제거
                                             dvar_value=$(echo "$dvar_value" | sed 's/^ *//')
 
                                             # "all"을 입력했을 경우 "all"을 제외하고 모든 값 출력
                                             [ "$dvar_value" = "all" ] && dvar_value=$(printf "%s " "${dvar_value_array[@]}" | sed 's/\<all\>//g')
-
-                                            #echo "r:$dvar_value" && readx
 
                                         # 기본값이 하나일때
                                         else
