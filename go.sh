@@ -2028,8 +2028,11 @@ vi22() {
 }
 vi2() {
     rbackup "$1"
-    #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! | /^%%% .*\[$2\]" "$1"; else vim "$1" || vi "$1"; fi
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
+    # 문자열 찾고 그 위치에서 편집
+    #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
+    # 문자열 찾고 그 위치의 문단끝에서 편집
+    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! }'" "$1"; else vim "$1" || vi "$1"; fi
+
 }
 vi2e() {
     rbackup $1
@@ -2040,12 +2043,12 @@ vi2u() {
     vim -c "set fileencoding=utf-8" $1
 }
 vi2a() {
-    rbackup $1 && [ ! "$(file -i $1 | grep "utf")" ] && {
-        iconv -f euc-kr -t utf-8//IGNORE -o $1.utf8 $1 2>/dev/null
-        mv $1.utf8 $1
-    }
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
+    rbackup "$1" && [ "$(locale charmap)" = "UTF-8" ] && [ ! "$(file -i "$1" | grep "utf")" ] &&
+        iconv -f euc-kr -t utf-8//IGNORE -o "$1.utf8" "$1" 2>/dev/null && mv "$1.utf8" "$1"
+
+    vim -c "[ -n \"$2\" ] && autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! }'" "$1" || vi "$1"
 }
+
 # server-status
 weblog() { lynx --dump --width=260 http://localhost/server-status; }
 
