@@ -19,7 +19,16 @@ base="$(dirname "$basefile")"
 
 gofile="$base/go.sh"
 envorg="$base/go.env"
-envtmp="$base/.go.env"
+
+# envtmp="$base/.go.env"
+# envtmp 파일을 메모리에 상주 cat 부하 감소
+shm_env_file="/dev/shm/.go.env"
+fallback_env_file="$base/.go.env"
+if rm -f "$shm_env_file" 2>/dev/null; then
+    envtmp="$shm_env_file"
+else
+    envtmp="$fallback_env_file"
+fi
 env="$envtmp"
 
 # 서버별로 별도의 추가 go.env 가 필요한 경우, 기본 go.env 와 추가로 불러오는 go.my.env
