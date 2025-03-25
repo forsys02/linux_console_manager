@@ -1153,7 +1153,11 @@ cgrepn() {
     local search_strs=("${@:1:$#-1}") # 나머지는 검색어 목록
 
     # 색칠 범위 기본값 설정 (숫자가 아니면 기본값 0)
-    [[ $num_cols =~ ^-?[0-9]+$ ]] || num_cols=0
+    if echo "$num_cols" | grep -qE '^-?[0-9]+$'; then
+        : # num_cols 값이 유효한 숫자일 때 유지
+    else
+        num_cols=0
+    fi
 
     perl -pe "
         BEGIN {
