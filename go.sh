@@ -1928,7 +1928,7 @@ assh() {
         host="${args[0]}"
         id="${args[1]}"
         pw="${args[2]}"
-        if [[ ${args[3]} =~ ^[0-9]+$ ]]; then
+        if echo "${args[3]}" | grep -qE '^[0-9]+$'; then
             port="${args[3]}"
         else
             encoding="${args[3]}"
