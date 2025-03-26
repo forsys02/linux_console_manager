@@ -1004,24 +1004,24 @@ menufunc() {
                             echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                             cmds
 
-                            # Check 4: Alias from .bashrc? (Fallback if not a command)
-                            #                        elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
-                            #                            # Found alias definition 'aliascmd'.
-                            #                            echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
-                            #                            echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
-                            #
-                            #                            # Execute the extracted command string in a subshell using bash -c
-                            #                            # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
-                            #                            (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
-                            #
-                            #                            # Clean up the temporary variable
-                            #                            unset aliascmd
-                            #
-                            #                            # Optional: Log execution
-                            #                            echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                            #                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
-                            #                            cmds
-                            #
+                        # Check 4: Alias from .bashrc? (Fallback if not a command)
+                        elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                            # Found alias definition 'aliascmd'.
+                            echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
+                            echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
+
+                            # Execute the extracted command string in a subshell using bash -c
+                            # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
+                            (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
+
+                            # Clean up the temporary variable
+                            unset aliascmd
+
+                            # Optional: Log execution
+                            echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
+                            cmds
+
                         # Fallback: Unknown or invalid input
                         else
                             cmd_choice=""
@@ -1195,22 +1195,17 @@ menufunc() {
             }
 
             # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
-            #        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
 
-            #           echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
-            #          echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
+            echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
+            echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
-            # Execute the extracted command string in a subshell using bash -c
-            # Pass the alias command string, set $0 to the alias name, and pass $choice1 as $1
-            # The "$aliascmd \"\$@\"" part ensures arguments passed to bash -c are available inside via $@ or $1, $2 etc.
-            #         (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
+            (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
 
-            # Clean up the temporary variable
-            #        unset aliascmd
+            unset aliascmd
 
-            # Optional: Log execution
-            #       echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-            #      echo 'Alias (from .bashrc) executed. Done... ' && sleep 1 && noclear="y"
+            echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1 && noclear="y"
 
         else
             echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
