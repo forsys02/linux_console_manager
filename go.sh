@@ -878,7 +878,6 @@ menufunc() {
 
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
-                    #[[ -n "$cmd_choice" && "${cmd_choice//[0-9]/}" ]] && case "$cmd_choice" in
                     [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] && case "$cmd_choice" in
                     # --- Basic Navigation & Commands ---
                     ".." | "sh")
@@ -1012,7 +1011,9 @@ menufunc() {
 
                             # Execute the extracted command string in a subshell using bash -c
                             # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
+                            dline
                             (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
+                            dline
 
                             # Clean up the temporary variable
                             unset aliascmd
@@ -1200,7 +1201,9 @@ menufunc() {
             echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
             echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
+            dline
             (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
+            dline
 
             unset aliascmd
 
@@ -1208,7 +1211,9 @@ menufunc() {
             echo 'Alias (from .bashrc) executed. Done... ' && sleep 1 && noclear="y"
 
         else
-            echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
+            #echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
+            #choice=""
+            unset noclear choice
         fi
     done # end of main while
     ############### main loop end ###################
@@ -1332,6 +1337,130 @@ dline() {
     printf "%.0s$delimiter" $(seq "$num_characters")
     printf "\n"
 }
+
+# Function to colorize percentages and optionally format KiB numbers human-readably (-h).
+colorize() {
+    # Default thresholds
+    local THRESHOLD_TOP=90
+    local THRESHOLD_MEDIUM=70
+    local THRESHOLD_LOW=50
+    local FORMAT_HUMAN=0 # Flag to enable human-readable formatting (assumes KiB input)
+
+    # --- Option Parsing ---
+    # Options: -h (human readable KiB), -T/M/L (thresholds), -H (help)
+    while getopts "T:M:L:hH" opt; do
+        case "$opt" in
+        T) THRESHOLD_TOP="$OPTARG" ;;
+        M) THRESHOLD_MEDIUM="$OPTARG" ;;
+        L) THRESHOLD_LOW="$OPTARG" ;;
+        h) FORMAT_HUMAN=1 ;; # Enable human-readable formatting (assumes KiB)
+        H)                   # Help option
+            echo "Usage: command | colorize [options]"
+            echo "Highlights percentages and optionally formats numbers human-readably."
+            echo
+            echo "Options:"
+            echo "  -h           Assume input numbers are KiB (Kilobytes) and format human-readably"
+            echo "               (K, M, G, T...). Use for 'pvesm status', 'df -k', 'free'."
+            echo "               Does not affect % or existing units like in 'df -h'."
+            echo "  -T VALUE     Threshold for top usage percentage (red, default: $THRESHOLD_TOP)"
+            echo "  -M VALUE     Threshold for medium usage percentage (purple, default: $THRESHOLD_MEDIUM)"
+            echo "  -L VALUE     Threshold for low usage percentage (yellow, default: $THRESHOLD_LOW)"
+            echo "  -H           Show this help message"
+            return 0
+            ;;
+        *)
+            echo "Unknown option: -$OPTARG" >&2
+            return 1
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    # --- Input Handling ---
+    local input_data
+    input_data=$(cat) # Read all input from stdin
+
+    if [[ -z $input_data ]]; then
+        if [[ -t 0 ]]; then echo "Error: No input received via pipe or redirection." >&2; else echo "Error: Received empty input." >&2; fi
+        echo "Usage: command | colorize [options]" >&2
+        return 1
+    fi
+
+    # --- AWK Processing ---
+    # Pass data and options to awk. No input_unit needed as -h implies KiB.
+    echo "$input_data" | awk -v top="$THRESHOLD_TOP" \
+        -v medium="$THRESHOLD_MEDIUM" \
+        -v low="$THRESHOLD_LOW" \
+        -v format_human="$FORMAT_HUMAN" \
+        '
+    # Function to format KiB number into human-readable (K, M, G...) - for -h option
+    # Assumes input value is in KiB. Corrected logic for K values.
+    function format_kib_to_human(kib_value) {
+        kib_value = kib_value + 0; # Ensure numeric
+
+        # Handle zero separately
+        if (kib_value == 0) return "0";
+
+        # Define thresholds (powers of 1024 relative to KiB input)
+        m_thresh = 1024;    # MiB threshold (in KiB)
+        g_thresh = 1024*1024; # GiB threshold (in KiB)
+        t_thresh = 1024*1024*1024; # TiB threshold (in KiB)
+        p_thresh = 1024*1024*1024*1024; # PiB threshold (in KiB)
+
+        # Determine the appropriate unit and format
+        # Refine: Show integer K for values >= 1 KiB and < 1 MiB (1024 KiB)
+        if (kib_value < m_thresh)   return sprintf("%dK", kib_value);
+        # Show .1f for M, G, T, P
+        if (kib_value < g_thresh)   return sprintf("%.1fM", kib_value / m_thresh);
+        if (kib_value < t_thresh)   return sprintf("%.1fG", kib_value / g_thresh);
+        if (kib_value < p_thresh)   return sprintf("%.1fT", kib_value / t_thresh);
+        return sprintf("%.1fP", kib_value / p_thresh);
+        # Note: Previous commented out section with apostrophe issue is removed for clarity.
+    }
+
+    # ANSI color codes
+    BEGIN {
+        RED    = "\033[1;31m"; PURPLE = "\033[1;35m"; YELLOW = "\033[1;33m"; RESET  = "\033[0m";
+    }
+
+    # Header
+    NR == 1 { print; next; }
+
+    # Data lines
+    {
+        highlighted_first_col = 0;
+        for (i = 1; i <= NF; i++) {
+
+            # --- 1. Apply Human-Readable Formatting (-h option assumes KiB input) ---
+            # Check if formatting enabled, field is number, and no existing units/percent
+            if (format_human && $i ~ /^[0-9]+(\.[0-9]+)?$/ && $i !~ /[KMGTPE%]/) {
+                 $i = format_kib_to_human($i);
+            }
+
+            # --- 2. Apply Percentage Highlighting (Always runs) ---
+            if (match($i, /([0-9]+(\.[0-9]+)?)%/)) {
+                original_match = substr($i, RSTART, RLENGTH);
+                p = substr(original_match, 1, RLENGTH - 1) + 0;
+                color_code = "";
+                if      (p >= top)    { color_code = RED; }
+                else if (p >= medium) { color_code = PURPLE; }
+                else if (p >= low)    { color_code = YELLOW; }
+                if (color_code != "") {
+                    colored_string = color_code original_match RESET;
+                    gsub(original_match, colored_string, $i);
+                    if (p >= top) { highlighted_first_col = 1; }
+                }
+            }
+        } # --- End field loop ---
+
+        # --- 3. Highlight First Column if needed ---
+        if (highlighted_first_col && index($1, RESET) == 0) { $1 = RED $1 RESET; }
+
+        print;
+    }' | column -t
+}
+
+# Optional alias: alias hl=colorize
 
 # colored percent
 #cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p==100?31:p>89?31:p>69?35:33)"m"p"%\033[0m")}1'; }
