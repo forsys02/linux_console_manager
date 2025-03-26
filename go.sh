@@ -371,7 +371,7 @@ menufunc() {
             }
             # debug printarr keysarr
 
-            # title ansi
+            # titleansi
             items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
 
             printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
@@ -594,7 +594,7 @@ menufunc() {
                                     display_idx=$((display_idx + 1))
                                 fi
 
-                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 list ansi
+                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
@@ -604,7 +604,7 @@ menufunc() {
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|cat\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|cat \|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(restart\|reload\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
