@@ -818,7 +818,7 @@ menufunc() {
                                             if ! printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
                                                 var_value="$(printf %q "$var_value")"
                                             fi
-                                            echo "$var_value" && readx
+                                            #echo "$var_value" && readx
                                             trap - INT
                                             eval flagof_"${var_name%%__*}"=set
                                         fi
