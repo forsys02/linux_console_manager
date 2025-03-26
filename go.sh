@@ -65,7 +65,7 @@ fi
 
 # varVAR reuse -> saveVAR -> autoloadVAR
 # loadVAR
-[ -f ~/.go.private.var ] && awk '!seen[$0]++' ~/.go.private.var >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var && source ~/.go.private.var
+[ -f ~/.go.private.var ] && source ~/.go.private.var
 
 # 터미널 한글 환경이 2가지 -> 글자 깨짐 방지 인코딩 변환
 # 환경 파일에 # 주석 제거 -> #앞뒤에 모두 공백이 있을때 판정 // 한글 인코딩 변환
@@ -165,13 +165,18 @@ process_commands() {
     local command="$1"
     local cfm=$2
     local nodone=$3
-    [ "${command:0:1}" == "#" ] && return                            # 주석선택시 취소
+
+    [[ ${command:0:1} == "#" ]] && return # 주석선택시 취소
+
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then # !!! check
         [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
             (
                 trap 'stty sane' SIGINT
+                # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
+                # _Cancel 같은 특수값을 select 에 추가하여 반회피 한다
+                # pipemenu 는 파일 리스트 등에 한정하여 쓴다
                 eval "$command"
             )
             trap - SIGINT
@@ -622,8 +627,9 @@ menufunc() {
                             while :; do
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1
-                                trap - SIGINT SIGTERM EXIT    # 트랩 해제 (이후에는 기본 동작)
-                                [[ -n $cmd_choice ]] && break # 값이 입력되었을 때만 루프 탈출
+                                trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
+                                [[ -n $cmd_choice ]] && break || tput cuu1
+                                tput el # 값이 입력되었을 때만 루프 탈출
                             done
 
                             ############ read cmd_choice
@@ -910,7 +916,7 @@ menufunc() {
 
                     # explorer
                     [[ $cmd_choice == "e" ]] && { ranger $cmd_choice1 2>/dev/null || explorer; } && cmds
-                    [[ $cmd_choice == "df" ]] && [[ ! $cmd_choice1 ]] && { df -h | cper; } && readx && cmds
+                    [[ $cmd_choice == "df" ]] && [[ ! $cmd_choice1 ]] && { df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && cmds
                     [[ $cmd_choice == "t" ]] && { htop 2>/dev/null || top; } && cmds
                     [[ $cmd_choice == "tt" ]] && { iftop -t 2>/dev/null || (yyay iftop && iftop -t); } && cmds
                     [[ $cmd_choice == "ttt" || $cmd_choice == "dfm" ]] && { dfmonitor; } && cmds
@@ -1054,7 +1060,7 @@ menufunc() {
             echo "Back three menus.. [$ooooldscut]" && sleep 0.5
             savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" "$(notscutrelay "$ooooldscut")" # back to previous menu
         elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
-            /bin/df -h | cper && readx
+            /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
         elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
             ollama run gemma3 2>/dev/null
         elif [ "$choice" ] && [ "$choice" == "h" ]; then
@@ -1248,7 +1254,22 @@ dline() {
 }
 
 # colored percent
-cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p==100?31:p>89?31:p>69?35:33)"m"p"%\033[0m")}1'; }
+#cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p==100?31:p>89?31:p>69?35:33)"m"p"%\033[0m")}1'; }
+cper() {
+    awk '{
+    if (match($0,/([5-9][0-9](\.[0-9]+)?|100(\.[0-9]+)?)%/)) {
+      p = substr($0, RSTART, RLENGTH-1);
+      color = (p+0==100 ? 31 : p+0>=90 ? 31 : p+0>=70 ? 35 : 33);
+      gsub(p"%", "\033[1;" color "m" p "%\033[0m");
+
+      # 90% 이상이면 $1 필드도 빨강색(31)으로 강조
+      if (p+0 >= 90) {
+        $1 = "\033[1;31m" $1 "\033[0m";
+      }
+    }
+    print;
+  }'
+}
 
 # colored url
 courl() { awk '{match_str="https?:\\/\\/[^ ]+";gsub(match_str, "\033[1;36;04m&\033[0m"); print $0;}'; }
@@ -1336,6 +1357,7 @@ pipemenucancel() {
         while read -r line; do awk '{print $0}' < <(echo "$line"); done
         echo ":_Cancel"
     )
+
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
     unset IFS
     unset PS3
@@ -1348,7 +1370,7 @@ pipemenu1() {
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done)
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset PS3
 }
 pipemenu1cancel() {
@@ -1358,9 +1380,9 @@ pipemenu1cancel() {
     export pipeitem=""
     items=$(
         while read -r line; do awk '{print $1}' < <(echo "$line"); done
-        echo ": Cancel"
+        echo ":_Cancel"
     )
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset PS3
 }
 
@@ -1373,9 +1395,9 @@ pipemenulist() {
     export pipeitem=""
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done
-        echo ": Cancel"
+        echo ":_Cancel"
     )
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset IFS
     unset PS3
 }
@@ -1433,9 +1455,12 @@ pipemenulistc() {
     IFS=$'\n'
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done | stripe
-        echo ": Cancel"
+        echo ":_Cancel"
     )
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && break; done </dev/tty
+    [ "$items" ] && select item in $items; do [ -n "$item" ] && {
+        echo "$item"
+        echo "$item" | grep -q "_Cancel" && export pipeitem="$item" cfm="n" && break || export pipeitem="$item" && break
+    }; done </dev/tty
     unset IFS
     unset PS3
 }
@@ -1444,13 +1469,17 @@ oneline() {
     tr '\n' ' '
 }
 
+# strfunc
 # shortcutarr 배열에서 값 추출 // 메뉴 단축키를 입력하면 해당 단축키의 item 모두 출력
 # scutall i
 # 배열 값 4가지
-# d@@@%%% 서버 데몬 관리 [d]
-# i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
-# dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd]
-# lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp}
+# 배열 끝에 {...} 항목이 없으면 cmd-choice 있으면 choice 재진입
+# notscutrelay 값이 있으면 cmd-choice -> relay 메뉴 출력 없어도 됨
+#
+# d@@@%%% 서버 데몬 관리 [d] - cmd-choice
+# i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys} - relay - choice
+# dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd] - cmd-choice
+# lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp} - relay - choice
 scutall() {
     scut=$1
     scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
@@ -1487,6 +1516,7 @@ notscutrelay() {
     [ ! "$(echo "$item" | awk '{if (match($0, /\{[^}]+\}$/)) print substr($0, RSTART, RLENGTH)}')" ] && echo $scut
 }
 
+# 끝에 {...} 존재하는 배열요소
 scutrelay() {
     scut=$1
     item="$(scutall $scut)"
@@ -1597,7 +1627,8 @@ lastdayb() { date -d "$(date '+%Y-%m-01') 0 month -1 day" '+%Y-%m-%d'; }
 # seen # not sort && uniq
 seen() { awk '!seen[$0]++'; }
 # not sort && uniq && lastseen print
-lastseen() { awk '{ records[$0] = NR } END { for (record in records) { sorted[records[record]] = record } for (i = 1; i <= NR; i++) { if (sorted[i]) { print sorted[i] } } }'; }
+#lastseen() { awk '{ records[$0] = NR } END { for (record in records) { sorted[records[record]] = record } for (i = 1; i <= NR; i++) { if (sorted[i]) { print sorted[i] } } }'; }
+lastseen() { awk '{ last[$0] = NR; line[NR] = $0 } END { for (i = 1; i <= NR; i++) if (last[line[i]] == i) print line[i] }'; }
 
 readv() {
     bashver=${BASH_VERSINFO[0]}
@@ -1670,6 +1701,7 @@ savescut() {
 saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     chmod 600 ~/.go.private.var
+    awk '!seen[$0]++' ~/.go.private.var >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var
 }
 loadVAR() {
     [ -f ~/.go.private.var ] && tail -n10 ~/.go.private.var && source ~/.go.private.var
