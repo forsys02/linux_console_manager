@@ -34,11 +34,12 @@ env="$envtmp"
 # 서버별로 별도의 추가 go.env 가 필요한 경우, 기본 go.env 와 추가로 불러오는 go.my.env
 # 메뉴구성전 cat go.my.env >> go.env 합쳐서 파싱
 envorg2="$base/go.my.env"
-[ ! -f "$envorg2" ] && touch "$base/go.my.env"
+[ ! -f "$envorg2" ] && touch "$envorg2"
 
 # gofile +x perm
 #echo "base: $base"
 chmod +x "$gofile"
+chmod 600 "$envorg" "$envorg2"
 
 # go.env 환경파일이 없을경우 다운로드
 if [ ! -f "$envorg" ]; then
@@ -67,59 +68,31 @@ fi
 # loadVAR
 [ -f ~/.go.private.var ] && source ~/.go.private.var
 
-# 터미널 한글 환경이 2가지 -> 글자 깨짐 방지 인코딩 변환
-# 환경 파일에 # 주석 제거 -> #앞뒤에 모두 공백이 있을때 판정 // 한글 인코딩 변환
-if [ "$envko" ]; then
-    # 사용자 수동 설정 [kr] 입력시
-    # 터미널 utf8 / go.env !utf8
-    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
-    echo >>"$envtmp"
-    [ "$envko" == "utf8" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>$envtmp
-    # 터미널 utf8 / go.env utf8
-    [ "$envko" == "utf8" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
-    echo >>"$envtmp"
-    [ "$envko" == "utf8" ] && [ "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" >>"$envtmp"
-    # 터미널 !utf8 / go.env utf8
-    [ "$envko" == "euckr" ] && [ "$(file "$envorg" | grep -i "utf")" ] && cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >$envtmp
-    echo >>"$envtmp"
-    [ "$envko" == "euckr" ] && [ "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>$envtmp
-    # 터미널 !utf8 / go.evn !utf8
-    [ "$envko" == "euckr" ] && [ ! "$(file "$envorg" | grep -i "utf")" ] && cp -a "$envorg" "$envtmp"
-    echo >>"$envtmp"
-    [ "$envko" == "euckr" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ] && cat "$envorg2" >>"$envtmp"
-else
-    # 터미널 자동감지
-    # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
-    if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
-        cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-    # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
-    elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
-        cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
-    else
-        cp -a "$envorg" "$envtmp"
-    fi
-
+# 터미널 자동감지
+# 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
+if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
+    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
     # cat go.my.env >> go.env
-    echo >>"$envtmp"
-    if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg2" | grep -i "utf")" ]; then
-        cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
-    elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg2" | grep -i "utf")" ]; then
-        cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
-    else
-        cat "$envorg2" >>"$envtmp"
-    fi
+    cat "$envorg2" 2>/dev/null | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+# 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
+elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
+    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+    cat "$envorg2" 2>/dev/null | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+else
+    cp -a "$envorg" "$env"
+    cat "$envorg2" >>"$env" 2>/dev/null
 fi
 
 # cmd 라인뒤 주석제거 // 빈줄은 그대로 // 공백이 들어간 빈줄은 삭제
-#sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
-sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$envtmp"
+#sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
+sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$env"
 
 # not kr
 # english menu tilte set
 if (($(locale | grep -ci "kr") == 0)); then
-    sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' "$envtmp"
+    sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' "$env"
 else
-    sed -i '/^%%%e /d' "$envtmp"
+    sed -i '/^%%%e /d' "$env"
 fi
 
 # tmp 폴더 set
@@ -159,7 +132,7 @@ oooldscut=${oooldscut-}
 ooooldscut=${ooooldscut-}
 
 ############################################################
-# 최종 명령문을 실행하는 함수
+# 최종 명령문을 실행하는 함수 process_commands
 ############################################################
 process_commands() {
     local command="$1"
@@ -196,6 +169,7 @@ process_commands() {
         if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then nodone=y && sleep 1; fi
         [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -r x; }
     else
+        echo "$command"
         echo "Canceled..."
     fi
     cmd_choice=""
@@ -307,7 +281,10 @@ menufunc() {
 
         ############## 메뉴 출력 ###############
 
-        [ -z "$debug" ] && { clear || reset; }
+        [ -z "$debug" ] && [ -z "$noclear" ] && {
+            clear || reset
+            unset noclear
+        }
         echo
         echo -n "=============================================="
         echo -n " :$choiceloop"
@@ -559,7 +536,7 @@ menufunc() {
                             )
 
                             display_idx=1
-                            unset cmd_choice original_indices
+                            unset original_indices
                             original_indices=()
 
                             # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리
@@ -618,26 +595,27 @@ menufunc() {
                             echo "=============================================="
 
                             #vx=""
-                            cmd_choice=""
 
                             ############ read cmd_choice
                             ############ read cmd_choice
                             #old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; }
                             old_cmd_choice="$cmd_choice"
+                            cmd_choice=""
                             # readcmd_choice
                             while :; do
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1
                                 trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
-                                [[ -n $cmd_choice ]] && break || tput cuu1
-                                tput el # 값이 입력되었을 때만 루프 탈출
+                                [[ -n $cmd_choice ]] && break
                             done
+                            readxx $LINENO cmd_choice: $cmd_choice
 
                             ############ read cmd_choice
                             ############ read cmd_choice
 
                             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
                             # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
+                            # cmd_choice 는 4번 골랐다고 4번이 아니고 4번에 해당되는 줄번호를 가짐
                             [ "$cmd_choice" ] && [[ $cmd_choice == [0-9] || $cmd_choice == [1-9][0-9] ]] && [ "$cmd_choice" -gt 0 ] && cmd_choice=${original_indices[$((cmd_choice - 1))]}
                         } # end of choice_list()
                         ####################### end of choice_list #######################
@@ -656,11 +634,12 @@ menufunc() {
                         # 명령줄을 한줄도 찾지 못한경우 -> 오류판정
                         echo "error : num_commands -> $num_commands // sub_menu: $sub_menu // debug: find -> chosen_commands="
                         echo ":459"
-                        readxx $LINENO submenu 옵션:$submenu title_of_menu 필수: $title_of_menu
+                        readxx $LINENO submenu 옵션:$sub_menu title_of_menu 필수: $title_of_menu
                         break
                     fi ### end of [ $num_commands -eq 1 ] # 명령줄 출력 부분 완료
 
                     readxx $LINENO chosen_command $chosen_command
+                    readxx $LINENO cmd_choice: $cmd_choice
 
                     ###################################################
                     # 명령줄 판단 부분
@@ -699,6 +678,8 @@ menufunc() {
                         else
                             cmd_array=("$chosen_command")
                         fi
+
+                        readxx $LINENO cmd_choice: $cmd_choice
 
                         local count=1
                         for cmd in "${cmd_array[@]}"; do # 배열을 반복하며 명령어 처리
@@ -864,9 +845,12 @@ menufunc() {
                                 # 명령어가 끝날때 Done... [Enter] print
                                 [ ! "$cancel" == "yes" ] && { if ((${#cmd_array[@]} > count)); then process_commands "$cmd" "$cfm" "nodone"; else process_commands "$cmd" "$cfm"; fi; }
                             fi
+                            readxx $LINENO cmd_choice: $cmd_choice
+
                             ((count++))
                         done # end of for
                         unset cancel
+                        readxx $LINENO cmd_choice: $cmd_choice
 
                         # flagof 변수 초기화
                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정 -> 초기화
@@ -885,14 +869,17 @@ menufunc() {
 
                     #
                     # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 // choice 변수는 메뉴(서브) 화면에서 수신값
+                    # cmd_choice 4번 메뉴를 골랐다고 4번이 아니고 4번에 해당되는 줄번호를 가짐
                     # direct command sub_menu
                     #
                     # 숫자 명령줄 번호가 선택이 안된 경우 이곳까지 내려옴
                     # lastcmd
                     readxx "cmd bottom"
 
-                    # set -x
-                    [[ -n $cmd_choice ]] && case "$cmd_choice" in
+                    readxx $LINENO cmd_choice: $cmd_choice
+                    #set -x
+                    #[[ -n "$cmd_choice" && "${cmd_choice//[0-9]/}" ]] && case "$cmd_choice" in
+                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] && case "$cmd_choice" in
                     # --- Basic Navigation & Commands ---
                     ".." | "sh")
                         bashcomm && cmds
@@ -1010,34 +997,36 @@ menufunc() {
                             echo # Newline for formatting
                             echo "Executing command: $cmd_choice $cmd_choice1"
                             # Safer execution without eval:
-                            "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
+                            #"$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
+                            eval "$cmd_choice $cmd_choice1"
                             read -p 'Command executed. Done.... [Enter] ' x </dev/tty
                             # Log the executed command
                             echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                             cmds
 
-                        # Check 4: Alias from .bashrc? (Fallback if not a command)
-                        elif aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
-                            # Found alias definition 'aliascmd'.
-                            echo "Found alias in .bashrc: $cmd_choice='$aliascmd'"
-                            echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
-
-                            # Execute the extracted command string in a subshell using bash -c
-                            # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
-                            (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
-
-                            # Clean up the temporary variable
-                            unset aliascmd
-
-                            # Optional: Log execution
-                            echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
-                            cmds
-
+                            # Check 4: Alias from .bashrc? (Fallback if not a command)
+                            #                        elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                            #                            # Found alias definition 'aliascmd'.
+                            #                            echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
+                            #                            echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
+                            #
+                            #                            # Execute the extracted command string in a subshell using bash -c
+                            #                            # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
+                            #                            (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
+                            #
+                            #                            # Clean up the temporary variable
+                            #                            unset aliascmd
+                            #
+                            #                            # Optional: Log execution
+                            #                            echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                            #                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
+                            #                            cmds
+                            #
                         # Fallback: Unknown or invalid input
                         else
-                            echo "Unknown or invalid command: $cmd_choice $cmd_choice1" >&2
-                            sleep 1 # Give user time to see the message
+                            cmd_choice=""
+                            #echo "Unknown or invalid command: $cmd_choice $cmd_choice1"
+                            #sleep 1 # Give user time to see the message
                             cmds
                         fi
                         ;;
@@ -1071,36 +1060,36 @@ menufunc() {
             if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "utf chg" && sleep 1
                 if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
-                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
                 else
-                    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
                 fi
-                echo >>"$envtmp"
+                echo >>"$env"
                 if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
-                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
                 else
-                    cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                    cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
                 fi
-                [ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
+                #[ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
             elif [[ "$(file $env | grep -i "utf")" && -s $env ]]; then
                 echo "euc-kr chg" && sleep 1
                 if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
-                    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
                 else
-                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$envtmp"
+                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
                 fi
-                echo >>"$envtmp"
+                echo >>"$env"
                 if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
-                    cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                    cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
                 else
-                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$envtmp"
+                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
                 fi
 
-                [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
+                #[ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
             #else
             #    echo "euc-kr print" && sleep 1
-            #    cp -a "$envorg" "$envtmp"
-            #    sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$envtmp"
+            #    cp -a "$envorg" "$env"
+            #    sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
             #    if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
             #    [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
             fi
@@ -1198,33 +1187,33 @@ menufunc() {
             # 실제 리눅스 명령이 들어온 경우 실행
         elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
             {
-                # eval "$choice $choice1"
-                "$choice" ${choice1:+"$choice1"}
+                eval "$choice $choice1"
+                #"$choice" ${choice1:+"$choice1"}
                 read -p 'You Win! Done... [Enter] ' x </dev/tty
                 # log
                 echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
             }
 
             # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
-        elif [ "$choice" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+            #        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
 
-            echo "Found alias in .bashrc: $choice='$aliascmd'"
-            echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
+            #           echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
+            #          echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
             # Execute the extracted command string in a subshell using bash -c
             # Pass the alias command string, set $0 to the alias name, and pass $choice1 as $1
             # The "$aliascmd \"\$@\"" part ensures arguments passed to bash -c are available inside via $@ or $1, $2 etc.
-            (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
+            #         (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
 
             # Clean up the temporary variable
-            unset aliascmd
+            #        unset aliascmd
 
             # Optional: Log execution
-            echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
+            #       echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+            #      echo 'Alias (from .bashrc) executed. Done... ' && sleep 1 && noclear="y"
 
         else
-            echo "No hooked!!!! go home!!!" && sleep 2
+            echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
         fi
     done # end of main while
     ############### main loop end ###################
@@ -1315,7 +1304,7 @@ cgrep3137() {
 }
 
 cgrepn() {
-    local num_cols="${@: -1}"         # 마지막 인수를 색칠 범위로 사용
+    local num_cols="${@:-1}"          # 마지막 인수를 색칠 범위로 사용
     local search_strs=("${@:1:$#-1}") # 나머지는 검색어 목록
 
     # 색칠 범위 기본값 설정 (숫자가 아니면 기본값 0)
@@ -1794,6 +1783,7 @@ savescut() {
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
+echoVAR() { declare -p | grep "^declare -x var[A-Z]"; }
 saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     chmod 600 ~/.go.private.var
