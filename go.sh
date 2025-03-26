@@ -198,6 +198,7 @@ process_commands() {
     else
         echo "Canceled..."
     fi
+    cmd_choice=""
 }
 
 #############################################################
@@ -890,7 +891,8 @@ menufunc() {
                     # lastcmd
                     readxx "cmd bottom"
 
-                    case "$cmd_choice" in
+                    # set -x
+                    [[ -n $cmd_choice ]] && case "$cmd_choice" in
                     # --- Basic Navigation & Commands ---
                     ".." | "sh")
                         bashcomm && cmds
