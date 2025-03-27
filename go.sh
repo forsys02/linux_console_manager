@@ -1022,7 +1022,9 @@ menufunc() {
                                 # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
                                 # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
                                 # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                                trap 'stty sane' SIGINT
                                 bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
+                                trap - INT
                                 dline
 
                                 # Clean up the temporary variable
@@ -1248,7 +1250,9 @@ menufunc() {
                     # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
                     # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
                     # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                    trap 'stty sane' SIGINT
                     bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
+                    trap - INT
                     dline
 
                     unset aliascmd
