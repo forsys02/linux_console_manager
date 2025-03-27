@@ -1951,6 +1951,8 @@ st() {
 }
 # shortcut array view
 str() {
+    st
+    echo
     printarr shortcutarr | cgrep1 @@@ | less -r
 }
 
