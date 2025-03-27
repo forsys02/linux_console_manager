@@ -795,9 +795,8 @@ menufunc() {
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
                                             readv var_value </dev/tty
-                                            # ' quoting
-                                            #var_value=$(echo "$var_value" | sed "s/'/\\\\'/g")
-                                            if ! printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
+                                            # ' " \ ->quoting
+                                            if printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
                                                 var_value="$(printf %q "$var_value")"
                                             fi
                                             #echo "$var_value" && readx
