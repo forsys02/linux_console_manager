@@ -1008,10 +1008,11 @@ menufunc() {
                             echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
                             echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
 
-                            # Execute the extracted command string in a subshell using bash -c
-                            # Pass alias command string, set $0 to alias name, $1 to $cmd_choice1
                             dline
-                            (bash -c "$aliascmd \"\$@\"" "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"})
+                            # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
+                            # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
+                            # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                            bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
                             dline
 
                             # Clean up the temporary variable
@@ -1019,7 +1020,7 @@ menufunc() {
 
                             # Optional: Log execution
                             echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1
+                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 2
                             cmds
 
                         # Fallback: Unknown or invalid input
@@ -1201,13 +1202,16 @@ menufunc() {
             echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
             dline
-            (bash -c "$aliascmd \"\$@\"" "$choice" ${choice1:+"$choice1"})
+            # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
+            # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
+            # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+            bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
             dline
 
             unset aliascmd
 
             echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-            echo 'Alias (from .bashrc) executed. Done... ' && sleep 1 && noclear="y"
+            echo 'Alias (from .bashrc) executed. Done... ' && sleep 2 && noclear="y"
 
         else
             #echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
