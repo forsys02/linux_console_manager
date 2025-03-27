@@ -236,8 +236,7 @@ menufunc() {
             title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m"
         } || {
             # 메인메뉴
-            #scut="m"
-            #oldscut=""
+            scut="m"
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
         [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
@@ -1031,7 +1030,7 @@ menufunc() {
 
                                 # Optional: Log execution
                                 echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                                echo 'Alias (from .bashrc) executed. Done... ' && sleep 2
+                                echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && sleep 2
                                 continue
 
                             # Fallback: Unknown or invalid input
@@ -1225,7 +1224,7 @@ menufunc() {
             *) # Handle remaining complex conditions or unrecognized choices
                 # shortcut 과 choice 가 동일할때 choice 없음 쌩엔터
                 if [[ -z $choice1 ]] && [[ $choice == "$scut" ]]; then
-                    echo "이곳이그곳" && sleep 2
+                    echo "이곳이그곳!!! " && sleep 2
                     choice=""
                     #readxx $LINENO shortcut move choice $choice
 
@@ -1255,7 +1254,7 @@ menufunc() {
                     unset aliascmd
 
                     echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                    echo 'Alias (from .bashrc) executed. Done... ' && sleep 2 && noclear="y"
+                    echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && sleep 2 && noclear="y"
 
                 fi
                 ;;
