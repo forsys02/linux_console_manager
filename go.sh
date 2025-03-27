@@ -858,6 +858,9 @@ menufunc() {
                             unset ${flag}
                         done
 
+                        # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
+                        [ $num_commands -eq 1 ] && break
+
                         # 아래 구문 skip
                         continue
 
@@ -866,9 +869,6 @@ menufunc() {
                     ################ 실졍 명령줄이 넘어온경우 end
                     ################ 실졍 명령줄이 넘어온경우 end
                     ################ 실졍 명령줄이 넘어온경우 end
-
-                    # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
-                    [ $num_commands -eq 1 ] && break
 
                     #
                     # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 // choice 변수는 메뉴(서브) 화면에서 수신값
@@ -1388,8 +1388,9 @@ dline() {
     printf "\n"
 }
 
-# Function to colorize percentages and optionally format KiB numbers human-readably (-h).
-colorize() {
+# Function to hl percentages and optionally format KiB numbers human-readably (-h).
+# highlight
+hl() {
     # Default thresholds
     local THRESHOLD_TOP=90
     local THRESHOLD_MEDIUM=70
@@ -1405,7 +1406,7 @@ colorize() {
         L) THRESHOLD_LOW="$OPTARG" ;;
         h) FORMAT_HUMAN=1 ;; # Enable human-readable formatting (assumes KiB)
         H)                   # Help option
-            echo "Usage: command | colorize [options]"
+            echo "Usage: command | hl [options]"
             echo "Highlights percentages and optionally formats numbers human-readably."
             echo
             echo "Options:"
@@ -1432,7 +1433,7 @@ colorize() {
 
     if [[ -z $input_data ]]; then
         if [[ -t 0 ]]; then echo "Error: No input received via pipe or redirection." >&2; else echo "Error: Received empty input." >&2; fi
-        echo "Usage: command | colorize [options]" >&2
+        echo "Usage: command | hl [options]" >&2
         return 1
     fi
 
@@ -1509,8 +1510,6 @@ colorize() {
         print;
     }' | column -t
 }
-
-# Optional alias: alias hl=colorize
 
 # colored percent
 #cper() { awk 'match($0,/([5-9][0-9]|100)%/){p=substr($0,RSTART,RLENGTH-1);gsub(p"%","\033[1;"(p==100?31:p>89?31:p>69?35:33)"m"p"%\033[0m")}1'; }
