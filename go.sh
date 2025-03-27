@@ -360,11 +360,11 @@ menufunc() {
 
         ############## 메뉴 출력 끝 ###############
         [[ $chosen_command_sub == "{}" ]] && [[ "$cmd_choice_scut" ]] && choice="$cmd_choice_scut" && cmd_choice_scut=""
-        readxx $LINENO read "choice menu pre_choice:" $choice
+        #readxx $LINENO read "choice menu pre_choice:" $choice
         if [[ -z $choice ]]; then
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
-            IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1
+            IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
             trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
         fi
 
@@ -604,7 +604,7 @@ menufunc() {
                             # readcmd_choice
                             while :; do
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
-                                IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1
+                                IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
                                 [[ -n $cmd_choice ]] && break
                             done
@@ -639,7 +639,7 @@ menufunc() {
                     fi ### end of [ $num_commands -eq 1 ] # 명령줄 출력 부분 완료
 
                     readxx $LINENO chosen_command $chosen_command
-                    readxx $LINENO cmd_choice: $cmd_choice
+                    #readxx $LINENO cmd_choice: $cmd_choice
 
                     ###################################################
                     # 명령줄 판단 부분
@@ -858,7 +858,11 @@ menufunc() {
                             unset ${flag}
                         done
 
-                    fi # end of if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
+                        # 아래 구문 skip
+                        continue
+
+                    fi # end of if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then / elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]; then
+
                     ################ 실졍 명령줄이 넘어온경우 end
                     ################ 실졍 명령줄이 넘어온경우 end
                     ################ 실졍 명령줄이 넘어온경우 end
@@ -873,166 +877,175 @@ menufunc() {
                     #
                     # 숫자 명령줄 번호가 선택이 안된 경우 이곳까지 내려옴
                     # lastcmd
-                    readxx "cmd bottom"
-
+                    readxx "번호를 선택받지 못하였다. cmd bottom"
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
-                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] && case "$cmd_choice" in
-                    # --- Basic Navigation & Commands ---
-                    ".." | "sh")
-                        bashcomm && cmds
-                        ;;
-                    "..." | "," | "bash")
-                        /bin/bash # Start sub-shell
-                        cmds      # Run cmds after sub-shell exits
-                        ;;
-                    "m")
-                        menufunc
-                        ;;
-                    "restart")
-                        echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
-                        ;; # exec terminates the script here
-                    "bm")
-                        echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooldscut"
-                        ;; # exec terminates
-                    "bbm")
-                        echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$oooldscut"
-                        ;; # exec terminates
-                    "bbbm")
-                        echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
-                        ;; # exec terminates
-                    "b")
-                        echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut &&
-                            menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
-                        ;;
-                    "bb")
-                        echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut &&
-                            menufunc "$(scutsub "$oooldscut")" "$(scuttitle "$oooldscut")" "$(notscutrelay "$oooldscut")"
-                        ;;
-                    "bbb")
-                        echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut &&
-                            menufunc "$(scutsub "$ooooldscut")" "$(scuttitle "$ooooldscut")" "$(notscutrelay "$ooooldscut")"
-                        ;;
-                    "chat" | "ai" | "hi" | "hello")
-                        ollama run gemma3 2>/dev/null && cmds
-                        ;;
-                    "conf")
-                        conf && cmds
-                        ;;
-                    "confmy")
-                        confmy && cmds
-                        ;;
-                    "confc")
-                        confc && cmds
-                        ;;
-                    "conff")
-                        conff && cmds
-                        ;;
-                    "conffc")
-                        conffc && cmds
-                        ;;
-                    "h")
-                        gohistory && cmds
-                        ;;
-                    "hh")
-                        hh && read -rep "[Enter] " x && cmds
-                        ;;
-                    "e")
-                        { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cmds
-                        ;;
-                    "df")
-                        if [[ ! $cmd_choice1 ]]; then
-                            { df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && cmds
-                        fi
-                        ;;
-                    "t")
-                        { htop 2>/dev/null || top; } && cmds
-                        ;;
-                    "tt")
-                        { iftop -t 2>/dev/null || (yyay iftop && iftop -t); } && cmds
-                        ;;
-                    "ttt" | "dfm")
-                        { dfmonitor; } && cmds
-                        ;;
-                    "em")
-                        { mc -b || { yyay mc && mc -b; }; } && cmds
-                        ;;
-                    "ee")
-                        { ranger /etc 2>/dev/null || explorer /etc; } && cmds
-                        ;;
-                    "ll")
-                        { journalctl -n10000 -e; } && cmds
-                        ;;
+                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] &&
+                        {
+                            YEL1
+                            echo
+                            echo "check your cmd_choice: $cmd_choice"
+                            RST
+                        } &&
+                        case "$cmd_choice" in
+                        # --- Basic Navigation & Commands ---
+                        "0" | "q" | ".")
+                            if [ "$choice" == "99" ]; then
+                                # scut 으로 들어온 경우, 상위메뉴타이틀 찾기
+                                title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | sed -e 's/^%%% //g' -e 's/.*}//')"
+                                readxx $LINENO "env: $env title_of_menu_sub:$title_of_menu_sub SHLVL:$SHLVL "
+                            fi
+                            unsetvar varl
+                            saveVAR
+                            break # Exit the loop
+                            ;;
 
-                    # --- Cancel/Exit ---
-                    "0" | "q" | ".")
-                        [ "$choice" == "99" ] && title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | sed -e 's/^%%% //g' -e 's/.*}//')"
-                        title_of_menu=$title_of_menu_sub # Assign title
-                        unsetvar varl
-                        saveVAR
-                        break # Exit the loop
-                        ;;
+                        ".." | "sh")
+                            bashcomm && continue
+                            ;;
+                        "..." | "," | "bash")
+                            /bin/bash # Start sub-shell
+                            continue  # Run cmds after sub-shell exits
+                            ;;
+                        "m")
+                            menufunc
+                            ;;
+                        "restart")
+                            echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
+                            ;; # exec terminates the script here
+                        "bm")
+                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooldscut"
+                            ;; # exec terminates
+                        "bbm")
+                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$oooldscut"
+                            ;; # exec terminates
+                        "bbbm")
+                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
+                            ;; # exec terminates
+                        "b")
+                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut &&
+                                menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
+                            ;;
+                        "bb")
+                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut &&
+                                menufunc "$(scutsub "$oooldscut")" "$(scuttitle "$oooldscut")" "$(notscutrelay "$oooldscut")"
+                            ;;
+                        "bbb")
+                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut &&
+                                menufunc "$(scutsub "$ooooldscut")" "$(scuttitle "$ooooldscut")" "$(notscutrelay "$ooooldscut")"
+                            ;;
+                        "chat" | "ai" | "hi" | "hello")
+                            ollama run gemma3 2>/dev/null && continue
+                            ;;
+                        "conf")
+                            conf && continue
+                            ;;
+                        "confmy")
+                            confmy && continue
+                            ;;
+                        "confc")
+                            confc && continue
+                            ;;
+                        "conff")
+                            conff && continue
+                            ;;
+                        "conffc")
+                            conffc && continue
+                            ;;
+                        "h")
+                            gohistory && continue
+                            ;;
+                        "hh")
+                            hh && read -rep "[Enter] " x && continue
+                            ;;
+                        "e")
+                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && continue
+                            ;;
+                        "df")
+                            if [[ ! $cmd_choice1 ]]; then
+                                { df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && continue
+                            fi
+                            ;;
+                        "t")
+                            { htop 2>/dev/null || top; } && continue
+                            ;;
+                        "tt")
+                            { iftop -t 2>/dev/null || (yyay iftop && iftop -t); } && continue
+                            ;;
+                        "ttt" | "dfm")
+                            { dfmonitor; } && continue
+                            ;;
+                        "em")
+                            { mc -b || { yyay mc && mc -b; }; } && continue
+                            ;;
+                        "ee")
+                            { ranger /etc 2>/dev/null || explorer /etc; } && continue
+                            ;;
+                        "ll")
+                            { journalctl -n10000 -e; } && continue
+                            ;;
 
-                    # --- Default block for complex checks and fallback ---
-                    *)
-                        # Check 1: Shortcut menu jump? (Requires $cmd_choice1 empty & match in $shortcutstr)
-                        if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
-                            readxx $LINENO cmd_choice:"$cmd_choice" shortcut_moving
-                            cmd_choice_scut=$cmd_choice
-                            savescut && exec "$gofile" "$cmd_choice" # exec terminates
+                        # --- Default block for complex checks and fallback ---
+                        *)
+                            # Check 1: Shortcut menu jump? (Requires $cmd_choice1 empty & match in $shortcutstr)
+                            if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
+                                readxx $LINENO cmd_choice:"$cmd_choice" shortcut_moving
+                                cmd_choice_scut=$cmd_choice
+                                savescut && exec "$gofile" "$cmd_choice" # exec terminates
 
-                        # Check 2: Alarm? (Numeric, starts with 0, not just "0")
-                        elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" ]]; then
-                            echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1
-                            alarm "$cmd_choice" "$cmd_choice1" && {
-                                echo
-                                readx
-                                cmds
-                            }
+                            # Check 2: Alarm? (Numeric, starts with 0, not just "0")
+                            elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" ]]; then
+                                echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1
+                                alarm "$cmd_choice" "$cmd_choice1" && {
+                                    echo
+                                    readx
+                                    continue
+                                }
 
-                        # Check 3: Valid Linux command? (Not purely numeric and exists)
-                        elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
-                            echo # Newline for formatting
-                            echo "Executing command: $cmd_choice $cmd_choice1"
-                            # Safer execution without eval:
-                            #"$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
-                            eval "$cmd_choice $cmd_choice1"
-                            read -p 'Command executed. Done.... [Enter] ' x </dev/tty
-                            # Log the executed command
-                            echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
-                            cmds
+                            # Check 3: Valid Linux command? (Not purely numeric and exists)
+                            elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
+                                echo # Newline for formatting
+                                echo "Executing command: $cmd_choice $cmd_choice1"
+                                dline
+                                process_commands "$cmd_choice $cmd_choice1" y
+                                dline
+                                echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+                                # Log the executed command
+                                continue
 
-                        # Check 4: Alias from .bashrc? (Fallback if not a command)
-                        elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
-                            # Found alias definition 'aliascmd'.
-                            echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
-                            echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
+                            # Check 4: Alias from .bashrc? (Fallback if not a command)
+                            elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                                # Found alias definition 'aliascmd'.
+                                echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
+                                echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
 
-                            dline
-                            # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
-                            # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
-                            # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
-                            bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
-                            dline
+                                dline
+                                # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
+                                # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
+                                # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                                bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
+                                dline
 
-                            # Clean up the temporary variable
-                            unset aliascmd
+                                # Clean up the temporary variable
+                                unset aliascmd
 
-                            # Optional: Log execution
-                            echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                            echo 'Alias (from .bashrc) executed. Done... ' && sleep 2
-                            cmds
+                                # Optional: Log execution
+                                echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                                echo 'Alias (from .bashrc) executed. Done... ' && sleep 2
+                                continue
 
-                        # Fallback: Unknown or invalid input
-                        else
-                            cmd_choice=""
-                            #echo "Unknown or invalid command: $cmd_choice $cmd_choice1"
-                            #sleep 1 # Give user time to see the message
-                            cmds
-                        fi
-                        ;;
-                    esac
-                    unset cmd_choice cmd_choice1
+                            # Fallback: Unknown or invalid input
+                            else
+                                #cmd_choice=""
+                                echo "Unknown or invalid command: $cmd_choice $cmd_choice1"
+                                #sleep 1 # Give user time to see the message
+                                #cmds
+                            fi
+                            ;;
+                        esac
+                    echo "no hook cmd_choice: $cmd_choice --- loop"
+                    #unset cmd_choice cmd_choice1
+                    cmd_choice=""
 
                 done #        end of      while true ; do # 하부 메뉴 loop 끝 command list
 
@@ -1050,169 +1063,321 @@ menufunc() {
             # 서브 메뉴 쇼트컷 탈출시
             # 메뉴중에 정상범위 숫자도 아니고 메인쇼트컷도 아닌 예외 메뉴 할당
             # readxx end cmds
-        elif [ "$choice" ] && [ "$choice" == "krr" ]; then
-            # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
-            if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
-                which jfbterm 2>/dev/null && jfbterm || (yum install -y jfbterm && jfbterm)
-            fi
-        elif [ "$choice" ] && [ "$choice" == "kr" ]; then
-            # hangul encoding force chg
-            # ssh 로 이곳 저곳 서버로 이동할때 terminal 클라이언트 한글 환경과 서버 한글 환경이 다르면 한글이 깨짐
-            if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
-                echo "utf chg" && sleep 1
-                if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
-                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+
+        #elif -> line of -- if ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
+        ###############################################################################################################
+        elif [ "$choice" ]; then
+            case "$choice" in
+            m) # 메인/서브 메뉴 탈출
+                menufunc
+                ;;
+            0 | "q" | .) # 메인/서브 메뉴 탈출 (quit)
+                # title_of_menu_sub=""
+                # chosen_command_sub=""
+                chosen_command=""
+
+                # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
+                if [ "$title_of_menu_sub" ]; then
+                    menufunc
                 else
-                    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                    saveVAR
+                    exit 0
                 fi
-                echo >>"$env"
-                if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
-                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
-                else
-                    cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                ;;
+            conf)
+                conf # vi.go.env
+                ;;
+            confmy)
+                confmy # vi.go.my.env
+                ;;
+            confc)
+                confc # rollback go.env
+                ;;
+            conff)
+                [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
+                ;;
+            conffc)
+                conffc # rollback go.sh
+                ;;
+            bm)
+                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
+                savescut && exec $gofile $ooldscut # back to previous menu
+                ;;
+            b)
+                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
+                savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
+                ;;
+            bbm)
+                echo "Back two menus.. [$oooldscut]" && sleep 0.5
+                savescut && exec $gofile $oooldscut # back to previous menu
+                ;;
+            bb)
+                echo "Back two menus.. [$oooldscut]" && sleep 0.5
+                savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" "$(notscutrelay "$oooldscut")" # back to previous menu
+                ;;
+            bbbm)
+                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
+                savescut && exec $gofile $ooooldscut # back to previous menu
+                ;;
+            bbb)
+                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
+                savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" "$(notscutrelay "$ooooldscut")" # back to previous menu
+                ;;
+            df)
+                # Original condition checked for ! "$choice1"
+                if [ ! "$choice1" ]; then
+                    /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
+                # else # Do nothing if choice1 exists, as per original logic implicit structure
+                #    :
                 fi
-                #[ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
-            elif [[ "$(file $env | grep -i "utf")" && -s $env ]]; then
-                echo "euc-kr chg" && sleep 1
-                if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
-                    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
-                else
-                    cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                ;;
+            chat | ai | hi | hello)
+                ollama run gemma3 2>/dev/null
+                ;;
+            h)
+                gohistory
+                ;;
+            e)
+                { ranger $choice1 2>/dev/null || explorer; }
+                ;;
+            t)
+                { htop 2>/dev/null || top; }
+                ;;
+            tt)
+                { iftop -t 2>/dev/null || (yyay iftop && iftop -t); }
+                ;;
+            ttt | dfm)
+                { dfmonitor; }
+                ;;
+            em)
+                mc -b || { yyay mc && mc -b; }
+                ;;
+            ee)
+                { ranger /etc 2>/dev/null || explorer /etc; }
+                ;;
+            ll)
+                { journalctl -n10000 -e; }
+                ;;
+            update | uu)
+                update
+                ;;
+            .. | sh) # 내장 함수와 .bashrc alias 를 쓸수 있는 bash
+                bashcomm
+                ;;
+            ... | , | bash) # alias 를 쓸수 있는 bash
+                /bin/bash
+                ;;
+            krr)
+                # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
+                if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
+                    which jfbterm 2>/dev/null && jfbterm || (yum install -y jfbterm && jfbterm)
                 fi
-                echo >>"$env"
-                if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
-                    cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
-                else
-                    cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                ;;
+
+            kr)
+                # hangul encoding force chg
+                # ssh 로 이곳 저곳 서버로 이동할때 terminal 클라이언트 한글 환경과 서버 한글 환경이 다르면 한글이 깨짐
+                if [[ ! "$(file $env | grep -i "utf")" && -s $env ]]; then
+                    echo "utf chg" && sleep 1
+                    if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
+                        cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                    else
+                        cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                    fi
+                    echo >>"$env"
+                    if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
+                        cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                    else
+                        cat "$envorg2" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                    fi
+                    #[ "$envko" ] && sed -i 's/^envko=.*/envko=utf8/' $HOME/go.private.env || echo "envko=utf8" >>$HOME/go.private.env
+                elif [[ "$(file $env | grep -i "utf")" && -s $env ]]; then
+                    echo "euc-kr chg" && sleep 1
+                    if [[ "$(file "$envorg" | grep -i "utf")" ]]; then
+                        cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                    else
+                        cat "$envorg" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+                    fi
+                    echo >>"$env"
+                    if [[ "$(file "$envorg2" | grep -i "utf")" ]]; then
+                        cat "$envorg2" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                    else
+                        cat "$envorg2" | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+                    fi
+
                 fi
+                # 한글 인코딩 관련 $env 환경파일 수정으로 새로시작
+                savescut && exec "$gofile" "$scut"
+                ;;
+            # alarm: Starts with 0, contains only digits, not just "0"
+            0[0-9]*)
+                # Verify it consists *only* of digits, matching original check: ! "${choice//[0-9]/}"
+                if [ -z "${choice//[0-9]/}" ]; then
+                    echo "alarm set --> $choice $choice1" && sleep 1 && alarm "$choice" "$choice1" && {
+                        echo
+                        readx
+                    }
+                # else # If it matches pattern but isn't purely numeric (e.g., "0abc"), fall through to '*'
+                #    : # Or potentially handle as an error/unknown command later in '*'
+                fi
+                ;;
 
-                #[ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
-            #else
-            #    echo "euc-kr print" && sleep 1
-            #    cp -a "$envorg" "$env"
-            #    sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
-            #    if ! echo "$LANG" | grep -iq 'utf'; then export LANG=euc-kr; fi
-            #    [ "$envko" ] && sed -i 's/^envko=.*/envko=euckr/' $HOME/go.private.env || echo "envko=euckr" >>$HOME/go.private.env
-            fi
-            # menufunc
-            # 환경파일 수정으로 새로시작
-            savescut && exec "$gofile" "$scut"
+            *) # Handle remaining complex conditions or unrecognized choices
+                # shortcut 과 choice 가 동일할때 choice 없음 쌩엔터
+                if [[ -z $choice1 ]] && [[ $choice == "$scut" ]]; then
+                    echo "이곳이그곳" && sleep 2
+                    choice=""
+                    #readxx $LINENO shortcut move choice $choice
 
-        # lastchoice
-        # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
+                # 실제 리눅스 명령이 들어온 경우 실행
+                # Check: is not purely numeric AND is a valid command
+                elif [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
+                    {
+                        process_commands "$choice $choice1" y
+                        # log
+                        echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+                    }
 
-        elif [ "$choice" ] && [ "$choice" == "conf" ]; then
-            conf # vi.go.env
-        elif [ "$choice" ] && [ "$choice" == "confmy" ]; then
-            confmy # vi.go.my.env
-        elif [ "$choice" ] && [ "$choice" == "confc" ]; then
-            confc # rollback go.env
-        elif [ "$choice" ] && [ "$choice" == "conff" ]; then
-            [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
-            #conff # vi go.sh
-        elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
-            conffc # rollback go.sh
-        elif [ "$choice" ] && [ "$choice" == "bm" ]; then
-            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
-            savescut && exec $gofile $ooldscut # back to previous menu
-        elif [ "$choice" ] && [ "$choice" == "b" ]; then
-            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
-            savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
-        elif [ "$choice" ] && [ "$choice" == "bbm" ]; then
-            echo "Back two menus.. [$oooldscut]" && sleep 0.5
-            savescut && exec $gofile $oooldscut # back to previous menu
-        elif [ "$choice" ] && [ "$choice" == "bb" ]; then
-            echo "Back two menus.. [$oooldscut]" && sleep 0.5
-            savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" "$(notscutrelay "$oooldscut")" # back to previous menu
-        elif [ "$choice" ] && [ "$choice" == "bbbm" ]; then
-            echo "Back three menus.. [$ooooldscut]" && sleep 0.5
-            savescut && exec $gofile $ooooldscut # back to previous menu
-        elif [ "$choice" ] && [ "$choice" == "bbb" ]; then
-            echo "Back three menus.. [$ooooldscut]" && sleep 0.5
-            savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" "$(notscutrelay "$ooooldscut")" # back to previous menu
-        elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
-            /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
-        elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
-            ollama run gemma3 2>/dev/null
-        elif [ "$choice" ] && [ "$choice" == "h" ]; then
-            gohistory
-        elif [ "$choice" ] && [ "$choice" == "e" ]; then
-            { ranger $choice1 2>/dev/null || explorer; }
-        elif [ "$choice" ] && [ "$choice" == "t" ]; then
-            { htop 2>/dev/null || top; }
-        elif [ "$choice" ] && [ "$choice" == "tt" ]; then
-            { iftop -t 2>/dev/null || (yyay iftop && iftop -t); }
-        elif [ "$choice" ] && [[ $choice == "ttt" || $choice == "dfm" ]]; then
-            { dfmonitor; }
-        elif [ "$choice" ] && [ "$choice" == "em" ]; then
-            mc -b || { yyay mc && mc -b; }
-        elif [ "$choice" ] && [ "$choice" == "ee" ]; then
-            { ranger /etc 2>/dev/null || explorer /etc; }
-        elif [ "$choice" ] && [ "$choice" == "ll" ]; then
-            { journalctl -n10000 -e; }
-        elif [ "$choice" ] && [[ $choice == "update" || $choice == "uu" ]]; then
-            update
-        # 내장 함수와 .bashrc alias 를 쓸수 있는 bash
-        elif [ "$choice" ] && [[ $choice == ".." || $choice == "sh" ]]; then
-            bashcomm
-        # alias 를 쓸수 있는 bash
-        elif [ "$choice" ] && [[ $choice == "..." || $choice == "," || $choice == "bash" ]]; then
-            /bin/bash
-        # 메인/서브 메뉴 탈출
-        elif [ "$choice" ] && [[ $choice == "m" ]]; then
-            menufunc
-        elif [ "$choice" ] && [[ $choice == "0" || $choice == "q" || $choice == "." ]]; then
+                # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
+                # Check: is not purely numeric AND is defined as an alias in .bashrc
+                elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
 
-            # title_of_menu_sub=""
-            # chosen_command_sub=""
-            chosen_command=""
+                    echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
+                    echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
-            # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
-            [ "$title_of_menu_sub" ] && menufunc || {
-                saveVAR
-                exit 0
-            }
+                    dline
+                    # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
+                    # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
+                    # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                    bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
+                    dline
 
-            # alarm
-        elif [ "$choice" ] && [ ! "${choice//[0-9]/}" ] && [ "${choice:0:1}" == "0" ]; then
-            echo "alarm set --> $choice $choice1" && sleep 1 && alarm "$choice" "$choice1" && {
-                echo
-                readx
-            }
-        # shortcut 과 choice 가 동일할때 choice 없음 쌩엔터
-        elif [[ -n $choice ]] && [[ -z $choice1 ]] && [[ $choice == "$scut" ]]; then
-            echo "이곳이그곳" && sleep 2
-            choice=""
-            #readxx $LINENO shortcut move choice $choice
+                    unset aliascmd
 
-            # 실제 리눅스 명령이 들어온 경우 실행
-        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
-            {
-                eval "$choice $choice1"
-                #"$choice" ${choice1:+"$choice1"}
-                read -p 'You Win! Done... [Enter] ' x </dev/tty
-                # log
-                echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
-            }
+                    echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                    echo 'Alias (from .bashrc) executed. Done... ' && sleep 2 && noclear="y"
 
-            # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
-        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                    # else
+                    # Optional: Handle choice that is non-empty but matched none of the specific cases
+                    # nor the complex conditions within this '*' block.
+                    # echo "Unknown command or invalid input: $choice"
+                    # : # Do nothing, or log an error
+                fi
+                ;;
+            esac
 
-            echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
-            echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
-
-            dline
-            # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
-            # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
-            # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
-            bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
-            dline
-
-            unset aliascmd
-
-            echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-            echo 'Alias (from .bashrc) executed. Done... ' && sleep 2 && noclear="y"
-
+            #        elif [ "$choice" ] && [ "$choice" == "conf" ]; then
+            #            conf # vi.go.env
+            #        elif [ "$choice" ] && [ "$choice" == "confmy" ]; then
+            #            confmy # vi.go.my.env
+            #        elif [ "$choice" ] && [ "$choice" == "confc" ]; then
+            #            confc # rollback go.env
+            #        elif [ "$choice" ] && [ "$choice" == "conff" ]; then
+            #            [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
+            #            #conff # vi go.sh
+            #        elif [ "$choice" ] && [ "$choice" == "conffc" ]; then
+            #            conffc # rollback go.sh
+            #        elif [ "$choice" ] && [ "$choice" == "bm" ]; then
+            #            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
+            #            savescut && exec $gofile $ooldscut # back to previous menu
+            #        elif [ "$choice" ] && [ "$choice" == "b" ]; then
+            #            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
+            #            savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
+            #        elif [ "$choice" ] && [ "$choice" == "bbm" ]; then
+            #            echo "Back two menus.. [$oooldscut]" && sleep 0.5
+            #            savescut && exec $gofile $oooldscut # back to previous menu
+            #        elif [ "$choice" ] && [ "$choice" == "bb" ]; then
+            #            echo "Back two menus.. [$oooldscut]" && sleep 0.5
+            #            savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" "$(notscutrelay "$oooldscut")" # back to previous menu
+            #        elif [ "$choice" ] && [ "$choice" == "bbbm" ]; then
+            #            echo "Back three menus.. [$ooooldscut]" && sleep 0.5
+            #            savescut && exec $gofile $ooooldscut # back to previous menu
+            #        elif [ "$choice" ] && [ "$choice" == "bbb" ]; then
+            #            echo "Back three menus.. [$ooooldscut]" && sleep 0.5
+            #            savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" "$(notscutrelay "$ooooldscut")" # back to previous menu
+            #        elif [ "$choice" ] && [ ! "$choice1" ] && [ "$choice" == "df" ]; then
+            #            /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
+            #        elif [ "$choice" ] && [[ $choice == "chat" || $choice == "ai" || $choice == "hi" || $choice == "hello" ]]; then
+            #            ollama run gemma3 2>/dev/null
+            #        elif [ "$choice" ] && [ "$choice" == "h" ]; then
+            #            gohistory
+            #        elif [ "$choice" ] && [ "$choice" == "e" ]; then
+            #            { ranger $choice1 2>/dev/null || explorer; }
+            #        elif [ "$choice" ] && [ "$choice" == "t" ]; then
+            #            { htop 2>/dev/null || top; }
+            #        elif [ "$choice" ] && [ "$choice" == "tt" ]; then
+            #            { iftop -t 2>/dev/null || (yyay iftop && iftop -t); }
+            #        elif [ "$choice" ] && [[ $choice == "ttt" || $choice == "dfm" ]]; then
+            #            { dfmonitor; }
+            #        elif [ "$choice" ] && [ "$choice" == "em" ]; then
+            #            mc -b || { yyay mc && mc -b; }
+            #        elif [ "$choice" ] && [ "$choice" == "ee" ]; then
+            #            { ranger /etc 2>/dev/null || explorer /etc; }
+            #        elif [ "$choice" ] && [ "$choice" == "ll" ]; then
+            #            { journalctl -n10000 -e; }
+            #        elif [ "$choice" ] && [[ $choice == "update" || $choice == "uu" ]]; then
+            #            update
+            #        # 내장 함수와 .bashrc alias 를 쓸수 있는 bash
+            #        elif [ "$choice" ] && [[ $choice == ".." || $choice == "sh" ]]; then
+            #            bashcomm
+            #        # alias 를 쓸수 있는 bash
+            #        elif [ "$choice" ] && [[ $choice == "..." || $choice == "," || $choice == "bash" ]]; then
+            #            /bin/bash
+            #        # 메인/서브 메뉴 탈출
+            #        elif [ "$choice" ] && [[ $choice == "m" ]]; then
+            #            menufunc
+            #        elif [ "$choice" ] && [[ $choice == "0" || $choice == "q" || $choice == "." ]]; then
+            #
+            #            # title_of_menu_sub=""
+            #            # chosen_command_sub=""
+            #            chosen_command=""
+            #
+            #            # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
+            #            [ "$title_of_menu_sub" ] && menufunc || {
+            #                saveVAR
+            #                exit 0
+            #            }
+            #
+            #            # alarm
+            #        elif [ "$choice" ] && [ ! "${choice//[0-9]/}" ] && [ "${choice:0:1}" == "0" ]; then
+            #            echo "alarm set --> $choice $choice1" && sleep 1 && alarm "$choice" "$choice1" && {
+            #                echo
+            #                readx
+            #            }
+            #        # shortcut 과 choice 가 동일할때 choice 없음 쌩엔터
+            #        elif [[ -n $choice ]] && [[ -z $choice1 ]] && [[ $choice == "$scut" ]]; then
+            #            echo "이곳이그곳" && sleep 2
+            #            choice=""
+            #            #readxx $LINENO shortcut move choice $choice
+            #
+            #            # 실제 리눅스 명령이 들어온 경우 실행
+            #        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
+            #            {
+            #                eval "$choice $choice1"
+            #                #"$choice" ${choice1:+"$choice1"}
+            #                read -p 'You Win! Done... [Enter] ' x </dev/tty
+            #                # log
+            #                echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+            #            }
+            #
+            #            # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
+            #        elif [ "$choice" ] && [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+            #
+            #            echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
+            #            echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
+            #
+            #            dline
+            #            # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
+            #            # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
+            #            # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+            #            bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
+            #            dline
+            #
+            #            unset aliascmd
+            #
+            #            echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+            #            echo 'Alias (from .bashrc) executed. Done... ' && sleep 2 && noclear="y"
+            #
         else
             #echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
             #choice=""
@@ -1226,9 +1391,9 @@ menufunc() {
 
 ##############################################################################################################
 ##############################################################################################################
+# 아래는 go.env 에서 사용가능한 함수 subfunc
 ##############################################################################################################
-
-# go.env 에서 사용가능한 함수 subfunc
+##############################################################################################################
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
 ff() { declare -f "$@"; }
@@ -1692,6 +1857,7 @@ oneline() {
 # i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys} - relay - choice
 # dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd] - cmd-choice
 # lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp} - relay - choice
+# scut2
 scutall() {
     scut=$1
     scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
@@ -1935,15 +2101,15 @@ format() {
 # vi2 envorg && restart go.sh
 conf() {
     vi2 "$envorg" $scut
-    savescut && exec "$gofile" $scut
+    savescut && exec "$gofile" "$scut"
 }
 confmy() {
     vi2 "$envorg2" $scut
-    savescut && exec "$gofile" $scut
+    savescut && exec "$gofile" "$scut"
 }
 conff() {
     [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
-    savescut && exec "$gofile" $scut
+    savescut && exec "$gofile" "$scut"
 }
 confc() { rollback "$envorg"; }
 conffc() { rollback "$gofile"; }
@@ -3050,9 +3216,9 @@ EOF
 
 ##############################################################################################################
 ##############################################################################################################
-##############################################################################################################
-
 ############## template copy/view func
+##############################################################################################################
+##############################################################################################################
 
 template_view() { template_copy $1 /dev/stdout; }
 
