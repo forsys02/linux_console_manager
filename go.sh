@@ -581,7 +581,7 @@ menufunc() {
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|cat \|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(restart\|reload\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
@@ -1311,21 +1311,34 @@ cip16() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
 
 # 검색문자열들 색칠(red)
 cgrep() {
-    for word in "$@"; do awk_cmd="${awk_cmd}{gsub(/$word/, \"\033[1;31m&\033[0m\")}"; done
+    for word in "$@"; do
+        escaped_word=${word//\//\\/}
+        awk_cmd="${awk_cmd}{gsub(/$escaped_word/, \"\033[1;31m&\033[0m\")}"
+    done
     awk "${awk_cmd}{print}"
 }
+# 검색문자열들 색칠(yellow)
 cgrep1() {
-    for word in "$@"; do awk_cmd="${awk_cmd}{gsub(/$word/, \"\033[1;33m&\033[0m\")}"; done
+    for word in "$@"; do
+        escaped_word=${word//\//\\/}
+        awk_cmd="${awk_cmd}{gsub(/$escaped_word/, \"\033[1;33m&\033[0m\")}"
+    done
     awk "${awk_cmd}{print}"
 }
+# 검색문자열줄을 색칠 (red)
 cgrepl() {
-    for word in "$@"; do awk_cmd="${awk_cmd}/$word/ {print \"\033[1;31m\"\$0\"\033[0m\"; next} "; done
+    for word in "$@"; do
+        escaped_word=${word//\//\\/}
+        awk_cmd="${awk_cmd}\$0 ~ /$escaped_word/ {print \"\\033[1;31m\" \$0 \"\\033[0m\"; next} "
+    done
     awk "${awk_cmd}{print}"
 }
+# 검색문자열줄을 색칠 (yellow)
 cgrepline() {
     pattern=$(echo "$*" | sed 's/ /|/g')
     awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;33m&\033[0m"); print $0;}'
 }
+# 검색문자열줄을 색칠 (red)
 cgrepline1() {
     pattern=$(echo "$*" | sed 's/ /|/g')
     awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}'
@@ -1970,7 +1983,7 @@ savescut() {
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
-echoVAR() { declare -p | grep "^declare -x var[A-Z]"; }
+viewVAR() { declare -p | grep "^declare -x var[A-Z]"; }
 saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     chmod 600 ~/.go.private.var
@@ -2010,6 +2023,9 @@ conffc() { rollback "$gofile"; }
 
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env; }
+
+ver() { ls -al $basefile; }
+verr() { cdiff $basefile $basefile.1.bak; }
 
 # bell
 bell() { echo -ne "\a"; }
@@ -4850,10 +4866,96 @@ echo "<p><strong>테스트 완료.</strong></p>";
 EOF
         ;;
 
+    named.conf.options)
+        cat >"$file_path" <<'EOF'
+// --- ACL 정의 (options 블록 바깥 또는 안에 정의 가능) ---
+acl "secondary-servers" {
+    // YOUR_2ND_NAME_SERVER_IP;  // 2차 서버 1
+    // YOUR_3RD_NAME_SERVER_IP;  // 2차 서버 2
+};
+// ---------------------------------------------------
+
+options {
+        directory "/var/cache/bind";
+
+        // listen-on-v6 { any; }; // IPv6를 사용한다면 필요에 따라 설정 (any; 또는 ::1; 등)
+        listen-on port 53 { 127.0.0.1; YOUR_1ST_NAME_SERVER_IP; }; // IPv4 수신 IP 및 포트 명시
+
+        // --- 전역 옵션에서 ACL 사용 ---
+        allow-transfer { secondary-servers; }; // secondary-servers ACL에 포함된 IP만 허용
+        // ------------------------------
+
+        allow-query    { any; };  // 누구나 쿼리할 수 있도록 허용 (보안상 필요시 특정 IP 대역으로 제한 가능)
+
+        // --- 중요: Authoritative 서버는 재귀 쿼리를 비활성화합니다 ---
+        recursion no;                    // 재귀 쿼리 비활성화
+        allow-recursion { none; };       // 재귀 쿼리 요청 거부
+        // --- ---
+
+        dnssec-validation auto; // DNSSEC 사용 시 필요 (기본 설정 유지)
+
+        // 로그 관련 설정 (필요시 추가)
+        // querylog yes; // 쿼리 로그 활성화 (성능 저하 유발 가능)
+};
+
+// 로깅 채널 및 카테고리 설정 (기본값 유지 또는 필요시 수정)
+logging {
+        channel default_debug {
+                file "/var/log/bind9/named.run"; // 로그 파일 경로
+                severity dynamic;
+        };
+};
+EOF
+        ;;
+
+    db.example.com)
+        cat >"$file_path" <<'EOF'
+;
+;
+$TTL    604800 ; 기본 TTL (Time To Live) 값 (단위: 초, 예: 1주일)
+@       IN      SOA     ns1.namedomain.com. admin.namedomain.com. (
+                     2023102701      ; Serial (파일 변경 시 반드시 1씩 증가시켜야 함 - YYYYMMDDNN 형식 권장)
+                         604800      ; Refresh (Secondary 서버가 Primary 서버 정보 갱신 주기)
+                          86400      ; Retry (Secondary 서버 갱신 실패 시 재시도 간격)
+                        2419200      ; Expire (Secondary 서버가 Primary 서버와 연결 불가 시 정보 파기까지의 시간)
+                         604800 )    ; Negative Cache TTL (존재하지 않는 레코드에 대한 캐시 유지 시간)
+;
+; Name Server 정보
+@       IN      NS      ns1.namedomain.com.      ; 이 도메인의 네임서버는 ns1.namedomain.com 이다.
+;@       IN      NS      ns2.namedomain.com.      ; 보조 네임서버가 있다면 추가
+
+; Name Server의 IP 주소 (A 레코드)
+; 자체 네임서버 구축한 도메인에 대해서 A 레코드 설정 주석해제
+; 위임된 도메인은 주석처리
+;ns1     IN      A       YOUR_1ST_NAME_SERVER_IP        ; ns1.namedomain.com 의 IP 주소
+;ns2     IN      A       YOUR_2ND_NAME_SERVER_IP        ; na2.namedomain.com 의 IP 주소
+
+; 도메인 자체 및 서브도메인 A 레코드 (웹서버 등)
+@       IN      A       YOUR_SERVER_IP        ; Domain 자체의 IP 주소
+www     IN      A       YOUR_SERVER_IP        ; Doamin 자체의 IP 주소
+mail    IN      A       YOUR_SERVER_IP        ; 메일 서버가 있다면 해당 IP (이 서버와 같을 수도 있음)
+
+; Mail Exchanger (MX) 레코드 (메일 서버 지정)
+@       IN      MX      10 mail
+
+; 기타 필요한 레코드 추가 가능 (CNAME, TXT 등)
+; ftp     IN      CNAME   www.example.com.    ; ftp.example.com 은 www.example.com 의 별칭이다.
+@       IN      TXT     "v=spf1 ip4:YOUR_SERVER_IP ~all" ; SPF 레코드 예시
+
+EOF
+        ;;
+
+    db.example.com.rev)
+        cat >"$file_path" <<'EOF'
+
+EOF
+
+        ;;
+
     6yyP.7dw.sample.yml)
         cat >"$file_path" <<'EOF'
-    sample
 EOF
+
         ;;
 
         # reuse
