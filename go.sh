@@ -769,10 +769,13 @@ menufunc() {
 
                                     # 기본값에 쓸수 없는 문자가 들어올경우 종료
                                     elif [[ $var_name == *__[a-zA-Z0-9./]* ]]; then
-                                        printf "!!! error -> var: only var[A-Z][a-zA-Z0-9_.@-]* -> / 필요시 @@ 로 대체 입력가능 \n " && exit 0
+                                        printf "!!! error -> var: only var[A-Z][a-zA-Z0-9_@-]* -> / 필요시 @@ 로 대체 입력가능 \n " && exit 0
 
                                     # 변수 기본값이 없을때
                                     else
+                                        # 기본 값이 없을때,
+                                        # 변수이름에는 점을 사용할수 없으며, 점 앞까지가 변수이름으로 지정
+                                        var_name=${var_name%%.*}
                                         # $HOME/go.private.env 에 정의된 변수가 있을때
                                         # 이전에 동일한 이름 변수에 값이 할당된 적이 있을때
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
@@ -2070,6 +2073,47 @@ done; }
 # 0060 msg           # 60분 후에 "60분 알람 msg "이라는 메시지를 텔레그램으로 전송합니다.
 # 00001700 msg or 0000 1700 msg      # 오후 5시에 "17:00 알람 msg "이라는 메시지를 텔레그램으로 전송합니다.
 # 000017001 msg      # 내일 오후 5시에 "17:00 알람 msg "이라는 메시지를 텔레그램으로 전송합니다.
+
+#
+# nameserver zonefile serial update
+serialup() {
+    local zonefile="$1"
+    local today
+    today=$(date +"%Y%m%d") # YYYYMMDD 형식의 오늘 날짜
+
+    # 파일이 존재하는지 확인
+    if [[ ! -f $zonefile ]]; then
+        echo "오류: 파일 '$zonefile'이 존재하지 않습니다."
+        return 1
+    fi
+
+    # 현재 시리얼 찾기 (SOA 레코드에 있는 숫자 10자리)
+    local current_serial
+    current_serial=$(grep -Eo '[0-9]{10}' "$zonefile")
+
+    # 현재 시리얼이 없으면 기본값 설정
+    if [[ -z $current_serial ]]; then
+        new_serial="${today}00"
+    else
+        # 기존 시리얼에서 날짜 부분 추출
+        local old_date="${current_serial:0:8}"
+        local old_nn="${current_serial:8:2}"
+
+        # 오늘 날짜와 같은 경우 NN 증가, 다르면 00으로 초기화
+        if [[ $old_date == "$today" ]]; then
+            new_nn=$(printf "%02d" $((10#$old_nn + 1))) # 01 -> 02 등 숫자로 변환 후 증가
+        else
+            new_nn="00"
+        fi
+
+        new_serial="${today}${new_nn}"
+    fi
+
+    # 시리얼을 업데이트
+    sed -i "s/$current_serial/$new_serial/" "$zonefile"
+
+    echo "업데이트 완료: $zonefile (새 시리얼: $new_serial)"
+}
 
 isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|kr|co.kr|org|io|info|xyz|app|dev)(\.[a-z]{2,})?$' >/dev/null && return 0 || return 1; }
 
@@ -4947,6 +4991,23 @@ EOF
 
     db.example.com.rev)
         cat >"$file_path" <<'EOF'
+$TTL    86400 ; 기본 TTL (1일) - 필요시 조정
+@       IN      SOA     ns1.example.com. admin.example.com. (
+                     2023102702      ; Serial (파일 변경 시 반드시 1씩 증가!)
+                                     ; (Forward Zone과는 별개의 Serial 사용 또는 동기화)
+                         86400       ; Refresh (1일)
+                          7200       ; Retry (2시간)
+                       2419200       ; Expire (4주)
+                          86400 )    ; Negative Cache TTL (1일)
+;
+; Name Server 정보 (이 Reverse Zone을 서비스하는 NS)
+@       IN      NS      ns1.example.com.
+;@       IN      NS      ns2.example.com.      ; 보조 네임서버가 있다면 추가
+
+; PTR Records (IP -> Hostname Mapping)
+; IP 주소의 마지막 옥텟을 레코드 이름으로 사용합니다.
+NS1IP4OCTET     IN      PTR     ns1.example.com.
+;NS2IP4OCTET     IN      PTR     ns2.example.com.
 
 EOF
 
