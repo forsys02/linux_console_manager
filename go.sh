@@ -578,7 +578,7 @@ menufunc() {
                                     -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
-                                    -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
+                                    -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
                                     -e '/^#/! s/\(template_copy\|template_view\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
@@ -593,7 +593,8 @@ menufunc() {
 
                             echo "=============================================="
 
-                            #vx=""
+                            # __이후.점구분안구분 장애 trash
+                            #-e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
 
                             ############ read cmd_choice
                             ############ read cmd_choice
@@ -694,8 +695,11 @@ menufunc() {
                                     var_value=""
                                     dvar_value=""
                                     var_name="var${var#var}"
-                                    # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점 사용 쩨한할경우 )
+
+                                    # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점사용 쩨한 ) varVAR.conf -> varVAR 이 변수
                                     if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
+                                    # 변수조정 varVAR__ -> varAVR ( 변수에__ 이 있지만 기본값이 없을때 )
+                                    # if [[ $var_name = *__ ]]; then var_name="${var_name%%_*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
@@ -768,7 +772,7 @@ menufunc() {
                                         eval flagof_"${var_name%%__*}"=set
 
                                     # 기본값에 쓸수 없는 문자가 들어올경우 종료
-                                    elif [[ $var_name == *__[a-zA-Z0-9./]* ]]; then
+                                    elif [[ $var_name == *__[a-zA-Z./]* ]]; then
                                         printf "!!! error -> var: only var[A-Z][a-zA-Z0-9_@-]* -> / 필요시 @@ 로 대체 입력가능 \n " && exit 0
 
                                     # 변수 기본값이 없을때
@@ -826,11 +830,11 @@ menufunc() {
                                     # varVAR 를 실제값으로 변환
                                     # echo "var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
-                                    #cmd=${cmd//$var_name/$var_value}
-                                    #cmd=$(echo "$cmd" | awk -v name="$var_name" -v value="$var_value" '{ gsub("\\<" name "\\>", value); print }' 2>/dev/null)
+                                    #cmd=${cmd//$var_name/$var_value} -> 경로등 특수문자 변환 문제
 
                                     escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
                                     cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
+                                    unset $escaped_value
 
                                     # 실행중 // 동일 이름 변수 재사용 export
                                     # 기본값이 주어진 변수도 재사용 export
@@ -920,7 +924,7 @@ menufunc() {
                         "m")
                             menufunc
                             ;;
-                        "restart")
+                        "restart" | "rest")
                             echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
                             ;; # exec terminates the script here
                         "bm")
