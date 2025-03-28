@@ -2520,6 +2520,116 @@ rbackup() {
     done
 }
 
+# 함수 이름: insert
+# 사용법: echo "삽입할 텍스트" | insert <대상_파일> <찾을_문자열>
+# 설명:
+#   표준 입력 텍스트를 <대상_파일> 내 <찾을_문자열> 첫 번째 줄 다음에 삽입합니다.
+#   수정 전 파일을 원본과 같은 디렉토리에 <원본파일이름>_YYYYMMDD_HHMMSS.bak 형식으로 백업합니다.
+#   sed 명령 실패 시 백업 파일로 복구합니다. 수정 후 차이를 diff로 보여줍니다.
+#   임시 파일 대신 /dev/stdin을 사용하여 안정성을 확보합니다.
+
+insert() {
+    local filename="$1" search_string="$2" line_num backup_filename timestamp
+
+    # 1. 기본 검증
+    if [ -z "$filename" ] || [ -z "$search_string" ] ||
+        [ ! -f "$filename" ] || [ ! -r "$filename" ] || [ ! -w "$filename" ] || [ -t 0 ]; then
+        echo 'Usage: echo "text" | insert <file> <string>' >&2
+        echo "Error: Check arguments, file permissions ('$filename'), and ensure input is piped." >&2
+        return 1
+    fi
+
+    # 2. 줄 번호 찾기
+    line_num=$(awk -v p="$search_string" '$0 ~ p { print NR; exit } END { if (!NR) exit 1 }' "$filename") ||
+        {
+            echo "Error: String '$search_string' not found in '$filename'." >&2
+            return 1
+        }
+
+    # 3. 백업 (Vim 스타일 이름, 같은 디렉토리)
+    timestamp=$(date +%Y%m%d_%H%M%S)               # YYYYMMDD_HHMMSS 형식
+    backup_filename="${filename}_${timestamp}.bak" # 원본이름_타임스탬프.bak 형식
+
+    echo "Info: Backing up '$filename' to '$backup_filename'..."
+    cp -p "$filename" "$backup_filename" ||
+        {
+            echo "Error: Failed to backup to '$backup_filename'." >&2
+            return 1
+        }
+    echo "Info: Backup complete."
+
+    # 4. 삽입 (sed 'r /dev/stdin' 사용) 및 실패 시 복구
+    echo "Info: Attempting to insert text from stdin after line $line_num in '$filename'..."
+    if ! sed -i "${line_num}r /dev/stdin" "$filename"; then
+        echo "Error: Failed to insert text using sed 'r /dev/stdin' (exit code $?)." >&2
+        echo "Info: Attempting to restore from backup '$backup_filename'..."
+        if cp -p "$backup_filename" "$filename"; then
+            echo "Info: Successfully restored '$filename' from backup." >&2
+        else
+            echo "CRITICAL ERROR: Failed to restore '$filename' from backup '$backup_filename'. Manual intervention required!" >&2
+        fi
+        return 1 # 삽입 실패 (복구 시도 후)
+    fi
+
+    echo "Info: Text inserted successfully."
+
+    # 5. 변경 사항 비교 (Diff)
+    echo "--- Changes Applied (diff -u backup current) ---"
+    cdiff "$backup_filename" "$filename"
+    echo "-------------------------------------------------"
+
+    # 6. 완료
+    echo "Success: '$filename' modified. Backup saved as '$backup_filename'."
+    return 0
+}
+
+# 함수 이름: change
+# 사용법: change <파일경로> <찾을_문자열> <바꿀_문자열>
+# 설명:
+#   핵심 기능만 수행: Perl -i로 백업 및 치환, diff로 비교.
+#   구분자 '|||' 사용. 문자열 내 특수문자 처리는 최소화됨 (백슬래시만 처리).
+
+change() {
+    local filepath="$1" search="$2" replace="$3"
+    local backup_suffix timestamp backup_filename exit_code
+
+    # 1. 인자 개수 확인 (최소한)
+    if [ $# -ne 3 ]; then
+        echo "Usage: change <filepath> <find_string> <replace_string>" >&2
+        return 1
+    fi
+
+    # 2. 백업 접미사 생성
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    backup_suffix="_${timestamp}.bak"
+    backup_filename="${filepath}${backup_suffix}" # 예상 백업 파일명
+
+    # 3. Perl 실행 (이스케이프 없음! 변수 직접 삽입)
+    #    -e 다음 코드를 큰따옴표(")로 감싸 쉘 변수($search, $replace) 확장 허용.
+    #    - 변수 내용이 Perl 구문을 깨뜨리지 않는다고 가정 (매우 위험).
+    perl "-i${backup_suffix}" -p -e "s|$(perl -e 'print quotemeta shift' "$search")|$replace|g" "$filepath"
+
+    exit_code=$?
+
+    # 4. 결과 처리 및 Diff 실행
+    if [ $exit_code -eq 0 ]; then
+        echo "Change applied (no escape). Backup: $backup_filename"
+        # Diff 실행 (백업 파일 존재 확인 후)
+        if [ -f "$backup_filename" ]; then
+            echo "--- Diff (backup vs current) ---"
+            cdiff "$backup_filename" "$filepath"
+            echo "------------------------------"
+        else
+            echo "Warning: Backup file '$backup_filename' not found for diff." >&2
+        fi
+        return 0
+    else
+        echo "Error during change operation (no escape - code: $exit_code). Check backup: $backup_filename" >&2
+        # 실패 시 원본 파일은 백업 파일에 보존될 수 있음 (perl -i 동작)
+        return $exit_code
+    fi
+}
+
 # 환경변수에 추가 prefix[0-999]=$2
 exportvar() {
     p=$1
