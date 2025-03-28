@@ -826,8 +826,11 @@ menufunc() {
                                     # varVAR 를 실제값으로 변환
                                     # echo "var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
-                                    cmd=${cmd//$var_name/$var_value}
+                                    #cmd=${cmd//$var_name/$var_value}
                                     #cmd=$(echo "$cmd" | awk -v name="$var_name" -v value="$var_value" '{ gsub("\\<" name "\\>", value); print }' 2>/dev/null)
+
+                                    escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
+                                    cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
 
                                     # 실행중 // 동일 이름 변수 재사용 export
                                     # 기본값이 주어진 변수도 재사용 export
