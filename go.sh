@@ -571,14 +571,14 @@ menufunc() {
                                     display_idx=$((display_idx + 1))
                                 fi
 
-                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi
+                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi 색칠
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
-                                    -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
+                                    -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
                                     -e '/^#/! s/\(template_copy\|template_view\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
@@ -694,8 +694,8 @@ menufunc() {
                                     var_value=""
                                     dvar_value=""
                                     var_name="var${var#var}"
-                                    # 변수조정 varVAR.conf -> varVAR ( 변수에 점 사용 쩨한할경우 )
-                                    # if [[ $value != *__* ]]; then var_name="${var_name%.*}"; fi
+                                    # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점 사용 쩨한할경우 )
+                                    if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
@@ -775,7 +775,7 @@ menufunc() {
                                     else
                                         # 기본 값이 없을때,
                                         # 변수이름에는 점을 사용할수 없으며, 점 앞까지가 변수이름으로 지정
-                                        var_name=${var_name%%.*}
+                                        # var_name=${var_name%%.*}
                                         # $HOME/go.private.env 에 정의된 변수가 있을때
                                         # 이전에 동일한 이름 변수에 값이 할당된 적이 있을때
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
@@ -824,7 +824,10 @@ menufunc() {
                                     fi
 
                                     # varVAR 를 실제값으로 변환
-                                    cmd=$(echo "$cmd" | awk -v name="$var_name" -v value="$var_value" '{ gsub("\\<" name "\\>", value); print }')
+                                    # echo "var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
+
+                                    cmd=${cmd//$var_name/$var_value}
+                                    #cmd=$(echo "$cmd" | awk -v name="$var_name" -v value="$var_value" '{ gsub("\\<" name "\\>", value); print }' 2>/dev/null)
 
                                     # 실행중 // 동일 이름 변수 재사용 export
                                     # 기본값이 주어진 변수도 재사용 export
@@ -4922,7 +4925,7 @@ acl "secondary-servers" {
 options {
         directory "/var/cache/bind";
 
-        // listen-on-v6 { any; }; // IPv6를 사용한다면 필요에 따라 설정 (any; 또는 ::1; 등)
+            listen-on-v6 { none; }; // IPv6를 사용한다면 필요에 따라 설정 (any; 또는 ::1; 등)
         listen-on port 53 { 127.0.0.1; YOUR_1ST_NAME_SERVER_IP; }; // IPv4 수신 IP 및 포트 명시
 
         // --- 전역 옵션에서 ACL 사용 ---
@@ -4942,13 +4945,6 @@ options {
         // querylog yes; // 쿼리 로그 활성화 (성능 저하 유발 가능)
 };
 
-// 로깅 채널 및 카테고리 설정 (기본값 유지 또는 필요시 수정)
-logging {
-        channel default_debug {
-                file "/var/log/bind9/named.run"; // 로그 파일 경로
-                severity dynamic;
-        };
-};
 EOF
         ;;
 
