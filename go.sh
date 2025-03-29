@@ -587,7 +587,8 @@ menufunc() {
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
-                                    -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
+                                    -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
+                                    -e 's/#$/\x1b[1;36m#\x1b[0m/' `# 주석을 청록색으로 포맷`
 
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
@@ -2738,6 +2739,51 @@ change() {
         # 실패 시 원본 파일은 백업 파일에 보존될 수 있음 (perl -i 동작)
         return $exit_code
     fi
+}
+
+eprintf() {
+    # 사용자 안내 메시지 (stderr)
+    echo "설정 내용을 입력하세요. 입력 완료 후 Ctrl+D를 누르세요:" >&2
+
+    local line
+    local ansi_c_content="" # ANSI-C $'' 안에 들어갈 내용
+    local first_line=1      # 첫 줄 플래그
+
+    # /dev/tty 에서 한 줄씩 읽기
+    while IFS= read -r line || [[ -n $line ]]; do
+        # 이스케이프: \ -> \\, ' -> \'
+        line=${line//\\/\\\\}
+        line=${line//\'/\\\'}
+
+        # 내용 조합: 첫 줄은 그대로, 이후 줄은 \n 과 함께 추가
+        if [[ $first_line -eq 1 ]]; then
+            ansi_c_content="$line"
+            first_line=0
+        else
+            ansi_c_content+="\\n$line" # 줄 사이에 \n 추가
+        fi
+    done </dev/tty
+
+    # 입력 내용 없으면 경고 후 종료
+    if [[ -z $ansi_c_content && $first_line -eq 1 ]]; then
+        echo "경고: 입력된 내용이 없습니다." >&2
+        return 1
+    fi
+
+    # ANSI-C 내용의 가장 끝에 줄바꿈 이스케이프(\n)를 추가합니다.
+    # 이렇게 하면 생성된 printf 명령 실행 시 마지막 내용 뒤에 줄바꿈이 발생합니다.
+    # (입력이 아예 없었던 경우는 제외)
+    if [[ $first_line -eq 0 ]]; then # 입력이 한 줄이라도 있었으면
+        ansi_c_content+='\n'         # 내용 끝에 \n 추가
+    fi
+
+    # 최종 printf 명령어 문자열을 '한 줄로' 출력하고, 그 뒤에 줄바꿈을 추가합니다.
+    # 형식: printf $'{포맷팅된 내용}\n' (이제 {포맷팅된 내용} 끝에 \n 이 포함됨)
+    # 바깥쪽 printf의 포맷 문자열 끝에 \n 을 추가하여 eprintf 함수 자체 출력 후 줄바꿈 발생
+    printf "printf \$'%s'\n" "$ansi_c_content"
+    #                      ^^-- eprintf 출력 후 줄바꿈 위해 유지
+
+    # 함수 실행 후 프롬프트가 새 줄에서 시작됨
 }
 
 # 환경변수에 추가 prefix[0-999]=$2
