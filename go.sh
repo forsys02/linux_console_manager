@@ -840,10 +840,23 @@ menufunc() {
                                     # echo "var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
                                     #cmd=${cmd//$var_name/$var_value} -> 경로등 특수문자 변환 문제
+                                    #cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g") -> varA_ -> varA 인식못함
 
-                                    escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
+                                    #escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
                                     #cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
-                                    cmd=$(echo "$cmd" | sed "s|\b$var_name|$escaped_value|g")
+                                    #
+                                    # 1. var_name을 sed 정규식 패턴에 안전하게 사용하도록 이스케이프 (동일)
+                                    regex_safe_var_name=$(printf '%s' "$var_name" | sed 's/[.^$*\[\]\\]/\\&/g')
+
+                                    # 2. var_value를 sed 치환 문자열에 안전하게 사용하도록 이스케이프 (구분자 # 포함 - 동일)
+                                    escaped_value=$(printf '%s' "$var_value" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g' -e 's/#/\\#/g')
+
+                                    # 3. 캡처 그룹을 사용하여 cmd 업데이트 (Lookaround 대신)
+                                    #    (^|[^a-zA-Z0-9]): 시작(^) 이거나 영숫자가 아닌 문자(그룹 1)
+                                    #    ([^a-zA-Z0-9]|$): 영숫자가 아닌 문자 이거나 끝($)(그룹 2)
+                                    #    치환 시 \1$escaped_value\2 로 원래 경계 문자를 다시 넣어줌
+                                    cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
+
                                     unset $escaped_value
 
                                     #echo "here~~~ var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
@@ -989,7 +1002,9 @@ menufunc() {
                             ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
-                                { df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && continue
+                                { /bin/df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && continue
+                            else
+                                /bin/df $cmd_choice1 && readx && continue
                             fi
                             ;;
                         "t")
@@ -1157,8 +1172,8 @@ menufunc() {
                 # Original condition checked for ! "$choice1"
                 if [ ! "$choice1" ]; then
                     /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
-                # else # Do nothing if choice1 exists, as per original logic implicit structure
-                #    :
+                else # Do nothing if choice1 exists, as per original logic implicit structure
+                    /bin/df $choice1 && readx
                 fi
                 ;;
             chat | ai | hi | hello)
