@@ -2684,17 +2684,17 @@ insert() {
 }
 
 # 함수 이름: change
-# 사용법: change <파일경로> <찾을_문자열> <바꿀_문자열>
+# 사용법: change <파일경로> <찾을_문자열> <바꿀_문자열> <line:검색라인교체시>
 # 설명:
 #   핵심 기능만 수행: Perl -i로 백업 및 치환, diff로 비교.
 #   구분자 '|||' 사용. 문자열 내 특수문자 처리는 최소화됨 (백슬래시만 처리).
 
 change() {
-    local filepath="$1" search="$2" replace="$3"
+    local filepath="$1" search="$2" replace="$3" line="$4"
     local backup_suffix timestamp backup_filename exit_code
 
     # 1. 인자 개수 확인 (최소한)
-    if [ $# -ne 3 ]; then
+    if [ $# -lt 3 ]; then
         echo "Usage: change <filepath> <find_string> <replace_string>" >&2
         return 1
     fi
@@ -2707,7 +2707,17 @@ change() {
     # 3. Perl 실행 (이스케이프 없음! 변수 직접 삽입)
     #    -e 다음 코드를 큰따옴표(")로 감싸 쉘 변수($search, $replace) 확장 허용.
     #    - 변수 내용이 Perl 구문을 깨뜨리지 않는다고 가정 (매우 위험).
-    perl "-i${backup_suffix}" -p -e "s|$(perl -e 'print quotemeta shift' "$search")|$replace|g" "$filepath"
+
+    # $4 에 line 값이 들어오면, 검색되는 줄을 삭제하고 대체
+    # perl "-i${backup_suffix}" -p -e "s|$(perl -e 'print quotemeta shift' "$search")|$replace|g" "$filepath"
+    if [ "$line" ] && [ "$line" == "line" ]; then
+        # 첫글자부터 같아야 search
+        perl "-i${backup_suffix}" -p -e "s{.*}{$replace} if m#^$(perl -e 'print quotemeta shift' "$search")#" "$filepath"
+    else
+        # 위치 상관없이 search -> 주석으로 인해 동일한 검색이 많을 경우 중복변경
+        perl "-i${backup_suffix}" -p -e "s|$(perl -e 'print quotemeta shift' "$search")|$replace|g" "$filepath"
+        # perl "-i${backup_suffix}" -p -e "s{.*}{$replace} if m#$(perl -e 'print quotemeta shift' "$search")#" "$filepath"
+    fi
 
     exit_code=$?
 
