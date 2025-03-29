@@ -855,7 +855,8 @@ menufunc() {
                                     #    (^|[^a-zA-Z0-9]): 시작(^) 이거나 영숫자가 아닌 문자(그룹 1)
                                     #    ([^a-zA-Z0-9]|$): 영숫자가 아닌 문자 이거나 끝($)(그룹 2)
                                     #    치환 시 \1$escaped_value\2 로 원래 경계 문자를 다시 넣어줌
-                                    cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
+                                    #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
+                                    cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
 
                                     unset $escaped_value
 
