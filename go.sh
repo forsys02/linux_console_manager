@@ -581,7 +581,7 @@ menufunc() {
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(stop\|stopall\|allstop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
@@ -3324,6 +3324,7 @@ EOF
 ##############################################################################################################
 ##############################################################################################################
 
+template_edit() { conff $1; }
 template_view() { template_copy $1 /dev/stdout; }
 
 template_copy() {
