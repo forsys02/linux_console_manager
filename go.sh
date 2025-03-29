@@ -562,7 +562,7 @@ menufunc() {
                                 # 주석 아닌경우 배열 순번에 줄번호를 할당 (주석은 번호할당 열외)
                                 # 시작하는 공백을 제거후 할당
                                 pi=""
-                                if [ "$(echo "$c_cmd" | xargs | cut -c1)" != "#" ]; then
+                                if [ "$(echo "$c_cmd" | xargs -0 | cut -c1)" != "#" ]; then
 
                                     pi="${display_idx}." # 줄번호
                                     # 배열 확장
@@ -582,9 +582,9 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 노란색` \
                                     -e '/^#/! s/\(template_copy\|template_view\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(stop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(status\)/\x1b[1;33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(restart\|reload\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
+                                    -e '/^#/! s/\(stop\|stopall\|allstop\|disable\|disabled\)/\x1b[1;31m\1\x1b[0m/g' `# stop disable red` \
+                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/#\(.*\)/\x1b[1;36m#\1\x1b[0m/' `# 주석을 청록색으로 포맷`
@@ -661,7 +661,9 @@ menufunc() {
                         echo
                         # Danger 판단
                         if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
+                            # !!! 제거 # !!! 앞에 공백이 간혹 있을때 버그 방지
                             chosen_command=${chosen_command#* }
+                            chosen_command=${chosen_command#!!!}
                             echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
                             echo
                             # !!! -> danger print -> var cfm
@@ -5040,6 +5042,16 @@ $TTL    86400 ; 기본 TTL (1일) - 필요시 조정
 NS1IP4OCTET     IN      PTR     ns1.example.com.
 ;NS2IP4OCTET     IN      PTR     ns2.example.com.
 
+EOF
+
+        ;;
+
+    heredocutest.conf)
+        cat >"$file_path" <<EOF
+        1. $VAR1
+        2. $VAR2
+        3. VAR1
+        4. VAR2
 EOF
 
         ;;
