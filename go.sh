@@ -5113,6 +5113,29 @@ EOF
 
         ;;
 
+    roundcube.conf)
+        cat >"$file_path" <<EOF
+<VirtualHost *:80>
+    ServerName $SERVERNAME
+    DocumentRoot $roundcubepath/roundcube
+
+    <Directory $roundcubepath/roundcube/>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+        # PHP 설정 (필요시)
+        # php_value memory_limit 64M
+        # php_value upload_max_filesize 10M
+        # php_value post_max_size 12M
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/roundcube_error.log
+    CustomLog ${APACHE_LOG_DIR}/roundcube_access.log combined
+</VirtualHost>
+EOF
+
+        ;;
+
     6yyP.7dw.sample.yml)
         cat >"$file_path" <<'EOF'
 EOF
