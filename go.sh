@@ -699,7 +699,7 @@ menufunc() {
                                     # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점사용 쩨한 ) varVAR.conf -> varVAR 이 변수
                                     if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
                                     # 변수조정 varVAR__ -> varAVR ( 변수에__ 이 있지만 기본값이 없을때 )
-                                    # if [[ $var_name = *__ ]]; then var_name="${var_name%%_*}"; fi
+                                    if [[ $var_name == *__ ]]; then var_name="${var_name%%__*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
@@ -815,7 +815,11 @@ menufunc() {
                                         [[ ${var_name} == *nospace ]] && var_value="${var_value// /,}"
                                     fi
                                     echo
+
+                                    # 변수 파싱 끝 최종
                                     # 변수에 read 수신값 할당
+                                    #
+                                    # 입력값 없지만 기본값 있을때
                                     if [ ! "$var_value" ] && [ "$dvar_value" ]; then
                                         # 변수의 기본값을 지정 (varABC__22) 기본값은 숫자와영문자만 가능
                                         if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
@@ -823,8 +827,13 @@ menufunc() {
                                         elif [ "${!var_name}" ]; then
                                             var_value="$dvar_value"
                                         fi
+                                    # 입력값 없거나 cancel 일때
                                     elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ]; then
                                         { cancel=yes && echo "Canceled..." && eval flagof_"${var_name%%__*}"=set && break; }
+                                    # 입력값 있을때
+                                    else
+                                        # echo "here var_name~~:$var_name // var_value~~:$var_value" ;
+                                        :
                                     fi
 
                                     # varVAR 를 실제값으로 변환
@@ -833,8 +842,11 @@ menufunc() {
                                     #cmd=${cmd//$var_name/$var_value} -> 경로등 특수문자 변환 문제
 
                                     escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
-                                    cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
+                                    #cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
+                                    cmd=$(echo "$cmd" | sed "s|\b$var_name|$escaped_value|g")
                                     unset $escaped_value
+
+                                    #echo "here~~~ var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
                                     # 실행중 // 동일 이름 변수 재사용 export
                                     # 기본값이 주어진 변수도 재사용 export
