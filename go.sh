@@ -1,6 +1,6 @@
 #!/bin/bash
 # bash2 하위 호환성 유지 (redhat7/oops1)
-
+#
 #debug="y"
 
 echo
@@ -1625,6 +1625,33 @@ cdiff() {
     diff -u "$old" "$new" | while IFS= read -r l; do case "$l" in "-"*) printf "${R}${l}${N}\n" ;; "+"*) printf "${Y}${l}${N}\n" ;; *) printf "${l}\n" ;; esac done
 }
 
+# .vim/backup 의 최신 백업파일과 현재 파일의 차이를 보여줌
+fdiff() {
+    local backup_dir="$HOME/.vim/backup"
+
+    if [[ -z $1 ]]; then
+        echo "Usage: fdiff <filename>"
+        return 1
+    fi
+
+    local target_file
+    target_file=$(basename -- "$1") # 파일명만 추출
+
+    # 가장 최근의 백업 파일 찾기
+    local latest_backup
+    latest_backup=$(ls -t "$backup_dir"/"$target_file"* 2>/dev/null | head -n 1)
+
+    if [[ -z $latest_backup ]]; then
+        echo "No backup file found for $target_file"
+        return 1
+    fi
+
+    cdiff "$latest_backup" "$1" | less -RX
+}
+
+godiff() { fdiff $gofile; }
+goodiff() { fdiff $envorg; }
+
 # colored dir
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
@@ -2758,7 +2785,7 @@ eprintf() {
         # 이스케이프: \ -> \\, ' -> \'
         line=${line//\\/\\\\}
         line=${line//\'/\\\'}
-
+        line=${line//%/%%}
         # 내용 조합: 첫 줄은 그대로, 이후 줄은 \n 과 함께 추가
         if [[ $first_line -eq 1 ]]; then
             ansi_c_content="$line"
@@ -4783,7 +4810,7 @@ set mat=3 showmatch
 "set nu
 
 set bs=2                " allow backspacing over everything in insert mode
-set nobackup          " do not keep a backup file, use versions instead
+"set nobackup          " do not keep a backup file, use versions instead
 
 set viminfo='100,<50    " read/write a .viminfo file, don't store more
                         " than 100 lines of registers
@@ -4971,7 +4998,7 @@ endif
 if filereadable($HOME."/.vimrc.local")
   source $HOME/.vimrc.local
 endif
-		
+
 EOF
         ;;
 
