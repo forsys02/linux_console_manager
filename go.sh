@@ -1039,7 +1039,8 @@ menufunc() {
                             if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
                                 readxx $LINENO cmd_choice:"$cmd_choice" shortcut_moving
                                 cmd_choice_scut=$cmd_choice
-                                savescut && exec "$gofile" "$cmd_choice" # exec terminates
+                                #savescut && exec "$gofile" "$cmd_choice" # exec terminates
+                                menufunc "$(scutsub "$cmd_choice")" "$(scuttitle "$cmd_choice")" "$(notscutrelay "$cmd_choice")"
 
                             # Check 2: Alarm? (Numeric, starts with 0, not just "0")
                             elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" ]]; then
@@ -4759,6 +4760,218 @@ function! VisualSelection(direction, extra_filter) range
 endfunction
 set t_ti= t_te=
 
+EOF
+        ;;
+
+    vimrc2.yml)
+        cat >"$file_path" <<'EOF'
+" Arcy's vim environment (based on perky's)
+
+let g:Arcy="4.9"
+
+let mapleader="\<Space>"
+
+set nocompatible
+"set fileformat=unix
+set formatoptions=tcql
+set ai
+"set laststatus=2
+"set wrapmargin=2
+set visualbell
+set mat=3 showmatch
+"set term=xterm
+"set nu
+
+set bs=2                " allow backspacing over everything in insert mode
+set nobackup          " do not keep a backup file, use versions instead
+
+set viminfo='100,<50    " read/write a .viminfo file, don't store more
+                        " than 100 lines of registers
+set history=500         " keep 500 lines of command line history
+set ruler               " show the cursor position all the time
+
+set list lcs=tab:\|.,trail:~    " display tab as >------, and trail as ~
+
+set fencs=utf-8,cp949,euc-kr,ucs-bom,latin1
+
+set incsearch           " incremental searching
+set ignorecase smartcase
+
+set wildmenu
+
+" netrw setting
+let g:netrw_winsize = -28
+let g:netrw_chgwin = -1
+let g:netrw_browse_split = 0
+let g:netrw_banner = 0
+let g:netrw_liststyle = 3
+" https://vi.stackexchange.com/questions/7889/cannot-exit-vim-even-using-q
+" Per default, netrw leaves unmodified buffers open. This autocommand
+" deletes netrw's buffer once it's hidden (using ':q', for example)
+autocmd FileType netrw setl bufhidden=delete
+
+if v:version >= 703
+  let undodir=$HOME."/.vim/undo"
+  if !isdirectory(undodir)
+    call mkdir(undodir, "p")
+  endif
+  set undofile                " Save undo's after file closes
+  set undodir=$HOME/.vim/undo " where to save undo histories
+  set undolevels=1000         " How many undos
+  set undoreload=10000        " number of lines to save for undo
+endif
+
+" Switch syntax highlighting on, when the terminal has colors
+" Also switch on highlighting the last used search pattern.
+if &t_Co > 2 || has("gui_running")
+  syntax on
+  set hlsearch
+endif
+
+" Force encoding as UTF-8, in cygwin ssh enviroment
+if stridx(&term, "xterm") >= 0 && stridx($USERDOMAIN, "NT AUTHORITY") >= 0
+  set enc=utf-8
+endif
+
+" Update function
+if has("eval")
+  fun! Updateit()
+    " Install Vundle
+    if !isdirectory($HOME."/.vim/bundle")
+      !git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
+    endif
+
+    BundleInstall
+
+    " Update vimrc
+    winc n
+    ,!uname -s
+    yank
+    undo
+    winc c
+    let os = @
+    if stridx(os, "FreeBSD") >= 0
+      !fetch -o ~/.vimrc.new https://arcy.org/.vimrc
+    else
+      !curl -o ~/.vimrc.new https://arcy.org/.vimrc
+    endif
+
+    if match(readfile($HOME."/.vimrc.new"), "\" Arcy") != 0
+      echo "Error while downloading new vimrc"
+      echo readfile($HOME."/.vimrc.new")
+      return
+    endif
+    !mv ~/.vimrc.new ~/.vimrc
+  endfun
+endif
+
+set background=dark
+
+set <S-F1>=O2P
+set <S-F2>=O2Q
+set <S-F3>=O2R
+set <S-F4>=O2S
+
+map <S-F1> :echo "Arcy's environment version " g:Arcy<cr>
+map <S-F2> :call Updateit()<CR>:source ~/.vimrc<CR>
+map <F3> :Lexplore<cr>
+map <S-F3> :bd<cr>
+map <F4> :up<cr>
+imap <F4> <ESC>:up<CR>a
+map <S-F4> :q<cr>
+map <F9> :<C-U>exec v:count1 . "cp"<CR>
+map <F10> :<C-U>exec v:count1 . "cn"<CR>
+map <S-F9> :bp<cr>
+map <S-F10> :bn<cr>
+map <F11> :N<cr>
+map <F12> :n<cr>
+map <S-F11> :tN<cr>
+map <S-F12> :tn<cr>
+map <C-j> <C-w>j
+map <C-k> <C-w>k
+map <C-h> <C-w>h
+map <C-l> <C-w>l
+map <C-n> <C-w>n
+map <C-;> :redr!<cr>
+map <C-i> :tabprev<cr>
+map <C-p> :tabnext<cr>
+map <C-m> :tabnew<cr>
+
+" Leader mapping
+noremap <Leader>b :term bash<CR>
+noremap <Leader>t :Sexplore<CR>
+noremap <Leader>T :Texplore<CR>
+noremap <Leader>gs :Git<CR>
+noremap <Leader>gd :Gdiff<CR>
+noremap <Leader>ge :Gedit<CR>
+noremap <Leader>gg :Ggrep <C-R><C-W><CR>
+noremap <Leader>du :diffupdate<CR>
+noremap <Leader>r :set relativenumber! nu!<CR>
+noremap <Leader>p :set paste!<CR>
+set pastetoggle=<F2>
+
+" Disable man page
+nnoremap K <nop>
+" Disable ex mode
+nmap Q q
+
+" Command mode remap
+cnoremap <C-a> <Home>
+cnoremap <C-e> <End>
+cnoremap <Esc>b <S-Left>
+cnoremap <Esc>f <S-Right>
+
+" Alt-Backspace to delete a word
+inoremap <Esc><Backspace> <C-w>
+cnoremap <Esc><Backspace> <C-w>
+
+"map D o/*<cr> * <cr>*/<esc>ka
+
+" Auto close tag with HTML files
+function! s:CloseTags()
+  imap <C--> <lt>/<C-x><C-o>
+endfunction
+autocmd BufRead,BufNewFile *.html,*.js,*.xml,*.vue call s:CloseTags()
+
+" show relavite line number from cursor
+augroup numbertoggle
+  autocmd!
+  autocmd VimEnter,WinEnter,BufWinEnter * setlocal relativenumber number
+  autocmd WinLeave * setlocal norelativenumber number
+augroup END
+
+au BufNewFile,BufRead *.c          set si
+au BufNewFile,BufRead *.php        set si et sw=4 sts=4
+au BufNewFile,BufRead *.py         set si et sw=4 sts=4
+au BufNewFile,BufRead *.html,*.css set sw=8 sts=8 noet
+au BufNewFile,BufRead *.js,*.ts    set et sw=2 sts=2
+au BufNewFile,BufRead *.rdf        set et sw=2 sts=2
+au BufNewFile,BufRead *.vue        setlocal filetype=vue.html.javascript.css
+
+
+" Load Vundle
+if isdirectory($HOME."/.vim/bundle")
+  filetype off
+  set rtp+=~/.vim/bundle/Vundle.vim
+  call vundle#begin()
+  Plugin 'VundleVim/Vundle.vim'
+  Plugin 'tpope/vim-fugitive' " Git management
+  Plugin 'AutoComplPop' " Auto complete popup
+  " Syntax
+  " Plugin 'vim-syntastic/syntastic'
+  " Plugin 'posva/vim-vue' " Vue.js
+  " Plugin 'fatih/vim-go' " Golang
+
+  call vundle#end()
+  filetype plugin indent on
+endif
+
+
+" Load local config
+if filereadable($HOME."/.vimrc.local")
+  source $HOME/.vimrc.local
+endif
+		
 EOF
         ;;
 
