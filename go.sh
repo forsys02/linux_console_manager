@@ -3,6 +3,9 @@
 
 #debug="y"
 
+echo
+who am i && sleep 1
+
 # 존재 하는 파일의 절대경로 출력 readlink -f
 readlinkf() {
     p="$1"
@@ -96,7 +99,7 @@ else
 fi
 
 # tmp 폴더 set
-if touch /tmp/go_history.txt 2>/dev/null; then
+if [ $(id -u) == "0" ] && echo "" >>/tmp/go_history.txt 2>/dev/null; then
     gotmp="/tmp"
     chmod 600 /tmp/go_history.txt
 else
