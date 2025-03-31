@@ -3242,7 +3242,8 @@ sleepdot() {
     s=$(date +%s)
     c=1
     [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "
-    time while [ -z "$x" ]; do
+    #time while [ -z "$x" ]; do
+    while [ -z "$x" ]; do
         [ "$1" ] && sleep 1
         echo -n "."
         [ $((c % 5)) -eq 0 ] && echo -n " "
