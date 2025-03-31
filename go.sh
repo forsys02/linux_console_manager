@@ -547,8 +547,9 @@ menufunc() {
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
 
-                                # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로
-                                file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
+                                # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
+                                #file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
+                                file_paths="$(echo "$c_cmd" | awk '/^[[:space:]]*#/{next} {for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath}}}}')"
 
                                 # 해당 서버에 없는 경로에 대해서는 음영처리 // 있는 경로는 밝게
                                 # 서버에 따라 환경파일의 경로가 달라 파일 존재 여부 밝음/어둠으로 체크
