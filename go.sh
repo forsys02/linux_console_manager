@@ -99,10 +99,11 @@ else
 fi
 
 # tmp 폴더 set
-if [ $(id -u) == "0" ] && echo "" >>/tmp/go_history.txt 2>/dev/null; then
+if [[ $(id -u) == "0" ]] && echo "" >>/tmp/go_history.txt 2>/dev/null; then
     gotmp="/tmp"
     chmod 600 /tmp/go_history.txt
 else
+    [[ $(id -u) == "0" ]] && mv -f /tmp/go_history.txt /tmp/go_history.txt.
     gotmp="$HOME/tmp"
     mkdir -p "$gotmp"
     touch "$gotmp"/go_history.txt
@@ -585,7 +586,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|cat \|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|cat \|hash_add\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -2672,7 +2673,10 @@ insert() {
     fi
 
     # 2. 줄 번호 찾기
-    line_num=$(awk -v p="$search_string" '$0 ~ p { print NR; exit } END { if (!NR) exit 1 }' "$filename") ||
+
+    # 서치내용에 특수기호 무효화
+    #line_num=$(awk -v p="$search_string" '$0 ~ p { print NR; exit } END { if (!NR) exit 1 }' "$filename") ||
+    line_num=$(awk -v p="$search_string" 'index($0, p) > 0 { print NR; found=1; exit } END { if (!found) exit 1 }' "$filename") ||
         {
             echo "Error: String '$search_string' not found in '$filename'." >&2
             return 1
@@ -2769,6 +2773,191 @@ change() {
         echo "Error during change operation (no escape - code: $exit_code). Check backup: $backup_filename" >&2
         # 실패 시 원본 파일은 백업 파일에 보존될 수 있음 (perl -i 동작)
         return $exit_code
+    fi
+}
+
+hash_add() {
+    # --- Arguments & Basic Validation ---
+    local fpath="$1" search="$2" num_arg="$3"
+    # Default: Comment 1 line (the matched one)
+    local num_lines=1
+    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff" # Assume cdiff exists
+
+    # Validate number of arguments
+    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+        echo "Usage: hash_add <filepath> <search> [total_lines]" >&2
+        echo "  - comments matched line (if not already commented)." >&2
+        echo "  - if total_lines >= 1, comments that many lines total," >&2
+        echo "    starting with the matched one. Subsequent lines get '# ' prepended." >&2
+        return 1
+    fi
+
+    # Validate optional total_lines argument
+    if [ $# -eq 3 ]; then
+        # Must be an integer >= 1
+        if [[ ! $num_arg =~ ^[1-9][0-9]*$ ]]; then
+            echo "Error: total_lines must be an integer >= 1." >&2
+            return 1
+        fi
+        num_lines="$num_arg"
+    fi
+
+    # Validate file exists
+    if [ ! -f "$fpath" ]; then
+        echo "Error: File not found: $fpath" >&2
+        return 1
+    fi
+
+    # --- Setup ---
+    ts=$(date +%Y%m%d_%H%M%S)
+    bk_suffix="_${ts}.bak"
+    bk_fname="${fpath}${bk_suffix}"
+    # Quote search pattern for Perl regex
+    quoted_s=$(perl -e 'print quotemeta shift' "$search")
+    [ -z "$quoted_s" ] && {
+        echo "Error: Failed to quote search pattern (empty?)." >&2
+        return 1
+    }
+
+    # --- Perl Script (concise, uses env vars P and N) ---
+    # $c: counter for lines remaining to force-comment *after* the matched line.
+    # $ENV{P}: Quoted search Pattern.
+    # $ENV{N}: Total number of lines to comment (including matched).
+    # On match, set counter c to N-1 (remaining lines).
+    perl_p='
+        BEGIN { $c = 0 }
+        if (m/$ENV{P}/) {
+            # Matched line: Comment if needed
+            unless (/^\s*#/) { $_ = "# " . $_ }
+            # Set counter for remaining lines (Total N lines - 1 matched line = N-1)
+            $c = $ENV{N} - 1;
+        } elsif ($c-- > 0) {
+            # Subsequent lines to force-comment
+            $_ = "# " . $_;
+        }
+        print;
+    '
+    # One-liner version:
+    # perl_p='BEGIN{$c=0} if(m/$ENV{P}/){unless(/^\s*#/){$_="# ".$_} $c=$ENV{N}-1}elsif($c-->0){$_="# ".$_} print'
+
+    # --- Execution ---
+    export P="$quoted_s" N="$num_lines" # Pass total lines N
+    perl "-i${bk_suffix}" -n -e "$perl_p" "$fpath"
+    ret=$?
+    unset P N # Clean up environment
+
+    # --- Reporting ---
+    if [ $ret -eq 0 ]; then
+        echo "Hash Add potentially done. Backup: $bk_fname"
+        # Check if backup exists and differs before showing diff
+        if [ -f "$bk_fname" ]; then
+            if ! cmp -s "$bk_fname" "$fpath"; then
+                echo "--- Diff (${DIFF_CMD}) ---"
+                "$DIFF_CMD" "$bk_fname" "$fpath"
+                echo "--------------------"
+            else
+                echo "Info: No effective changes made to file content."
+            fi
+        else
+            echo "Info: No changes made (no backup created)."
+        fi
+        return 0
+    else
+        echo "Error during Hash Add (code: $ret). Check backup: $bk_fname" >&2
+        return $ret
+    fi
+}
+
+hash_remove() {
+    # --- Arguments & Basic Validation ---
+    local fpath="$1" search="$2" num_arg="$3"
+    # Default: Uncomment 1 line (the matched one)
+    local num_lines=1
+    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff" # Assume cdiff exists
+
+    # Validate number of arguments
+    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+        echo "Usage: hash_remove <filepath> <search> [total_lines]" >&2
+        echo "  - uncomments matched line if it starts with '# ' and contains <search>." >&2
+        echo "  - if total_lines >= 1, attempts to uncomment that many lines total," >&2
+        echo "    starting with the matched one. Only removes leading '# ' if present." >&2
+        return 1
+    fi
+
+    # Validate optional total_lines argument
+    if [ $# -eq 3 ]; then
+        # Must be an integer >= 1
+        if [[ ! $num_arg =~ ^[1-9][0-9]*$ ]]; then
+            echo "Error: total_lines must be an integer >= 1." >&2
+            return 1
+        fi
+        num_lines="$num_arg"
+    fi
+
+    # Validate file exists
+    if [ ! -f "$fpath" ]; then
+        echo "Error: File not found: $fpath" >&2
+        return 1
+    fi
+
+    # --- Setup ---
+    ts=$(date +%Y%m%d_%H%M%S)
+    bk_suffix="_${ts}.bak"
+    bk_fname="${fpath}${bk_suffix}"
+    # Quote search pattern for Perl regex
+    quoted_s=$(perl -e 'print quotemeta shift' "$search")
+    [ -z "$quoted_s" ] && {
+        echo "Error: Failed to quote search pattern (empty?)." >&2
+        return 1
+    }
+
+    # --- Perl Script (concise, uses env vars P and N) ---
+    # $c: counter for lines remaining to process *after* the matched line.
+    # $ENV{P}: Quoted search Pattern (expected content *after* '# ').
+    # $ENV{N}: Total number of lines to attempt uncommenting.
+    # On match, set counter c to N-1 (remaining lines).
+    perl_p='
+        BEGIN { $c = 0 }
+        # Check if line starts with optional space(s) + "# " AND contains the pattern P afterwards
+        if (m/^\s*# .*?\Q$ENV{P}\E/) {
+             # Remove the leading "# " prefix (preserving leading whitespace)
+             s/^(\s*)# /$1/;
+             # Set counter for remaining lines to process
+             $c = $ENV{N} - 1;
+        } elsif ($c-- > 0) {
+             # For subsequent lines, remove leading "# " only IF present
+             s/^(\s*)# /$1/ if m/^\s*# /;
+        }
+        print;
+    '
+    # One-liner version:
+    # perl_p='BEGIN{$c=0} if(m/^\s*# .*?\Q$ENV{P}\E/){s/^(\s*)# /$1/; $c=$ENV{N}-1} elsif($c-->0){s/^(\s*)# /$1/ if m/^\s*# /} print'
+
+    # --- Execution ---
+    export P="$quoted_s" N="$num_lines" # Pass total lines N
+    perl "-i${bk_suffix}" -n -e "$perl_p" "$fpath"
+    ret=$?
+    unset P N # Clean up environment
+
+    # --- Reporting ---
+    if [ $ret -eq 0 ]; then
+        echo "Hash Remove potentially done. Backup: $bk_fname"
+        # Check if backup exists and differs before showing diff
+        if [ -f "$bk_fname" ]; then
+            if ! cmp -s "$bk_fname" "$fpath"; then
+                echo "--- Diff (${DIFF_CMD}) ---"
+                "$DIFF_CMD" "$bk_fname" "$fpath"
+                echo "--------------------"
+            else
+                echo "Info: No effective changes made to file content."
+            fi
+        else
+            echo "Info: No changes made (no backup created)."
+        fi
+        return 0
+    else
+        echo "Error during Hash Remove (code: $ret). Check backup: $bk_fname" >&2
+        return $ret
     fi
 }
 
