@@ -981,6 +981,14 @@ menufunc() {
                             echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut &&
                                 menufunc "$(scutsub "$ooooldscut")" "$(scuttitle "$ooooldscut")" "$(notscutrelay "$ooooldscut")"
                             ;;
+                        "<")
+                            beforescut=$(st $scut b)
+                            echo "Move to Before menu.. [$beforescut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$beforescut")" "$(scuttitle "$beforescut")" "$(notscutrelay "$beforescut")"
+                            ;;
+                        ">")
+                            nextscut=$(st $scut n)
+                            echo "Move to Next menu.. [$nextscut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$nextscut")" "$(scuttitle "$nextscut")" "$(notscutrelay "$nextscut")"
+                            ;;
                         "chat" | "ai" | "hi" | "hello")
                             ollama run gemma3 2>/dev/null && continue
                             ;;
@@ -2042,9 +2050,61 @@ rollback() {
     savescut && exec "$gofile" $scut
 }
 
-# shortcut view
+# shortcut view n> b<
 st() {
-    echo "$shortcutstr"
+    # 인수가 없으면 전체 문자열 출력 (Bash 2 호환)
+    if [ $# -eq 0 ]; then
+        echo "$shortcutstr"
+        return 0
+    fi
+
+    # local 변수는 Bash 2에서 사용 가능
+    local shortcut="$1"
+    local mode="$2"
+
+    # 필수 인수가 없거나 모드가 잘못된 경우 간단한 도움말 표시 (Bash 2 호환)
+    # [ ] 구문과 -o (OR), -a (AND) 또는 개별 조건문 사용
+    if [ -z "$shortcut" ] || [ -z "$mode" ]; then
+        echo "사용법: st <shortcut> <n|b>  또는 st" >&2
+        return 1
+    fi
+    # 모드 검사를 별도로 수행 (AND/OR 연산자 복잡성 회피)
+    if [ "$mode" != "n" ] && [ "$mode" != "b" ]; then
+        echo "사용법: st <shortcut> <n|b>  또는 st" >&2
+        return 1
+    fi
+
+    # awk 사용: <<< 대신 echo ... | 사용 (Bash 2 호환)
+    # awk 스크립트 내용은 동일하게 유지
+    echo "$shortcutstr" | awk -v shortcut="$shortcut" -v mode="$mode" -v RS='@@@' -F'|' '
+        # 첫 번째 빈 레코드 건너뛰기 (문자열이 @@@로 시작하므로)
+        NR <= 1 { next }
+
+        # "n" (next) 모드 처리
+        mode == "n" {
+            if (print_next) {
+                print $1
+                exit # awk 종료
+            }
+            if ($1 == shortcut) {
+                print_next = 1
+            }
+        }
+
+        # "b" (before) 모드 처리
+        mode == "b" {
+            if ($1 == shortcut) {
+                # prev_key가 비어있으면(첫 항목) 아무것도 출력되지 않음
+                print prev_key
+                exit # awk 종료
+            }
+            prev_key = $1
+        }
+    '
+    # awk가 결과를 표준 출력으로 직접 보냄
+
+    # 요구사항에 따라 사용법 오류 외에는 항상 성공(0) 반환
+    return 0
 }
 # shortcut array view
 str() {
