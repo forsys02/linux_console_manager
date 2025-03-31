@@ -2360,6 +2360,130 @@ idpw() {
     [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" || echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"
 }
 
+qssh() {
+    # --- 설정 ---
+    local default_user="root" # 사용자 미지정 시 기본값
+    local arp_scan_timeout=3  # arp-scan 대기 시간 (초)
+    # --- 설정 끝 ---
+
+    # 인수 개수 확인 (최소 1개, 최대 2개)
+    if [[ $# -eq 0 || $# -gt 2 ]]; then
+        echo "Usage: qssh <vmid> [ssh_user]"
+        echo "  Example 1 (default user '$default_user'): qssh 101"
+        echo "  Example 2 (specify user):        qssh 101 myuser"
+        return 1
+    fi
+
+    local vmid="$1" # 첫 번째 인수는 항상 VM ID
+    # 두 번째 인수가 있으면 사용하고, 없으면 기본값 사용
+    local user="${2:-$default_user}"
+
+    # VM ID가 숫자인지 간단히 확인
+    if ! echo "$vmid" | grep -qE '^[0-9]+$'; then
+
+        echo "Error: Invalid VMID format '$vmid'. It should be a number."
+        return 1
+    fi
+
+    # 사용자 이름이 비어있는지 확인 (거의 발생 안 함)
+    if [[ -z $user ]]; then
+        # 이 경우는 "$2"가 비어있는 문자열("")로 들어왔을 때 발생 가능
+        echo "Error: SSH username cannot be empty if provided."
+        return 1
+    fi
+
+    echo "--- Processing qssh for VM $vmid (User: $user) ---"
+
+    # --- 이하 로직은 이전 버전과 동일 ---
+
+    # 1. VM 설정 가져오기 및 MAC/브리지 추출
+    echo "[1] Getting VM configuration..."
+    local config_line
+    config_line=$(qm config "$vmid" 2>/dev/null | grep -E '^net[0-9]+:' | grep 'bridge=' | head -n 1)
+
+    if [[ -z $config_line ]]; then
+        if ! qm status "$vmid" >/dev/null 2>&1; then
+            echo "Error: VM $vmid does not seem to exist."
+        else
+            echo "Error: Could not find a bridged network interface for VM $vmid."
+        fi
+        return 1
+    fi
+
+    local mac bridge
+    mac=$(echo "$config_line" | grep -oP '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
+    bridge=$(echo "$config_line" | sed -n 's/.*bridge=\([^,]\+\).*/\1/p')
+
+    if [[ -z $mac || -z $bridge ]]; then
+        echo "Error: Failed to extract MAC or Bridge from: '$config_line'"
+        return 1
+    fi
+
+    local lower_mac
+    lower_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
+    echo "  > Found MAC: $mac (checking as $lower_mac) on Bridge: $bridge"
+
+    # 2a. 로컬 ARP 캐시에서 IP 주소 먼저 확인
+    echo "[2a] Checking local ARP cache for $lower_mac..."
+    local ip=""
+    ip=$(arp -n | grep -i "$lower_mac" | awk '{print $1}' | head -n 1)
+
+    # 2b. ARP 캐시에 없으면 arp-scan 사용 (Fallback)
+    if [[ -z $ip ]]; then
+        echo "  > MAC not found in ARP cache. Proceeding with arp-scan..."
+
+        if ! command -v arp-scan &>/dev/null; then
+            echo "Error: 'arp-scan' command not found. Please install it (e.g., apt install arp-scan)."
+            return 1
+        fi
+
+        echo "[2b] Finding IP address via arp-scan..."
+        echo "  > Scanning on $bridge for MAC: $lower_mac..."
+        local arp_scan_output
+        arp_scan_output=$(arp-scan --interface="$bridge" --localnet --numeric --quiet --timeout=$((arp_scan_timeout * 1000)) 2>/dev/null | grep -i "$lower_mac")
+
+        if [[ -z $arp_scan_output ]]; then
+            echo "Error: arp-scan could not find MAC $lower_mac on interface $bridge."
+            echo "  > Check if VM $vmid is running and has obtained an IP address."
+            echo "  > Double check network/firewall settings."
+            return 1
+        fi
+
+        ip=$(echo "$arp_scan_output" | head -n 1 | awk '{print $1}')
+
+        if [[ -z $ip ]]; then
+            echo "Error: Found MAC via arp-scan, but could not extract IP address from output line:"
+            echo "  '$arp_scan_output'"
+            return 1
+        fi
+        echo "  > Found IP via arp-scan: $ip"
+
+    else
+        echo "  > Found IP in ARP cache: $ip"
+    fi
+
+    if [[ -z $ip ]]; then
+        echo "Error: Failed to determine IP address for MAC $lower_mac."
+        return 1
+    fi
+
+    # 3. SSH 접속
+    echo "[3] Attempting SSH connection..."
+    echo "  > Running: ssh $user@$ip"
+    # SSH 접속 시도 (-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null 옵션은
+    # 보안상 필요에 따라 추가/제거. 여기서는 기본 ssh 명령 사용)
+    ssh "$user@$ip"
+    local ssh_exit_code=$?
+
+    if [[ $ssh_exit_code -ne 0 ]]; then
+        echo "--- SSH session for $user@$ip (VM $vmid) ended with exit code $ssh_exit_code. ---"
+        return $ssh_exit_code
+    else
+        echo "--- SSH session for $user@$ip (VM $vmid) finished successfully. ---"
+        return 0
+    fi
+}
+
 # assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
     local host id pw port
@@ -2795,7 +2919,7 @@ hash_add() {
     # Validate optional total_lines argument
     if [ $# -eq 3 ]; then
         # Must be an integer >= 1
-        if [[ ! $num_arg =~ ^[1-9][0-9]*$ ]]; then
+        if ! echo "$num_arg" | grep -qE '^[1-9][0-9]*$'; then
             echo "Error: total_lines must be an integer >= 1." >&2
             return 1
         fi
@@ -2887,7 +3011,7 @@ hash_remove() {
     # Validate optional total_lines argument
     if [ $# -eq 3 ]; then
         # Must be an integer >= 1
-        if [[ ! $num_arg =~ ^[1-9][0-9]*$ ]]; then
+        if ! echo "$num_arg" | grep -Eq '^[1-9][0-9]*$'; then
             echo "Error: total_lines must be an integer >= 1." >&2
             return 1
         fi
