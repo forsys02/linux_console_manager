@@ -702,15 +702,22 @@ menufunc() {
                                 while read -r var; do
                                     var_value=""
                                     dvar_value=""
+                                    #echo "init_var_name: $var_name" && readx
                                     var_name="var${var#var}"
 
                                     # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점사용 쩨한 ) varVAR.conf -> varVAR 이 변수
                                     if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
+                                    # 변수조정 varVAR@localhost -> varVAR ( 변수이름에 @사용 제한 )
+                                    if [[ $var_name != *__* ]]; then var_name="${var_name#@}" && var_name="${var_name%%@*}"; fi
                                     # 변수조정 varVAR__ -> varAVR ( 변수에__ 이 있지만 기본값이 없을때 )
                                     if [[ $var_name == *__ ]]; then var_name="${var_name%%__*}"; fi
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
+                                        # 순수 var_name 취득
+                                        temp_prefix="${var_name%%__*}"
+                                        org_var_name="${temp_prefix%@*}"
+
                                         # @space@ -> 공백 치환
                                         # @dot@ -. 점 치환
                                         # @@ -> / 치환
@@ -780,7 +787,9 @@ menufunc() {
                                             [ "$var_value" == "c" ] && var_value="canceled"
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
+                                        # 기본값에 @ 허용하지만 변수이름자체는 @ 허용 안함
                                         eval flagof_"${var_name%%__*}"=set
+                                        #eval flagof_"${org_var_name}"=set
 
                                     # 기본값에 쓸수 없는 문자가 들어올경우 종료
                                     elif [[ $var_name == *__[a-zA-Z./]* ]]; then
@@ -793,6 +802,10 @@ menufunc() {
                                         # var_name=${var_name%%.*}
                                         # $HOME/go.private.env 에 정의된 변수가 있을때
                                         # 이전에 동일한 이름 변수에 값이 할당된 적이 있을때
+
+                                        temp_prefix="${var_name%%__*}"
+                                        org_var_name="${temp_prefix%@*}"
+
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
                                             dvar_value="${!var_name}"
                                             # 이미 설정한 변수는 pass
@@ -805,6 +818,7 @@ menufunc() {
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="canceled"
                                                 eval flagof_"${var_name%%__*}"=set
+                                                #eval flagof_"${org_var_name}"=set
                                             fi
 
                                         else
@@ -819,6 +833,7 @@ menufunc() {
                                             #echo "$var_value" && readx
                                             trap - INT
                                             eval flagof_"${var_name%%__*}"=set
+                                            #eval flagof_"${org_var_name}"=set
                                         fi
 
                                         # 변수 이름에 nospace 가 있을때 ex) varVARnospace
@@ -878,6 +893,7 @@ menufunc() {
                                     # [ "$var_value" ] && eval "export ${var_name%%__*}='${var_value}'"
                                     if ! printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
                                         [ "$var_value" ] && export ${var_name%%__*}="$(printf %q "$var_value")"
+                                        #[ "$var_value" ] && export ${org_var_name}="$(printf %q "$var_value")"
                                     fi
 
                                 done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++')
