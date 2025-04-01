@@ -167,7 +167,7 @@ process_commands() {
         # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
         unset var_value var_name
-        echo && [ ! "$nodone" ] && echo -n "--> " && GRN1 && echo "$command" && RST
+        echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
         if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then nodone=y && sleep 1; fi
@@ -576,9 +576,18 @@ menufunc() {
                                     display_idx=$((display_idx + 1))
                                 fi
 
+                                # 명령줄이 길어지면 제한자 이내로 출력
+                                max_len=336
+                                processed_cmd="$c_cmd"
+                                if ((${#c_cmd} > max_len)); then
+                                    # max_len 까지만 자르고 "..." 추가
+                                    processed_cmd="${c_cmd:0:max_len}..."
+                                fi
+
                                 # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi 색칠
                                 printf "\e[1m%-3s\e[0m " ${pi}
-                                echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
+                                #echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
+                                echo "$processed_cmd" | cut -c 1-350 | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
@@ -590,7 +599,7 @@ menufunc() {
                                     -e '/^#/! s/\(template_copy\|template_view\|template_edit\|cat \|hash_add\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
-                                    -e '/^#/! s/\(;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
+                                    -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
                                     -e 's/#$/\x1b[1;36m#\x1b[0m/' `# 주석을 청록색으로 포맷`
