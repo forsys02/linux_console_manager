@@ -732,6 +732,9 @@ menufunc() {
                                         [ "$dvar_value" == "datetag2" ] && dvar_value=$(datetag2)
                                         [ "$dvar_value" == "adatetag" ] && dvar_value=at_$(datetag)
                                         [ "$dvar_value" == "adatetag2" ] && dvar_value=at_$(datetag2)
+                                        [ "$dvar_value" == "publicip" ] && dvar_value=$publicip
+                                        [ "$dvar_value" == "localip1" ] && dvar_value=$localip1
+                                        [ "$dvar_value" == "guestip" ] && dvar_value=$guestip
 
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa__bb__cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
