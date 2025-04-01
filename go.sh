@@ -2161,6 +2161,12 @@ initVAR() {
 format() {
     shfmt -i 4 -s -w $gofile
 }
+newtemp() {
+    echo "template_edit $1
+template_view $1
+!!! template_copy $1 $2 ;; cat "\$lastarg"
+"
+}
 # vi2 envorg && restart go.sh
 conf() {
     vi2 "$envorg" $scut
@@ -5769,6 +5775,38 @@ EOF
     ErrorLog ${APACHE_LOG_DIR}/roundcube_error.log
     CustomLog ${APACHE_LOG_DIR}/roundcube_access.log combined
 </VirtualHost>
+EOF
+
+        ;;
+
+    teldrive.service)
+        cat >"$file_path" <<EOF
+[Unit]
+Description=Teldrive Service (run mode - Optimized)
+Documentation=https://github.com/divyam234/teldrive
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=teldrive
+Group=teldrive
+
+ExecStart=/usr/local/bin/teldrive run \
+    --tg-app-id "$telegramappid" \
+    --tg-app-hash "$telegramapphash" \
+    --jwt-secret "$jwtsecret" \
+    --tg-uploads-encryption-key "$tguploadsencryptionkey" \
+    --db-data-source "postgresql://$teldbuser:"$teldbpw"@$teldbhost:5432/$teldbname?sslmode=disable" \
+    --log-level INFO \
+    --tg-stream-multi-threads 4 \
+    --tg-stream-buffers 12 \
+    --server-port $webport
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
         ;;
