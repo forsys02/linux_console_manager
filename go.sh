@@ -1142,7 +1142,7 @@ menufunc() {
                             fi
                             ;;
                         esac
-                    echo "no hook cmd_choice: $cmd_choice --- loop"
+                    echo "no hook cmd_choice: $cmd_choice --- pre_commands refresh loop"
                     #unset cmd_choice cmd_choice1
                     cmd_choice=""
 
