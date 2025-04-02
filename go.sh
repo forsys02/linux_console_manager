@@ -617,12 +617,20 @@ menufunc() {
                             old_cmd_choice="$cmd_choice"
                             cmd_choice=""
                             # readcmd_choice
-                            while :; do
+                            if [ -z "$pre_commands" ]; then
+                                while :; do
+                                    trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+                                    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                    trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
+                                    [[ -n $cmd_choice ]] && break
+                                done
+                            else
+                                # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
-                                [[ -n $cmd_choice ]] && break
-                            done
+
+                            fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
                             ############ read cmd_choice
