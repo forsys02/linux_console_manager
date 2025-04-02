@@ -368,7 +368,8 @@ menufunc() {
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
-            trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
+            [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우
+            trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
         fi
 
         #shortcut 이 중복되더라도 첫번째 키만 가져옴
@@ -621,15 +622,16 @@ menufunc() {
                                 while :; do
                                     trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                     IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                    trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
+                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
                                 # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
-
+                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
