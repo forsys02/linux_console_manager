@@ -2867,15 +2867,15 @@ rbackup() {
     t=$(date +%Y%m%d)
     while [ $# -gt 0 ]; do
         d="${1%/}"
-        base="${d}"
+        base="$d"
         if [ -f "$d" ] && [[ "$(diff $d ${base}.1.bak 2>/dev/null)" || ! -f ${base}.1.bak ]]; then
-            d3=$(date -r ${base}.3.bak +%Y%m%d 2>/dev/null)
-            d4=$(date -r ${base}.4.bak +%Y%m%d 2>/dev/null)
-            if [ -f "${base}.4.bak" ] && [[ $t == "$d3" && $t != "$d4" ]]; then
-                cdate=$(date -r ${base}.4.bak +%Y%m%d)
-                mv ${base}.4.bak ${base}.${cdate}.bak
+            d9=$(date -r ${base}.9.bak +%Y%m%d 2>/dev/null)
+            d8=$(date -r ${base}.8.bak +%Y%m%d 2>/dev/null)
+            if [ -f "${base}.9.bak" ] && [[ $t == "$d8" && $t != "$d9" ]]; then
+                cdate=$(date -r ${base}.9.bak +%Y%m%d)
+                mv ${base}.9.bak ${base}.${cdate}.bak
             fi
-            for i in 3 2 1 ""; do
+            for i in 8 7 6 5 4 3 2 1 ""; do
                 cmd=${i:+mv}
                 cmd=${cmd:-cp}
                 $cmd ${base}.${i}.bak ${base}.$((${i:-0} + 1)).bak 2>/dev/null
@@ -2885,6 +2885,30 @@ rbackup() {
         shift
     done
 }
+
+#
+#rbackup() {
+#    t=$(date +%Y%m%d)
+#    while [ $# -gt 0 ]; do
+#        d="${1%/}"
+#        base="${d}"
+#        if [ -f "$d" ] && [[ "$(diff $d ${base}.1.bak 2>/dev/null)" || ! -f ${base}.1.bak ]]; then
+#            d3=$(date -r ${base}.3.bak +%Y%m%d 2>/dev/null)
+#            d4=$(date -r ${base}.4.bak +%Y%m%d 2>/dev/null)
+#            if [ -f "${base}.4.bak" ] && [[ $t == "$d3" && $t != "$d4" ]]; then
+#                cdate=$(date -r ${base}.4.bak +%Y%m%d)
+#                mv ${base}.4.bak ${base}.${cdate}.bak
+#            fi
+#            for i in 3 2 1 ""; do
+#                cmd=${i:+mv}
+#                cmd=${cmd:-cp}
+#                $cmd ${base}.${i}.bak ${base}.$((${i:-0} + 1)).bak 2>/dev/null
+#            done
+#            cp $d ${base}.1.bak
+#        fi
+#        shift
+#    done
+#}
 
 # 함수 이름: insert
 # 사용법: echo "삽입할 텍스트" | insert <대상_파일> <찾을_문자열>
@@ -4825,7 +4849,7 @@ EOF
         cat >"$file_path" <<'EOF'
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Maintainer:
-"       Amir Salihefendic ? @amix3k
+"       Amir Salihefendic - @amix3k
 "
 " Awesome_version:
 "       Get this config, nice color schemes and lots of plugins!
@@ -4858,15 +4882,13 @@ EOF
 " Sets how many lines of history VIM has to remember
 set history=500
 
-set fileencodings=utf8,euc-kr
-
 " Enable filetype plugins
 filetype plugin on
 filetype indent on
 
 " Set to auto read when a file is changed from the outside
 set autoread
-au FocusGained,BufEnter * checktime
+au FocusGained,BufEnter * silent! checktime
 
 " With a map leader it's possible to do extra key combinations
 " like <leader>w saves the current file
@@ -4903,7 +4925,7 @@ else
     set wildignore+=*/.git/*,*/.hg/*,*/.svn/*,*/.DS_Store
 endif
 
-"Always show current position
+" Always show current position
 set ruler
 
 " Height of the command bar
@@ -4936,6 +4958,7 @@ set magic
 
 " Show matching brackets when text indicator is over them
 set showmatch
+
 " How many tenths of a second to blink when matching brackets
 set mat=2
 
@@ -4950,7 +4973,6 @@ if has("gui_macvim")
     autocmd GUIEnter * set vb t_vb=
 endif
 
-
 " Add a bit extra margin to the left
 set foldcolumn=1
 
@@ -4961,15 +4983,14 @@ set foldcolumn=1
 " Enable syntax highlighting
 syntax enable
 
-" Enable 256 colors palette in Gnome Terminal
-if $COLORTERM == 'gnome-terminal'
-    set t_Co=256
-endif
+" Set regular expression engine automatically
+set regexpengine=0
 
-try
-    colorscheme desert
-catch
-endtry
+ " Enable 256 colors palette in Gnome Terminal
+ if &t_Co > 2 || has("gui_running")
+   syntax on
+   set hlsearch
+ endif
 
 set background=dark
 
@@ -4983,7 +5004,6 @@ endif
 
 " Set utf8 as standard encoding and en_US as the standard language
 set encoding=utf8
-"set encoding=euc-kr
 
 " Use Unix as the standard file type
 set ffs=unix,dos,mac
@@ -4993,9 +5013,9 @@ set ffs=unix,dos,mac
 " => Files, backups and undo
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Turn backup off, since most stuff is in SVN, git etc. anyway...
-set nobackup
-set nowb
-set noswapfile
+"set nobackup
+"set nowb
+"set noswapfile
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -5059,17 +5079,17 @@ map <leader>tn :tabnew<cr>
 map <leader>to :tabonly<cr>
 map <leader>tc :tabclose<cr>
 map <leader>tm :tabmove
-map <leader>t<leader> :tabnext
+map <leader>t<leader> :tabnext<cr>
 
 " Let 'tl' toggle between this and the last accessed tab
 let g:lasttab = 1
-nmap <Leader>tl :exe "tabn ".g:lasttab<CR>
+nmap <leader>tl :exe "tabn ".g:lasttab<CR>
 au TabLeave * let g:lasttab = tabpagenr()
 
 
 " Opens a new tab with the current buffer's path
 " Super useful when editing files in the same directory
-map <leader>te :tabedit <C-r>=expand("%:p:h")<cr>/
+map <leader>te :tabedit <C-r>=escape(expand("%:p:h"), " ")<cr>/
 
 " Switch CWD to the directory of the open buffer
 map <leader>cd :cd %:p:h<cr>:pwd<cr>
@@ -5140,6 +5160,7 @@ map <leader>sp [s
 map <leader>sa zg
 map <leader>s? z=
 
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => Misc
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -5208,7 +5229,41 @@ function! VisualSelection(direction, extra_filter) range
     let @/ = l:pattern
     let @" = l:saved_reg
 endfunction
-set t_ti= t_te=
+
+ " 단순 백업 설정 - 파일명_날짜시간.bak 형식
+ function! MakeBackup()
+   " 기본 백업 디렉토리 확인 및 생성
+   let l:backupdir = $HOME."/.vim/backup"
+   if !isdirectory(l:backupdir)
+     call mkdir(l:backupdir, "p")
+  endif
+
+   " 파일명과 타임스탬프를 결합한 백업 파일명 생성
+   let l:filename = expand("%:t")
+   let l:timestamp = strftime("%Y%m%d_%H%M%S")
+   let l:backupfile = l:backupdir."/".l:filename."_".l:timestamp.".bak"
+
+   " 백업 파일 생성
+   execute "silent !cp " . shellescape(expand("%:p")) . " " . shellescape(l:backupfile)
+ endfunction
+
+ autocmd BufWritePre * call MakeBackup()
+ set fileencodings=utf8,euc-kr
+ set paste
+ set pastetoggle=<F2>
+ set t_ti= t_te=
+
+ if v:version >= 703
+   let undodir=$HOME."/.vim/undo"
+   if !isdirectory(undodir)
+     call mkdir(undodir, "p")
+   endif
+   set undofile
+   set undodir=$HOME/.vim/undo
+   set undolevels=1000
+   set undoreload=10000
+ endif
+
 
 EOF
         ;;
