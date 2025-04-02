@@ -1055,7 +1055,7 @@ menufunc() {
                             ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
-                                { /bin/df -h | grep -v '^/dev/loop' | cper | column -t; } && readx && continue
+                                { /bin/df -h | grep -v '^/dev/loop' | cgrep1 /mnt/ | cper | column -t; } && readx && continue
                             else
                                 /bin/df $cmd_choice1 && readx && continue
                             fi
@@ -1225,7 +1225,7 @@ menufunc() {
             df)
                 # Original condition checked for ! "$choice1"
                 if [ ! "$choice1" ]; then
-                    /bin/df -h | grep -v '^/dev/loop' | cper | column -t && readx
+                    /bin/df -h | grep -v '^/dev/loop' | cgrep1 /mnt/ | cper | column -t && readx
                 else # Do nothing if choice1 exists, as per original logic implicit structure
                     /bin/df $choice1 && readx
                 fi
@@ -1695,6 +1695,10 @@ fdiff() {
     cdiff "$latest_backup" "$1" | less -RX
 }
 
+gdiff() {
+    d="$(cdiff $base/go.sh.1.bak $base/go.sh)"
+    [ -n "$d" ] && echo "$d" || cdiff $base/go.sh.2.bak $base/go.sh
+}
 godiff() { fdiff $gofile; }
 goodiff() { fdiff $envorg; }
 
