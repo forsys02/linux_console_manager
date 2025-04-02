@@ -911,7 +911,7 @@ menufunc() {
                                     #unset $escaped_value
                                     #echo "===after=====" ; declare -f "$escaped_value"
 
-                                    unset -v $escaped_value
+                                    unset -v escaped_value
 
                                     #echo "here~~~ var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
