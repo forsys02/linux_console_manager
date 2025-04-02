@@ -906,6 +906,11 @@ menufunc() {
                                     #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
                                     cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
 
+                                    #echo "===before====" ; declare -f "$escaped_value"
+                                    # unset bug?? .. delete func()
+                                    #unset $escaped_value
+                                    #echo "===after=====" ; declare -f "$escaped_value"
+
                                     unset -v $escaped_value
 
                                     #echo "here~~~ var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
