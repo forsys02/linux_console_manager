@@ -1065,7 +1065,7 @@ menufunc() {
                             ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
-                                { /bin/df -h | grep -v '^/dev/loop' | cgrep1 /mnt/ | cper | column -t; } && readx && continue
+                                { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrep1 /mnt/ | cper | column -t; } && readx && continue
                             else
                                 /bin/df $cmd_choice1 && readx && continue
                             fi
@@ -1236,7 +1236,7 @@ menufunc() {
             df)
                 # Original condition checked for ! "$choice1"
                 if [ ! "$choice1" ]; then
-                    /bin/df -h | grep -v '^/dev/loop' | cgrep1 /mnt/ | cper | column -t && readx
+                    /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrep1 /mnt/ | cper | column -t && readx
                 else # Do nothing if choice1 exists, as per original logic implicit structure
                     /bin/df $choice1 && readx
                 fi
@@ -2813,6 +2813,7 @@ ncp() {
     cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && ssh $p $h 'cd \"${dir}\" && tar cf - \"${i}\" | zstd ' | { pv 2>/dev/null||cat; }| zstd -d | tar xf - -C \"${l}\" || ssh $p $h 'cd \"${dir}\" && tar czf - \"${i}\"' | { pv 2>/dev/null||cat; } | tar xzf - -C \"${l}\""
     echo "$cmd"
     eval "$cmd"
+    bell
 }
 
 ncpr() {
