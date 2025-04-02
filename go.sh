@@ -154,10 +154,12 @@ process_commands() {
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
                 # _Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
+                readxx $LINENO "> command: $command"
                 eval "$command"
             )
             trap - SIGINT
         else
+            readxx $LINENO ">> command: $command"
             eval "$command"
         fi
         # log
@@ -166,7 +168,8 @@ process_commands() {
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         [ "${command%% *}" != "cd" ] && echo "=============================================="
-        unset var_value var_name
+        # unset var_value var_name
+        unset -v var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
@@ -623,15 +626,15 @@ menufunc() {
                                     trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                     IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
-                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                    #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
                                 # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
-                                trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                #[[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -903,7 +906,7 @@ menufunc() {
                                     #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
                                     cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
 
-                                    unset $escaped_value
+                                    unset -v $escaped_value
 
                                     #echo "here~~~ var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
 
@@ -1122,13 +1125,14 @@ menufunc() {
                                 # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
                                 trap 'stty sane' SIGINT
                                 bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
+                                #eval "$cmd_choice" "$cmd_choice1"
                                 trap - INT
                                 GRN1
                                 dline
                                 RST
 
                                 # Clean up the temporary variable
-                                unset aliascmd
+                                unset -v aliascmd
 
                                 # Optional: Log execution
                                 echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
@@ -1354,6 +1358,7 @@ menufunc() {
                     # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
                     trap 'stty sane' SIGINT
                     bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
+                    #eval "$choice" "$choice1"
                     trap - INT
                     GRN1
                     dline
@@ -1370,7 +1375,7 @@ menufunc() {
         else
             #echo "No hooked!!!! go home!!!" && sleep 0.5 && choice=""
             #choice=""
-            unset noclear choice
+            unset -v noclear choice
         fi
     done # end of main while
     ############### main loop end ###################
