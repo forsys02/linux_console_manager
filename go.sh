@@ -736,12 +736,14 @@ menufunc() {
                                     if [[ $var_name != *__* ]]; then var_name="${var_name#@}" && var_name="${var_name%%@*}"; fi
                                     # 변수조정 varVAR__ -> varAVR ( 변수에__ 이 있지만 기본값이 없을때 )
                                     if [[ $var_name == *__ ]]; then var_name="${var_name%%__*}"; fi
+                                    # 순수 var_name 취득 varVAR__abc -> varVAR // varVAR__abc@aaa.com -> varVAR varAVAR@varBVAR__abc
+                                    # temp_prefix="${var_name%%__*}"
+                                    # org_var_name="${temp_prefix%@*}" # 입력부터 @ 를 기준으로 변수 분리 되도록 조정
+                                    org_var_name="${var_name%%__*}"
+                                    pre_var_value="${!org_var_name}" # 사전에 입력했던 값이 있으면 변수설정
 
                                     # 기본값이 있을때 파싱
                                     if [[ $var_name == *__[a-zA-Z0-9.@-]* ]]; then
-                                        # 순수 var_name 취득
-                                        temp_prefix="${var_name%%__*}"
-                                        org_var_name="${temp_prefix%@*}"
 
                                         # @space@ -> 공백 치환
                                         # @dot@ -. 점 치환
@@ -815,7 +817,17 @@ menufunc() {
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
-                                            printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
+                                            # 이전에 선택했던 값이 있으면 함께 출력
+                                            if [ -n "${!org_var_name}" ]; then
+                                                printf "==============================================
+>>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name}$(tput sgr0)
+!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m:"
+                                            else
+                                                printf "==============================================
+!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m:"
+                                            fi
+
+                                            # printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
                                             [ "$var_value" == "c" ] && var_value="canceled"
@@ -916,7 +928,8 @@ menufunc() {
                                     #    ([^a-zA-Z0-9]|$): 영숫자가 아닌 문자 이거나 끝($)(그룹 2)
                                     #    치환 시 \1$escaped_value\2 로 원래 경계 문자를 다시 넣어줌
                                     #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
-                                    cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
+                                    #cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
+                                    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
 
                                     #echo "===before====" ; declare -f "$escaped_value"
                                     # unset bug?? .. delete func()
@@ -935,7 +948,10 @@ menufunc() {
                                         #[ "$var_value" ] && export ${org_var_name}="$(printf %q "$var_value")"
                                     fi
 
-                                done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++')
+                                    #done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++')
+                                    # 변수에는 @ 불가 변수값에는 @ 가능 // 구분하여 변수분할
+                                done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.-]*\(__[a-zA-Z0-9_.@-]*\)\?\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.-]*/p' | awk '!seen[$0]++')
+
                             # end of while
 
                             else # cfm -> n
@@ -1129,8 +1145,10 @@ menufunc() {
                                 # echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                                 continue
 
-                            # Check 4: Alias from .bashrc? (Fallback if not a command)
-                            elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                                # Check 4: Alias from .bashrc? (Fallback if not a command)
+                                #elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                            elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -e "s/^[[:space:]]*alias[[:space:]]\+$cmd_choice='\(.*\)'/\1/") && [[ -n $aliascmd ]]; then
+
                                 # Found alias definition 'aliascmd'.
                                 # echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
                                 echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
@@ -1364,9 +1382,10 @@ menufunc() {
                         # echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                     }
 
-                # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
-                # Check: is not purely numeric AND is defined as an alias in .bashrc
-                elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                    # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
+                    # Check: is not purely numeric AND is defined as an alias in .bashrc
+                    # elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
+                elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -e "s/^[[:space:]]*alias[[:space:]]\+$choice='\(.*\)'/\1/") && [[ -n $aliascmd ]]; then
 
                     # echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
                     echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
