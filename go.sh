@@ -635,6 +635,7 @@ menufunc() {
                             else
                                 # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+                                history -r
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
@@ -2859,7 +2860,7 @@ ncp() {
     l=$(get_input "$3" "로컬 디렉토리")
     i=$(basename "$r")
     dir=$(dirname "$r")
-    cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && ssh $p $h 'cd \"${dir}\" && tar cf - \"${i}\" | zstd ' | { pv 2>/dev/null||cat; }| zstd -d | tar xf - -C \"${l}\" || ssh $p $h 'cd \"${dir}\" && tar czf - \"${i}\"' | { pv 2>/dev/null||cat; } | tar xzf - -C \"${l}\""
+    cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && ssh $p $h 'cd \"${dir}\" && tar cf - \"${i}\" | zstd ' | { pv ||cat; }| zstd -d | tar xf - -C \"${l}\" || ssh $p $h 'cd \"${dir}\" && tar czf - \"${i}\"' | { pv ||cat; } | tar xzf - -C \"${l}\""
     echo "$cmd"
     eval "$cmd"
     bell
@@ -2873,7 +2874,7 @@ ncpr() {
     p=$([[ -n $4 ]] && echo "-p $4" || echo "")
     i=$(basename "$l")
     dir=$(dirname "$r")
-    cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && tar cf - \"${l}\" | zstd | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && zstd -d | tar xf - -C \"${dir}\"' || tar czf - \"${l}\" | { pv 2>/dev/null||cat; } | ssh $p $h 'cd \"${dir}\" && tar xzf - -C \"${dir}\"'"
+    cmd="(ssh $p $h 'command -v zstd &>/dev/null ' && command -v zstd &>/dev/null ) && tar cf - \"${l}\" | zstd | { pv ||cat; } | ssh $p $h 'cd \"${dir}\" && zstd -d | tar xf - -C \"${dir}\"' || tar czf - \"${l}\" | { pv ||cat; } | ssh $p $h 'cd \"${dir}\" && tar xzf - -C \"${dir}\"'"
     echo "$cmd"
     eval "$cmd"
 }
@@ -2887,8 +2888,9 @@ ncpzip() {
     l=$(get_input "$3" "로컬 디렉토리")
     i=$(basename "$r")
     dir=$(dirname "$r")
-    ssh $p $h "command -v zstd &>/dev/null " && command -v zstd &>/dev/null && { ssh $p $h "cd '$dir' && tar cf - '$i' | zstd " | (pv 2>/dev/null || cat) >"${l}/${h}.${i}.tar.zst" && ls -alh "${l}/${h}.${i}.tar.zst"; } || {
-        ssh $p $h "cd '$dir' && tar czf - '$i'" | (pv 2>/dev/null || cat) >"${l}/${h}.${i}.tgz"
+    # pv 는 stderr 로 상태바를 보여주므로 2>/dev/null 하면 보이지 않음
+    ssh $p $h "command -v zstd &>/dev/null " && command -v zstd &>/dev/null && { ssh $p $h "cd '$dir' && tar cf - '$i' | zstd " | (pv || cat) >"${l}/${h}.${i}.tar.zst" && ls -alh "${l}/${h}.${i}.tar.zst"; } || {
+        ssh $p $h "cd '$dir' && tar czf - '$i'" | (pv || cat) >"${l}/${h}.${i}.tgz"
         ls -alh "${l}/${h}.${i}.tgz"
     }
 }
@@ -2912,10 +2914,10 @@ ncpzipupdate() {
         echo "$i updating..."
         if [ -f "${b}.tar.zst" ]; then
             echo "$uf" >"${b}.tar.zst.update.${ts}.txt"
-            ssh $p $h "tar -cf - -T /dev/stdin" <"${b}.tar.zst.update.${ts}.txt" | zstd | (pv 2>/dev/null || cat) >"${b}.tar.zst.update.${ts}.tar.zst"
+            ssh $p $h "tar -cf - -T /dev/stdin" <"${b}.tar.zst.update.${ts}.txt" | zstd | (pv || cat) >"${b}.tar.zst.update.${ts}.tar.zst"
         elif [ -f "${b}.tgz" ]; then
             echo "$uf" >"${b}.tgz.update.${ts}.txt"
-            ssh $p $h "tar -czf - -T /dev/stdin" <"${b}.tgz.update.${ts}.txt" | (pv 2>/dev/null || cat) >"${b}.tgz.update.${ts}.tgz"
+            ssh $p $h "tar -czf - -T /dev/stdin" <"${b}.tgz.update.${ts}.txt" | (pv || cat) >"${b}.tgz.update.${ts}.tgz"
         fi
     else echo "$i skipped..."; fi
 }
@@ -3617,8 +3619,31 @@ runlockadd() {
 
 # 카피나 압축등 df -m  에 변동이 있을경우 모니터링용
 
+#dfmonitor() {
+#    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs")
+#    DF_BEFORE=$DF_INITIAL
+#    while true; do
+#        clear
+#        echo -e "System Uptime:\n--------------"
+#        uptime
+#        echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"
+#        ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep
+#        echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL"
+#        echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"
+#        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|Available|tmpfs")
+#        DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER"))
+#        echo -e "New df -m output with changes highlighted:\n------------------------------------------"
+#        echo "${DF_AFTER}" | while IFS= read -r line; do if [[ ${DIFF} == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done
+#        echo -e "\033[0m"
+#        DF_BEFORE=$DF_AFTER
+#        echo -n ">>> Quit -> [Anykey] "
+#        for i in $(seq 1 4); do read -p"." -t1 -n1 x && break; done
+#        [ "$x" ] && break
+#        echo
+#    done
+#}
 dfmonitor() {
-    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs")
+    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available")
     DF_BEFORE=$DF_INITIAL
     while true; do
         clear
@@ -3628,16 +3653,35 @@ dfmonitor() {
         ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep
         echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL"
         echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"
-        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|Available|tmpfs")
-        DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER"))
+        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available")
         echo -e "New df -m output with changes highlighted:\n------------------------------------------"
-        echo "${DF_AFTER}" | while IFS= read -r line; do if [[ ${DIFF} == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done
+        echo "${DF_AFTER}" | while IFS= read -r line; do
+            DEVICE=$(echo "$line" | awk '{print $1}')
+            USED_NEW=$(echo "$line" | awk '{print $3+0}')  # 숫자로 변환
+            AVAIL_NEW=$(echo "$line" | awk '{print $4+0}') # 숫자로 변환
+            USED_OLD=$(echo "$DF_BEFORE" | grep "^$DEVICE " | awk '{print $3+0}')
+            AVAIL_OLD=$(echo "$DF_BEFORE" | grep "^$DEVICE " | awk '{print $4+0}')
+
+            # 숫자가 유효한 경우에만 비교 수행
+            if [[ $USED_OLD =~ ^[0-9]+$ && $AVAIL_OLD =~ ^[0-9]+$ ]]; then
+                if [[ $USED_NEW -gt $USED_OLD ]]; then
+                    echo -e "\033[1;37;41m$line\033[0m" # 빨간색 (사용량 증가)
+                elif [[ $USED_NEW -lt $USED_OLD ]]; then
+                    echo -e "\033[1;37;44m$line\033[0m" # 파란색 (사용량 감소)
+                else
+                    echo "$line"
+                fi
+            else
+                echo "$line"
+            fi
+        done
         echo -e "\033[0m"
         DF_BEFORE=$DF_AFTER
         echo -n ">>> Quit -> [Anykey] "
-        for i in $(seq 1 4); do read -p"." -t1 -n1 x && break; done
+        for i in $(seq 1 4); do
+            read -p"." -t1 -n1 x && break
+        done
         [ "$x" ] && break
-        echo
     done
 }
 
