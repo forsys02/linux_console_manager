@@ -146,7 +146,7 @@ process_commands() {
     [[ ${command:0:1} == "#" ]] && return # 주석선택시 취소
 
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then # !!! check
-        [ "${command%% *}" != "cd" ] && echo && echo "=============================================="
+        echo && echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
             (
@@ -167,7 +167,8 @@ process_commands() {
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-        [ "${command%% *}" != "cd" ] && echo "=============================================="
+        [ "${command%% *}" = "cd" ] && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && ls -ltr | tail -n5
+        echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
         echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
@@ -1131,7 +1132,7 @@ menufunc() {
                             # Check 4: Alias from .bashrc? (Fallback if not a command)
                             elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
                                 # Found alias definition 'aliascmd'.
-                                echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
+                                # echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
                                 echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
 
                                 GRN1
@@ -1151,7 +1152,7 @@ menufunc() {
                                 # Clean up the temporary variable
 
                                 # Optional: Log execution
-                                echo "$cmd_choice $cmd_choice1 #(via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                                echo "$cmd_choice $cmd_choice1 # (cmd_choice via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
                                 echo 'Alias (from .bashrc) executed. Done... Sleep 2sec'
                                 if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                                 unset -v aliascmd
@@ -1367,7 +1368,7 @@ menufunc() {
                 # Check: is not purely numeric AND is defined as an alias in .bashrc
                 elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
 
-                    echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
+                    # echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
                     echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
                     GRN1
@@ -1384,7 +1385,7 @@ menufunc() {
                     dline
                     RST
 
-                    echo "$choice $choice1 # (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                    echo "$choice $choice1 # (choice via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
                     echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
                     if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                     unset -v aliascmd
