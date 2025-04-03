@@ -217,7 +217,7 @@ menufunc() {
     local choiceloop=0
     # 히스토리 파일 정의하고 불러옴
     HISTFILE="$gotmp/go_history.txt"
-    history -r "$HISTFILE"
+    #history -r "$HISTFILE"
 
     # 탈출코드 또는 ctrlc 가 입력되지 않는 경우 루프 loop
     ############### main loop ###################
@@ -370,6 +370,7 @@ menufunc() {
         if [[ -z $choice ]]; then
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+            history -r
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
             [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
@@ -624,6 +625,7 @@ menufunc() {
                             if [ -z "$pre_commands" ]; then
                                 while :; do
                                     trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+                                    history -r
                                     IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                     #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
@@ -1121,8 +1123,9 @@ menufunc() {
                                 echo # Newline for formatting
                                 echo "Executing command: $cmd_choice $cmd_choice1"
                                 process_commands "$cmd_choice $cmd_choice1" y
-                                echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                                 # Log the executed command
+                                # history -s "$cmd_choice $cmd_choice1"
+                                # echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                                 continue
 
                             # Check 4: Alias from .bashrc? (Fallback if not a command)
@@ -1148,7 +1151,7 @@ menufunc() {
                                 # Clean up the temporary variable
 
                                 # Optional: Log execution
-                                echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                                echo "$cmd_choice $cmd_choice1 #(via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
                                 echo 'Alias (from .bashrc) executed. Done... Sleep 2sec'
                                 if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                                 unset -v aliascmd
@@ -1353,9 +1356,11 @@ menufunc() {
                 # Check: is not purely numeric AND is a valid command
                 elif [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
                     {
+                        echo "Executing command: $choice $choice1"
                         process_commands "$choice $choice1" y
                         # log
-                        echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
+                        # history -s "$choice $choice1"
+                        # echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                     }
 
                 # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
@@ -1379,7 +1384,7 @@ menufunc() {
                     dline
                     RST
 
-                    echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                    echo "$choice $choice1 # (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
                     echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
                     if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                     unset -v aliascmd
