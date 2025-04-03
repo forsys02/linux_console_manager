@@ -636,8 +636,8 @@ menufunc() {
                                 # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                #[[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
-                                trap - SIGINT SIGTERM EXIT # 트랩 해제 (이후에는 기본 동작)
+                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -1742,12 +1742,26 @@ fdiff() {
     cdiff "$latest_backup" "$1" | less -RX
 }
 
+# rbackup diff
 gdiff() {
     d="$(cdiff $base/go.sh.1.bak $base/go.sh)"
     [ -n "$d" ] && echo "$d" || cdiff $base/go.sh.2.bak $base/go.sh
+    ls -al $gofile $envorg
 }
-godiff() { fdiff $gofile; }
-goodiff() { fdiff $envorg; }
+gdifff() {
+    d="$(cdiff $base/go.env.1.bak $base/go.env)"
+    [ -n "$d" ] && echo "$d" || cdiff $base/go.env.2.bak $base/go.env
+    ls -al $gofile $envorg
+}
+# vi diff
+godiff() {
+    fdiff $gofile
+    ls -al $gofile $envorg
+}
+goodiff() {
+    fdiff $envorg
+    ls -al $gofile $envorg
+}
 
 # colored dir
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
