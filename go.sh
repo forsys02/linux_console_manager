@@ -757,19 +757,28 @@ menufunc() {
                                         #printarr dvar_value_array
 
                                         # 현재 시간을 기본값으로 넣고자 할때 datetag(ymd) or datetag2(ymdhms) 사용 adatetag 는 letter 로 시작하는 제한이 있을때
-                                        [ "$dvar_value" == "datetag" ] && dvar_value=$(datetag)
-                                        [ "$dvar_value" == "datetag2" ] && dvar_value=$(datetag2)
+                                        [ "$dvar_value" == "datetag" ] && dvar_value=$(datetag)   # ymd
+                                        [ "$dvar_value" == "datetag2" ] && dvar_value=$(datetag2) # ymd_hms
                                         [ "$dvar_value" == "adatetag" ] && dvar_value=at_$(datetag)
                                         [ "$dvar_value" == "adatetag2" ] && dvar_value=at_$(datetag2)
                                         [ "$dvar_value" == "publicip" ] && dvar_value=$publicip
-                                        [ "$dvar_value" == "localip1" ] && dvar_value=$localip1
+                                        [ "$dvar_value" == "localip" ] && dvar_value=$localip1
                                         [ "$dvar_value" == "guestip" ] && dvar_value=$guestip
 
                                         # 기본값이 여러개 일때 select 로 선택진행 ex) aa__bb__cc select
                                         if [ ${#dvar_value_array[@]} -gt 1 ]; then
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             {
-                                                PS3="Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                # 이전에 선택했던 값이 있으면 함께 출력
+                                                if [ -n "${!org_var_name}" ]; then
+                                                    PS3="==============================================
+>>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name}$(tput sgr0)
+>>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                else
+                                                    PS3="==============================================
+>>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
+                                                fi
+
                                                 IFS='\n'
                                                 select dvar_value in "${dvar_value_array[@]}"; do
                                                     reply=$REPLY && break
@@ -1137,11 +1146,12 @@ menufunc() {
                                 RST
 
                                 # Clean up the temporary variable
-                                unset -v aliascmd
 
                                 # Optional: Log execution
                                 echo "$cmd_choice $cmd_choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                                echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && sleep 2
+                                echo 'Alias (from .bashrc) executed. Done... Sleep 2sec'
+                                if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
+                                unset -v aliascmd
                                 continue
 
                             # Fallback: Unknown or invalid input
@@ -1369,10 +1379,10 @@ menufunc() {
                     dline
                     RST
 
-                    unset aliascmd
-
                     echo "$choice $choice1 (via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
-                    echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && sleep 2 && noclear="y"
+                    echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
+                    if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
+                    unset -v aliascmd
 
                 fi
                 ;;
