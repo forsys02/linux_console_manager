@@ -855,6 +855,8 @@ menufunc() {
 
                                         if [ "${!var_name}" ] || [ "${!var_name%%__*}" ]; then
                                             dvar_value="${!var_name}"
+                                            # 변수에서 \ 제거 - 오작동
+                                            dvar_value=${dvar_value//\\/}
                                             # 이미 설정한 변수는 pass
                                             if [ "$(eval echo \"\${flagof_"${var_name%%__*}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
@@ -1036,15 +1038,15 @@ menufunc() {
                         "restart" | "rest")
                             echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
                             ;; # exec terminates the script here
-                        "bm")
-                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooldscut"
-                            ;; # exec terminates
-                        "bbm")
-                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$oooldscut"
-                            ;; # exec terminates
-                        "bbbm")
-                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
-                            ;; # exec terminates
+                            #                        "bm")
+                            #                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooldscut"
+                            #                            ;; # exec terminates
+                            #                        "bbm")
+                            #                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$oooldscut"
+                            #                            ;; # exec terminates
+                            #                        "bbbm")
+                            #                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
+                            #                            ;; # exec terminates
                         "b")
                             echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut &&
                                 menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
@@ -1242,25 +1244,25 @@ menufunc() {
             conffc)
                 conffc # rollback go.sh
                 ;;
-            bm)
-                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
-                savescut && exec $gofile $ooldscut # back to previous menu
-                ;;
+                #            bm)
+                #                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
+                #                savescut && exec $gofile $ooldscut # back to previous menu
+                #                ;;
+                #            bbm)
+                #                echo "Back two menus.. [$oooldscut]" && sleep 0.5
+                #                savescut && exec $gofile $oooldscut # back to previous menu
+                #                ;;
+                #            bbbm)
+                #                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
+                #                savescut && exec $gofile $ooooldscut # back to previous menu
+                #                ;;
             b)
                 echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
                 savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
                 ;;
-            bbm)
-                echo "Back two menus.. [$oooldscut]" && sleep 0.5
-                savescut && exec $gofile $oooldscut # back to previous menu
-                ;;
             bb)
                 echo "Back two menus.. [$oooldscut]" && sleep 0.5
                 savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" "$(notscutrelay "$oooldscut")" # back to previous menu
-                ;;
-            bbbm)
-                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
-                savescut && exec $gofile $ooooldscut # back to previous menu
                 ;;
             bbb)
                 echo "Back three menus.. [$ooooldscut]" && sleep 0.5
@@ -3617,6 +3619,7 @@ runlockadd() {
     }
 }
 
+bm() { bmon -p "$(basename -a /sys/class/net/e* | paste -sd ',')" || yyay bmon; }
 # 카피나 압축등 df -m  에 변동이 있을경우 모니터링용
 
 #dfmonitor() {
