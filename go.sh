@@ -582,8 +582,8 @@ menufunc() {
                                     display_idx=$((display_idx + 1))
                                 fi
 
-                                # 명령줄이 길어지면 제한자 이내로 출력
-                                max_len=336
+                                # 명령줄이 길어지면 제한자 이내로 출력 (약 3줄까지 출력)
+                                max_len=330
                                 processed_cmd="$c_cmd"
                                 if ((${#c_cmd} > max_len)); then
                                     # max_len 까지만 자르고 "..." 추가
@@ -2087,13 +2087,21 @@ s3cols() {
 }
 
 # datetag
-datetag() { datetag1; }
 datetag1() { date "+%Y%m%d"; }
+datetag() { datetag1; }
+ymd() { datetag1; }
+datetag=$(datetag)
+export datetag ymd=$datetag
 datetag2() { date "+%Y%m%d_%H%M%S"; }
+ydmhms() { datetag2; }
 datetag3() { date "+%Y%m%d_%H%M%S"_$((RANDOM % 9000 + 1000)); }
+ymdhmsr() { datetag3; }
 datetagw() { date "+%Y%m%d_%w"; } # 0-6
+ymdw() { datetagw; }
 lastday() { date -d "$(date '+%Y-%m-01') 1 month -1 day" '+%Y-%m-%d'; }
+# after
 lastdaya() { date -d "$(date '+%Y-%m-01') 2 month -1 day" '+%Y-%m-%d'; }
+# before
 lastdayb() { date -d "$(date '+%Y-%m-01') 0 month -1 day" '+%Y-%m-%d'; }
 
 # seen # not sort && uniq
@@ -2855,6 +2863,12 @@ get_input() { [ -z "$1" ] && read -p "$2: " input && echo "$input" || echo "$1";
 
 # ncp zstd or tar 압축 전송
 ncp() {
+    if [ $# -eq 0 ]; then
+        echo "ncp: 원격 호스트의 파일/디렉토리를 로컬로 복사합니다 (tar + zstd/gzip 사용)."
+        echo "사용법 (인수 제공 시):"
+        echo "  ncp <원격 호스트> <원격 경로> <로컬 디렉토리> [SSH 포트]"
+        echo "-------------------------------------"
+    fi
     local h p r l i dir cmd
     h=$(get_input "$1" "원격 호스트 (예: abc.com)")
     p=$([[ -n $4 ]] && echo "-p $4" || echo "")
@@ -2869,6 +2883,12 @@ ncp() {
 }
 
 ncpr() {
+    if [ $# -eq 0 ]; then
+        echo "ncpr: 로컬 파일/디렉토리를 원격 호스트로 복사합니다 (tar + zstd/gzip 사용)."
+        echo "사용법 (인수 제공 시):"
+        echo "  ncpr <로컬 경로> <원격 호스트> <원격 대상 디렉토리> [SSH 포트]"
+        echo "-------------------------------------"
+    fi
     local l h r p i dir cmd
     l=$(get_input "$1" "로컬 경로")
     h=$(get_input "$2" "원격 호스트 (예: abc.com)")
@@ -2883,6 +2903,11 @@ ncpr() {
 
 # ncp 로 파일을 카피할때 압축파일 형태로 로컬에 저장
 ncpzip() {
+    if [ $# -eq 0 ]; then
+        echo "ncpzip: 원격 파일/디렉토리를 로컬 파일로 압축하여 저장합니다 (tar + zstd/gzip 사용)."
+        echo "사용법: ncpzip <원격 호스트> <원격 경로> <로컬 저장 디렉토리> [SSH 포트]"
+        echo "-------------------------------------"
+    fi
     local h p r l i dir
     h=$(get_input "$1" "원격 호스트 (예: abc.com)")
     p=$([[ -n $4 ]] && echo "-p $4" || echo "")
@@ -2899,6 +2924,11 @@ ncpzip() {
 
 # ncpzip 이후 업데이트된 파일이 있을때 업데이트
 ncpzipupdate() {
+    if [ $# -eq 0 ]; then
+        echo "ncpzipupdate: 원격지의 변경된 파일만 로컬 업데이트 파일로 압축 저장합니다 (tar + zstd/gzip 사용)."
+        echo "사용법: ncpzipupdate <원격 호스트> <원격 경로> <로컬 저장 디렉토리> [SSH 포트]"
+        echo "-------------------------------------"
+    fi
     local h r l p i dir b uf ts
     h=$(get_input "$1")
     r=$(get_input "$2")
@@ -3646,7 +3676,7 @@ bm() { bmon -p "$(basename -a /sys/class/net/e* | paste -sd ',')" || yyay bmon; 
 #    done
 #}
 dfmonitor() {
-    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available")
+    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available|overlay|/snap/")
     DF_BEFORE=$DF_INITIAL
     while true; do
         clear
@@ -3656,21 +3686,24 @@ dfmonitor() {
         ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep
         echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL"
         echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"
-        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available")
+        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available|overlay|/snap/")
         echo -e "New df -m output with changes highlighted:\n------------------------------------------"
-        echo "${DF_AFTER}" | while IFS= read -r line; do
-            DEVICE=$(echo "$line" | awk '{print $1}')
-            USED_NEW=$(echo "$line" | awk '{print $3+0}')  # 숫자로 변환
-            AVAIL_NEW=$(echo "$line" | awk '{print $4+0}') # 숫자로 변환
-            USED_OLD=$(echo "$DF_BEFORE" | grep "^$DEVICE " | awk '{print $3+0}')
-            AVAIL_OLD=$(echo "$DF_BEFORE" | grep "^$DEVICE " | awk '{print $4+0}')
 
-            # 숫자가 유효한 경우에만 비교 수행
+        mapfile -t LINES <<<"$DF_AFTER"
+        for line in "${LINES[@]}"; do
+            DEVICE=$(echo "$line" | awk '{print $1}')
+            USED_NEW=$(echo "$line" | awk '{print $3+0}')
+            AVAIL_NEW=$(echo "$line" | awk '{print $4+0}')
+            OLD_LINE=$(echo "$DF_BEFORE" | grep "^$DEVICE ")
+            USED_OLD=$(echo "$OLD_LINE" | awk '{print $3+0}')
+            AVAIL_OLD=$(echo "$OLD_LINE" | awk '{print $4+0}')
+
             if [[ $USED_OLD =~ ^[0-9]+$ && $AVAIL_OLD =~ ^[0-9]+$ ]]; then
-                if [[ $USED_NEW -gt $USED_OLD ]]; then
-                    echo -e "\033[1;37;41m$line\033[0m" # 빨간색 (사용량 증가)
-                elif [[ $USED_NEW -lt $USED_OLD ]]; then
-                    echo -e "\033[1;37;44m$line\033[0m" # 파란색 (사용량 감소)
+                USED_DIFF=$((USED_NEW - USED_OLD))
+                if [[ $USED_DIFF -gt 0 ]]; then
+                    echo -e "\033[1;37;41m$line  [+${USED_DIFF}MB]\033[0m"
+                elif [[ $USED_DIFF -lt 0 ]]; then
+                    echo -e "\033[1;37;44m$line  [${USED_DIFF}MB]\033[0m"
                 else
                     echo "$line"
                 fi
@@ -3678,6 +3711,7 @@ dfmonitor() {
                 echo "$line"
             fi
         done
+
         echo -e "\033[0m"
         DF_BEFORE=$DF_AFTER
         echo -n ">>> Quit -> [Anykey] "
