@@ -595,11 +595,12 @@ menufunc() {
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 #echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                 echo "$processed_cmd" | cut -c 1-350 | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
-                                    -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
-                                    -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
+                                    -e 's/@space@/_/g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
+                                    -e 's/@colon@/:/g' `# 변수에 @colon@ 를 쓸경우 변환 ` \
+                                    -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
@@ -750,7 +751,7 @@ menufunc() {
                                         # @space@ -> 공백 치환
                                         # @dot@ -. 점 치환
                                         # @@ -> / 치환
-                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@dot@/.}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@@/\/}"
+                                        dvar_value="${var_name#*__}" && dvar_value="${dvar_value//@dot@/.}" && dvar_value="${dvar_value//@space@/ }" && dvar_value="${dvar_value//@colon@/:}" && dvar_value="${dvar_value//@@/\/}"
                                         # __ 를 구분으로 배열생성
                                         # dvar_value_array=($(echo "$dvar_value" | awk -F'__' '{for(i=1;i<=NF;i++)print $i}'))
 
@@ -801,9 +802,6 @@ menufunc() {
                                                 selected_values=""
                                                 for num in $reply; do
                                                     if echo "$num" | grep -q '^[0-9]\+$' && [ "$num" -ge 1 ] && [ "$num" -le "${#dvar_value_array[@]}" ]; then
-                                                        selected_values="$selected_values ${dvar_value_array[$((num - 1))]}"
-                                                    fi
-                                                    if [ "$num" -le "${#dvar_value_array[@]}" ]; then
                                                         selected_values="$selected_values ${dvar_value_array[$((num - 1))]}"
                                                     elif [ "$num" -eq $((${#dvar_value_array[@]} + 1)) ]; then
                                                         selected_values="All"
@@ -943,7 +941,14 @@ menufunc() {
                                     #    치환 시 \1$escaped_value\2 로 원래 경계 문자를 다시 넣어줌
                                     #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
                                     #cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
-                                    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
+                                    #cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
+                                    #	printf '%s' "$cmd" | od -c
+                                    #	set -x
+                                    #    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
+                                    # 순환하면서 varVAR 변환 11:11 같이 숫자: 이 포함된 경우 sed 에서 발작증상 \1 와 충돌
+                                    tmp_token="__REPL_TOKEN__"
+                                    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:g")
+                                    cmd="${cmd//${tmp_token}/$escaped_value}"
 
                                     #echo "===before====" ; declare -f "$escaped_value"
                                     # unset bug?? .. delete func()
@@ -1760,12 +1765,12 @@ fdiff() {
 gdiff() {
     d="$(cdiff $base/go.sh.1.bak $base/go.sh)"
     [ -n "$d" ] && echo "$d" || cdiff $base/go.sh.2.bak $base/go.sh
-    ls -al $gofile $envorg
+    ls -ltr $base | grep 'go.sh.[0-9].bak'
 }
 gdifff() {
     d="$(cdiff $base/go.env.1.bak $base/go.env)"
     [ -n "$d" ] && echo "$d" || cdiff $base/go.env.2.bak $base/go.env
-    ls -al $gofile $envorg
+    ls -ltr $base | grep 'go.env.[0-9].bak'
 }
 # vi diff
 godiff() {
