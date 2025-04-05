@@ -1051,9 +1051,11 @@ menufunc() {
                             # scut 으로 들어온 경우, 상위메뉴타이틀 찾기
                             title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | grep "^%%%" | sed -e 's/^%%% //g' -e 's/.*}//')"
                             title_of_menu=$title_of_menu_sub
-                            chosen_command_sub=""
                             readxx $LINENO "quit cmd_choice - pre_commands:$pre_commands"
+                            t_chosen_command_sub=$chosen_command_sub
+                            chosen_command_sub=""
                             listof_comm
+                            chosen_command_sub=$t_chosen_command_sub
                             readxx $LINENO "quit cmd_choice after listof_comm - pre_commands:$pre_commands"
                             #[ -n "$title_of_menu_sub" ] && title_of_menu="$title_of_menu_sub"
                             readxx $LINENO "quit cmd_choice - env: $env title_of_menu_sub:$title_of_menu_sub {chosen_command_sub}:${chosen_command_sub} SHLVL:$SHLVL "
