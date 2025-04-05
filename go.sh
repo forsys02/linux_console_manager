@@ -3689,8 +3689,7 @@ dfmonitor() {
         DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available|overlay|/snap/")
         echo -e "New df -m output with changes highlighted:\n------------------------------------------"
 
-        mapfile -t LINES <<<"$DF_AFTER"
-        for line in "${LINES[@]}"; do
+        echo "$DF_AFTER" | while read line; do
             DEVICE=$(echo "$line" | awk '{print $1}')
             USED_NEW=$(echo "$line" | awk '{print $3+0}')
             AVAIL_NEW=$(echo "$line" | awk '{print $4+0}')
@@ -3698,11 +3697,13 @@ dfmonitor() {
             USED_OLD=$(echo "$OLD_LINE" | awk '{print $3+0}')
             AVAIL_OLD=$(echo "$OLD_LINE" | awk '{print $4+0}')
 
-            if [[ $USED_OLD =~ ^[0-9]+$ && $AVAIL_OLD =~ ^[0-9]+$ ]]; then
+            # 숫자인지 확인 (bash2 호환)
+            echo "$USED_OLD" | grep -q '^[0-9]\+$' && echo "$AVAIL_OLD" | grep -q '^[0-9]\+$'
+            if [ $? -eq 0 ]; then
                 USED_DIFF=$((USED_NEW - USED_OLD))
-                if [[ $USED_DIFF -gt 0 ]]; then
+                if [ $USED_DIFF -gt 0 ]; then
                     echo -e "\033[1;37;41m$line  [+${USED_DIFF}MB]\033[0m"
-                elif [[ $USED_DIFF -lt 0 ]]; then
+                elif [ $USED_DIFF -lt 0 ]; then
                     echo -e "\033[1;37;44m$line  [${USED_DIFF}MB]\033[0m"
                 else
                     echo "$line"
