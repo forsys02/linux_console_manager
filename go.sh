@@ -782,8 +782,15 @@ menufunc() {
                                             {
                                                 # 이전에 선택했던 값이 있으면 함께 출력
                                                 if [ -n "${!org_var_name}" ]; then
+                                                    # 이전에 사용했던 값이 있을때 // 그중 비밀번호 변수 일때
+                                                    if echo "${org_var_name}" | grep -Eq "varPassword|varPW"; then
+                                                        masked_dvar_value="${pre_var_value:0:2}$(printf '*%.0s' $(seq 3 ${#pre_var_value}))"
+                                                    else
+                                                        masked_dvar_value="${pre_var_value}"
+                                                    fi
+
                                                     PS3="==============================================
->>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name//\\/}$(tput sgr0)
+>>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${masked_dvar_value//\\/}$(tput sgr0)
 >>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 else
                                                     PS3="==============================================
@@ -873,8 +880,14 @@ menufunc() {
                                             if [ "$(eval echo \"\${flagof_"${var_name%%__*}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
                                             else
+                                                # 이전에 사용했던 값이 있을때 // 그중 비밀번호 변수 일때
+                                                if echo "${var_name}" | grep -Eq "varPassword|varPW"; then
+                                                    masked_dvar_value="${dvar_value:0:2}$(printf '*%.0s' $(seq 3 ${#dvar_value}))"
+                                                else
+                                                    masked_dvar_value="${dvar_value}"
+                                                fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
+                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$masked_dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
