@@ -4,7 +4,7 @@
 #debug="y"
 
 echo
-who am i && sleep 1
+who am i && sleep 0.5
 
 # 존재 하는 파일의 절대경로 출력 readlink -f
 readlinkf() {
@@ -421,7 +421,7 @@ menufunc() {
                         title_of_menu="${itema2#*\%\%\% }"
                         readxx $LINENO 필수 title_of_menu:$title_of_menu
 
-                    # relay {} .. {}
+                        # relay {} .. {}
                     elif [[ $chosen_command_relay != "{}" && $chosen_command_relay ]]; then
                         # ex) shortcutarr[8] = i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
                         # ex) shortcutarr[141] = hid@@@%%% {submenu_sys}>히든메뉴 [hid]@@@{submenu_hidden}
@@ -431,7 +431,7 @@ menufunc() {
                         chosen_command_sub="${itema3#*\%\%\% }"
                         readxx $LINENO 인계메뉴 chosen_command_sub $chosen_command_sub chosen_command_relay $chosen_command_relay
 
-                    # submenu
+                        # submenu
                     else
                         # ex) shortcutarr[123] = irc@@@%%% {submenu_com}irc chat [irc]
                         chosen_command_relay=""
@@ -461,6 +461,8 @@ menufunc() {
             # 선택한 줄번호의 타이틀에 맞는 리스트가져옴
             ###############################################################
             listof_comm() {
+                # 필요인수: ${sub_menu}${title_of_menu}
+                #
                 # 선택한 메뉴가 서브메뉴인경우 ${chosen_command_sub}가 포함된 리스트 수집
                 # 선택한 메뉴가 메인메뉴인경우 ${chosen_command_sub} -> 공백처리
                 # 메뉴 4종류: 메인단독 / 메인경유 / 서브경유 / 최종
@@ -475,7 +477,7 @@ menufunc() {
                 [[ $sub_menu == "{}" ]] && sub_menu=""
                 # 재하청 메뉴는 relay_sub 를 sub_menu 로 사용.
                 [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
-                #readxx $LINENO title_of_menu: $title_of_menu sub_menu: $sub_menu
+                readxx $LINENO "lisof_comm func in - IFS check title_of_menu: $title_of_menu sub_menu: $sub_menu {chosen_command_sub}:${chosen_command_sub-} chosen_command_relay_sub:$chosen_command_relay_sub"
                 # %%% 부터 빈줄까지 변수에
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
                 # 제목배고 선명령 빼고 순서 명령문들 배열
@@ -527,6 +529,7 @@ menufunc() {
                             echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
                             echo "=============================================="
                             # pre excute
+
                             for items in "${pre_commands[@]}"; do
                                 eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
                             done > >(
@@ -1031,11 +1034,17 @@ menufunc() {
                         case "$cmd_choice" in
                         # --- Basic Navigation & Commands ---
                         "0" | "q" | ".")
-                            if [ "$choice" == "99" ]; then
-                                # scut 으로 들어온 경우, 상위메뉴타이틀 찾기
-                                title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | sed -e 's/^%%% //g' -e 's/.*}//')"
-                                readxx $LINENO "env: $env title_of_menu_sub:$title_of_menu_sub SHLVL:$SHLVL "
-                            fi
+                            #if [ "$choice" == "99" ]; then
+                            # scut 으로 들어온 경우, 상위메뉴타이틀 찾기
+                            title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | grep "^%%%" | sed -e 's/^%%% //g' -e 's/.*}//')"
+                            title_of_menu=$title_of_menu_sub
+                            chosen_command_sub=""
+                            readxx $LINENO "quit cmd_choice - pre_commands:$pre_commands"
+                            listof_comm
+                            readxx $LINENO "quit cmd_choice after listof_comm - pre_commands:$pre_commands"
+                            #[ -n "$title_of_menu_sub" ] && title_of_menu="$title_of_menu_sub"
+                            readxx $LINENO "quit cmd_choice - env: $env title_of_menu_sub:$title_of_menu_sub {chosen_command_sub}:${chosen_command_sub} SHLVL:$SHLVL "
+                            #fi
                             unsetvar varl
                             saveVAR
                             break # Exit the loop
@@ -1189,7 +1198,7 @@ menufunc() {
                                 # Clean up the temporary variable
 
                                 # Optional: Log execution
-                                echo "$cmd_choice $cmd_choice1 # (cmd_choice via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                                echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                                 echo 'Alias (from .bashrc) executed. Done... Sleep 2sec'
                                 if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                                 unset -v aliascmd
@@ -1423,7 +1432,7 @@ menufunc() {
                     dline
                     RST
 
-                    echo "$choice $choice1 # (choice via .bashrc alias)" >>"$gotmp"/go_history.txt 2>/dev/null
+                    echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                     echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
                     if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
                     unset -v aliascmd
