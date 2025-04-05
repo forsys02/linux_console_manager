@@ -136,7 +136,7 @@ oooldscut=${oooldscut-}
 ooooldscut=${ooooldscut-}
 
 ############################################################
-# 최종 명령문을 실행하는 함수 process_commands
+# 최종 명령문을 실행하는 함수 process_commands // execf
 ############################################################
 process_commands() {
     local command="$1"
@@ -152,7 +152,7 @@ process_commands() {
             (
                 trap 'stty sane' SIGINT
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
-                # _Cancel 같은 특수값을 select 에 추가하여 반회피 한다
+                # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
                 readxx $LINENO "> command: $command"
                 eval "$command"
@@ -160,6 +160,7 @@ process_commands() {
             trap - SIGINT
         else
             readxx $LINENO ">> command: $command"
+            #command=$(command)
             eval "$command"
         fi
         # log
@@ -778,7 +779,7 @@ menufunc() {
                                                 # 이전에 선택했던 값이 있으면 함께 출력
                                                 if [ -n "${!org_var_name}" ]; then
                                                     PS3="==============================================
->>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name}$(tput sgr0)
+>>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name//\\/}$(tput sgr0)
 >>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 else
                                                     PS3="==============================================
@@ -786,7 +787,7 @@ menufunc() {
                                                 fi
 
                                                 IFS='\n'
-                                                select dvar_value in "${dvar_value_array[@]}"; do
+                                                select dvar_value in "${dvar_value_array[@]}" All Cancel; do
                                                     reply=$REPLY && break
                                                 done
                                                 unset IFS
@@ -802,6 +803,14 @@ menufunc() {
                                                     if echo "$num" | grep -q '^[0-9]\+$' && [ "$num" -ge 1 ] && [ "$num" -le "${#dvar_value_array[@]}" ]; then
                                                         selected_values="$selected_values ${dvar_value_array[$((num - 1))]}"
                                                     fi
+                                                    if [ "$num" -le "${#dvar_value_array[@]}" ]; then
+                                                        selected_values="$selected_values ${dvar_value_array[$((num - 1))]}"
+                                                    elif [ "$num" -eq $((${#dvar_value_array[@]} + 1)) ]; then
+                                                        selected_values="All"
+                                                    elif [ "$num" -eq $((${#dvar_value_array[@]} + 2)) ]; then
+                                                        selected_values="Cancel"
+                                                    fi
+
                                                 done
                                                 dvar_value="$selected_values"
                                             else
@@ -811,8 +820,10 @@ menufunc() {
                                             # 시작공백제거
                                             dvar_value=$(echo "$dvar_value" | sed 's/^ *//')
 
-                                            # "all"을 입력했을 경우 "all"을 제외하고 모든 값 출력
-                                            [ "$dvar_value" = "all" ] && dvar_value=$(printf "%s " "${dvar_value_array[@]}" | sed 's/\<all\>//g')
+                                            # "all"을 입력했을 경우 "All Cancel"을 제외하고 모든 값 출력
+                                            if echo "$dvar_value" | grep -qi '^all$'; then
+                                                dvar_value=$(printf "%s\n" "${dvar_value_array[@]}" | grep -viE '^all$|^cancel$' | xargs)
+                                            fi
 
                                         # 기본값이 하나일때
                                         else
@@ -821,7 +832,7 @@ menufunc() {
                                             # 이전에 선택했던 값이 있으면 함께 출력
                                             if [ -n "${!org_var_name}" ]; then
                                                 printf "==============================================
->>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name}$(tput sgr0)
+>>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name//\\/}$(tput sgr0)
 !!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m:"
                                             else
                                                 printf "==============================================
@@ -831,7 +842,7 @@ menufunc() {
                                             # printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
-                                            [ "$var_value" == "c" ] && var_value="canceled"
+                                            [ "$var_value" == "c" ] && var_value="Cancel"
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
                                         # 기본값에 @ 허용하지만 변수이름자체는 @ 허용 안함
@@ -865,7 +876,7 @@ menufunc() {
                                                 printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$dvar_value] \e[0m: "
                                                 readv var_value </dev/tty
                                                 trap - INT
-                                                [ "$var_value" == "c" ] && var_value="canceled"
+                                                [ "$var_value" == "c" ] && var_value="Cancel"
                                                 eval flagof_"${var_name%%__*}"=set
                                                 #eval flagof_"${org_var_name}"=set
                                             fi
@@ -903,7 +914,7 @@ menufunc() {
                                             var_value="$dvar_value"
                                         fi
                                     # 입력값 없거나 cancel 일때
-                                    elif [ -z "$var_value" ] || [ "$var_value" == "canceled" ]; then
+                                    elif [ -z "$var_value" ] || [ "$var_value" == "Cancel" ]; then
                                         { cancel=yes && echo "Canceled..." && eval flagof_"${var_name%%__*}"=set && break; }
                                     # 입력값 있을때
                                     else
@@ -959,7 +970,7 @@ menufunc() {
 
                             else # cfm -> n
                                 # Danger item -> canceled
-                                cmd="canceled"
+                                cmd="Cancel"
                             fi # end of cfm=y
 
                             # 해당 메뉴의 선택명령이 딱 하나일때 바로 실행
@@ -1808,54 +1819,56 @@ noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null; } # Escape 문자(A
 selectmenu() { select item in $@; do echo $item; done; }
 
 # pipe 로 넘어온 줄의 모든 필드를 select 구분자-> 빈칸 빈줄 파이프(|}
+#pipemenu() {
+#    local prompt_message="$@"
+#    PS3="==============================================
+#>>> ${prompt_message:+"$prompt_message - "}Select No. : "
+#    IFS=$' \n|'
+#    export pipeitem=""
+#    items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
+#    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
+#    unset IFS
+#    unset PS3
+#}
 pipemenu() {
-    local prompt_message="$@"
-    PS3="==============================================
->>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    IFS=$' \n|'
-    export pipeitem=""
-    items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
-    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-    unset IFS
-    unset PS3
-}
-pipemenucancel() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     IFS=$' \n|'
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done
-        echo ":_Cancel"
+        echo "Cancel"
     )
 
     [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
     unset IFS
     unset PS3
 }
+pipemenucancel() { pipemenu; }
 
 # pipe 로 넘어온 줄의 첫번째 필드를 select
+#pipemenu1() {
+#    local prompt_message="$@"
+#    PS3="==============================================
+#>>> ${prompt_message:+"$prompt_message - "}Select No. : "
+#    export pipeitem=""
+#    items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done)
+#    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
+#    unset PS3
+#}
 pipemenu1() {
-    local prompt_message="$@"
-    PS3="==============================================
->>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    export pipeitem=""
-    items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done)
-    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-    unset PS3
-}
-pipemenu1cancel() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(
         while read -r line; do awk '{print $1}' < <(echo "$line"); done
-        echo ":_Cancel"
+        echo "Cancel"
     )
     { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset PS3
 }
+pipemenu1cancel() { pipemenu1; }
 
 # pipe 로 넘어온 라인별로 select
 pipemenulist() {
@@ -1866,7 +1879,7 @@ pipemenulist() {
     export pipeitem=""
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done
-        echo ":_Cancel"
+        echo "Cancel"
     )
     { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset IFS
@@ -1926,11 +1939,11 @@ pipemenulistc() {
     IFS=$'\n'
     items=$(
         while read -r line; do awk '{print $0}' < <(echo "$line"); done | stripe
-        echo ":_Cancel"
+        echo "Cancel"
     )
     [ "$items" ] && select item in $items; do [ -n "$item" ] && {
         echo "$item"
-        echo "$item" | grep -q "_Cancel" && export pipeitem="$item" cfm="n" && break || export pipeitem="$item" && break
+        echo "$item" | grep -q "Cancel" && export pipeitem="$item" cfm="n" && break || export pipeitem="$item" && break
     }; done </dev/tty
     unset IFS
     unset PS3
@@ -3424,10 +3437,13 @@ sleepdot() {
 
 # backup & vi
 vi22() {
+    [ ! -f "$1" ] && return 1
     rbackup "$1"
     if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
 }
 vi2() {
+    [ ! -f "$1" ] && echo "Canceled..." && return 1
+
     rbackup "$1"
     # 문자열 찾고 그 위치에서 편집
     #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
@@ -3436,14 +3452,17 @@ vi2() {
 
 }
 vi2e() {
+    [ ! -f "$1" ] && return 1
     rbackup $1
     vim -c "set fileencoding=euc-kr" $1
 }
 vi2u() {
+    [ ! -f "$1" ] && return 1
     rbackup $1
     vim -c "set fileencoding=utf-8" $1
 }
 vi2a() {
+    [ ! -f "$1" ] && return 1
     rbackup "$1" && [ "$(locale charmap)" = "UTF-8" ] && [ ! "$(file -i "$1" | grep "utf")" ] &&
         iconv -f euc-kr -t utf-8//IGNORE -o "$1.utf8" "$1" 2>/dev/null && mv "$1.utf8" "$1"
 
@@ -3467,6 +3486,8 @@ update() {
 
 # install
 yyay() {
+    [[ " $* " == *" Cancel "* ]] && echo "Canceled... " && return 1
+
     [ "$(which yum)" ] && yum="yum" || yum="apt"
     while [ $# -gt 0 ]; do
         $yum install -y $1
