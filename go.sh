@@ -5,6 +5,7 @@
 
 echo
 who am i && sleep 0.5
+#[ -t 0 ] && stty sane && stty erase ^?
 
 # 존재 하는 파일의 절대경로 출력 readlink -f
 readlinkf() {
@@ -887,7 +888,7 @@ menufunc() {
                                                     masked_dvar_value="${dvar_value}"
                                                 fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$masked_dvar_value] \e[0m: "
+                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$masked_dvar_value] \e[0m:"
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
@@ -898,7 +899,7 @@ menufunc() {
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
-                                            printf "Enter value for \e[1;35;40m[$var_name]\e[0m: "
+                                            printf "Enter value for \e[1;35;40m[$var_name]\e[0m:"
                                             readv var_value </dev/tty
                                             # ' " \ ->quoting
                                             if printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
@@ -2154,7 +2155,7 @@ lastseen() { awk '{ last[$0] = NR; line[NR] = $0 } END { for (i = 1; i <= NR; i+
 
 readv() {
     bashver=${BASH_VERSINFO[0]}
-    ((bashver < 3)) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep '' $1
+    ((bashver < 3)) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep ' ' $1
 }
 
 # bashcomm .bashrc 의 alias 사용가능 // history 사용가능
