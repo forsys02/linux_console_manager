@@ -1480,7 +1480,63 @@ menufunc() {
 ##############################################################################################################
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
-ff() { declare -f "$@"; }
+#ff() { declare -f "$@"; }
+
+ff() {
+    if [ -z "$1" ]; then
+        declare -f
+        return
+    fi
+
+    local target="$1"
+    _ff_seen_funcs=" $target "
+
+    _ff_inner() {
+        local func_name="$1"
+        local indent="$2"
+        local f defined all_funcs called_funcs line
+
+        # Get all defined functions
+        all_funcs=$(declare -F | awk '{print $3}')
+
+        # Extract called functions from the function body
+        called_funcs=$(declare -f "$func_name" 2>/dev/null | awk '
+            NR > 1 {  # Skip function declaration line
+                gsub(/[;(){}]/, " ");  # Replace semicolons and braces with spaces
+                for (i = 1; i <= NF; i++) {
+                    if ($i ~ /^[a-zA-Z_][a-zA-Z0-9_]*$/ &&
+                        $i !~ /^(local|echo|if|then|fi|for|do|done|while|return|declare|unset)$/) {
+                        print $i
+                    }
+                }
+            }' | sort -u)
+
+        # Print called functions recursively
+        for f in $called_funcs; do
+            if echo "$all_funcs" | grep -qw "$f" && ! echo "$_ff_seen_funcs" | grep -qw "$f"; then
+                _ff_seen_funcs="${_ff_seen_funcs}${f} "
+                echo "${indent}${f} () {"
+                _ff_inner "$f" "    $indent"
+                echo "${indent}}"
+                echo
+            fi
+        done
+
+        # Print the function body
+        declare -f "$func_name" 2>/dev/null | sed '1,2d;$d' | while IFS= read -r line; do
+            echo "${indent}${line}"
+        done
+    }
+
+    echo "${target} () {"
+    _ff_inner "$target" "    "
+    echo "}"
+    unset _ff_seen_funcs
+}
+
+ffc() {
+    ff "$@" | { batcat -l bash 2>/dev/null || cat; }
+}
 
 # colored ip (1 line multi ip apply)
 cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null ||
