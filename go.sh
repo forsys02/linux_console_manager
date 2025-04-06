@@ -1619,9 +1619,12 @@ load() {
     echo "cpu_line: $cpu_line"
 
     local us=0 sy=0 wa=0
-    us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print int($i)}')
+    #    us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print int($i)}')
+    #    sy=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /sy/) print int($i)}')
+    #    wa=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /wa/) print int($i)}')
+    us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print $i}' | awk '{print int($(NF-1))}')
     sy=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /sy/) print int($i)}')
-    wa=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /wa/) print int($i)}')
+    wa=$(echo "$cpu_line" | awk -F',' '{for(i=NF;i>0;i--) if($i ~ /wa/) {print int($i); break}}')
 
     if ! echo "$us$sy$wa" | grep -Eq '^[0-9]+$'; then
         echo "${RED}Error: Failed to parse CPU usage values.${NC}"
