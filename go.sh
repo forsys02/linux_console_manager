@@ -1569,30 +1569,46 @@ cgrep3137() {
 }
 
 cgrepn() {
-    local num_cols="${@:-1}"          # 마지막 인수를 색칠 범위로 사용
-    local search_strs=("${@:1:$#-1}") # 나머지는 검색어 목록
+    local args=("$@")    # 모든 인자를 배열로 저장
+    local search_strs=() # 검색할 문자열 배열
+    local num_cols=0     # 기본값을 1로 설정
 
-    # 색칠 범위 기본값 설정 (숫자가 아니면 기본값 0)
-    if echo "$num_cols" | grep -qE '^-?[0-9]+$'; then
-        : # num_cols 값이 유효한 숫자일 때 유지
-    else
-        num_cols=0
+    # 인자가 없으면 사용법 출력 후 종료
+    if [ "${#args[@]}" -eq 0 ]; then
+        echo "Usage: cgrepn [search_strings...] [num_cols]"
+        return 1
     fi
 
-    perl -pe "
+    # 마지막 인자가 숫자인지 확인
+    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
+        num_cols="${args[-1]}"                     # 마지막 인자를 num_cols로 설정
+        search_strs=("${args[@]:0:${#args[@]}-1}") # 나머지를 검색 문자열로 설정
+    else
+        search_strs=("${args[@]}") # 모든 인자를 검색 문자열로 설정
+    fi
+
+    # 검색할 문자열이 없으면 오류
+    if [ "${#search_strs[@]}" -eq 0 ]; then
+        echo "Error: No search strings provided."
+        return 1
+    fi
+
+    # Perl 스크립트를 사용해 색칠 처리
+    perl -s -pe '
         BEGIN {
-            \$color_red = \"\e[1;31m\";  # 빨간색
-            \$color_reset = \"\e[0m\";   # 색상 초기화
-            @search_words = qw(${search_strs[*]});
-            \$num = $num_cols;
-            if (\$num < 0) { \$before = -\$num; \$after = 0; }  # 음수: 앞쪽 강조
-            elsif (\$num > 0) { \$before = 0; \$after = \$num; }  # 양수: 뒤쪽 강조
-            else { \$before = 0; \$after = 0; }  # 0이면 해당 단어만
+            $color_red = "\e[1;31m";     # 빨간색
+            $color_reset = "\e[0m";      # 색상 초기화
+            @search_words = split / /, $search_strs;
+            $num = $num_cols;
+            if ($num < 0) { $before = -$num; $after = 0; }
+            elsif ($num > 0) { $before = 0; $after = $num; }
+            else { $before = 0; $after = 0; }  # num_cols가 0이면 검색 문자열 자체만 색칠
         }
-        foreach my \$search (@search_words) {
-            s/((\\S+\\s+){0,\$before}\$search(\\s+\\S+){0,\$after})/\$color_red\$1\$color_reset/g;
+        foreach my $search (@search_words) {
+            my $pattern = "(\\S+\\s+){0,$before}" . quotemeta($search) . "(\\s+\\S+){0,$after}";
+            s/($pattern)/$color_red$1$color_reset/g;
         }
-    "
+    ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
 load() {
@@ -1616,12 +1632,10 @@ load() {
         return 1
     fi
 
-    echo "cpu_line: $cpu_line"
+    echo "cpu_line: $cpu_line" | cgrepn us sy wa -1
+    echo
 
     local us=0 sy=0 wa=0
-    #    us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print int($i)}')
-    #    sy=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /sy/) print int($i)}')
-    #    wa=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /wa/) print int($i)}')
     us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print $i}' | awk '{print int($(NF-1))}')
     sy=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /sy/) print int($i)}')
     wa=$(echo "$cpu_line" | awk -F',' '{for(i=NF;i>0;i--) if($i ~ /wa/) {print int($i); break}}')
@@ -1632,7 +1646,7 @@ load() {
         return 1
     fi
 
-    echo -e "\nParsed values -> us=${us}, sy=${sy}, wa=${wa}"
+    #echo -e "\nParsed values -> us=${us}, sy=${sy}, wa=${wa}"
     echo -e "${BLUE}CPU Usage Summary:${NC}"
     echo " - User (us): ${YELLOW}${us}%${NC}"
     echo " - System (sy): ${YELLOW}${sy}%${NC}"
