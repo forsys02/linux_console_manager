@@ -176,7 +176,12 @@ process_commands() {
         echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
-        if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then nodone=y && sleep 1; fi
+        if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then
+            nodone=y && sleep 1
+        elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd|pwd|ls'; then
+            bashcomm
+        fi
+
         [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -r x; }
     else
         echo "$command"
@@ -2159,27 +2164,72 @@ readv() {
 }
 
 # bashcomm .bashrc 의 alias 사용가능 // history 사용가능
+#bashcomm() {
+#    echo
+#    local original_aliases
+#    original_aliases=$(shopt -p expand_aliases)
+#    shopt -s expand_aliases
+#    source ${HOME}/.bashrc
+#    unalias q 2>/dev/null
+#    HISTFILE="$gotmp/go_history.txt"
+#    history -r "$HISTFILE"
+#    while :; do
+#        CYN
+#        pwdv=$(pwd)
+#        echo "pwd: $([ -L $pwdv ] && ls -al $pwdv | awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)"
+#        RST
+#        IFS="" read -rep 'BaSH_Command_[q] > ' cmd
+#        if [[ $cmd == "q" || -z $cmd ]]; then eval "$original_aliases" && break; else {
+#            history -s "$cmd"
+#            eval "process_commands \"$cmd\" y nodone"
+#            history -a "$HISTFILE"
+#        }; fi
+#    done
+#}
 bashcomm() {
+    IN_BASHCOMM=1
     echo
-    local original_aliases
+    local original_aliases prev_empty=false cmd
     original_aliases=$(shopt -p expand_aliases)
     shopt -s expand_aliases
-    source ${HOME}/.bashrc
+    source "${HOME}/.bashrc"
     unalias q 2>/dev/null
+
     HISTFILE="$gotmp/go_history.txt"
     history -r "$HISTFILE"
-    while :; do
+
+    local exit_loop=false
+
+    while ! $exit_loop; do
+        # show working directory info
         CYN
+        user=$(id -un)
         pwdv=$(pwd)
-        echo "pwd: $([ -L $pwdv ] && ls -al $pwdv | awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)"
+        echo -n "user: $user  |  pwd: "
+        [[ -L $pwdv ]] && ls -al "$pwdv" | awk '{print $(NF-2),$(NF-1),$NF}' || echo "$pwdv"
         RST
+
         IFS="" read -rep 'BaSH_Command_[q] > ' cmd
-        if [[ $cmd == "q" || -z $cmd ]]; then eval "$original_aliases" && break; else {
+
+        if [[ $cmd == "q" ]]; then
+            exit_loop=true
+        elif [[ -z $cmd ]]; then
+            if $prev_empty; then
+                exit_loop=true
+            else
+                prev_empty=true
+            fi
+        else
+            prev_empty=false
             history -s "$cmd"
             eval "process_commands \"$cmd\" y nodone"
             history -a "$HISTFILE"
-        }; fi
+        fi
     done
+
+    # 한 번만 호출
+    eval "$original_aliases"
+    unset -v IN_BASHCOMM
 }
 
 # rbackup -> rollback
