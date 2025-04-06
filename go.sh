@@ -4,7 +4,7 @@
 #debug="y"
 
 echo
-who am i && sleep 0.5
+who am i && sleep 0.2
 #[ -t 0 ] && stty sane && stty erase ^?
 
 # 존재 하는 파일의 절대경로 출력 readlink -f
@@ -380,7 +380,7 @@ menufunc() {
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             history -r
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
-            [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우
+            [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
         fi
 
@@ -2210,6 +2210,7 @@ bashcomm() {
         RST
 
         IFS="" read -rep 'BaSH_Command_[q] > ' cmd
+        [[ $? -eq 1 ]] && cmd="q"
 
         if [[ $cmd == "q" ]]; then
             exit_loop=true
