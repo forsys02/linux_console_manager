@@ -137,7 +137,7 @@ oooldscut=${oooldscut-}
 ooooldscut=${ooooldscut-}
 
 ############################################################
-# 최종 명령문을 실행하는 함수 process_commands // execf
+# 최종 명령문을 실행하는 함수 process_commands // execf Process
 ############################################################
 process_commands() {
     local command="$1"
@@ -147,7 +147,8 @@ process_commands() {
     [[ ${command:0:1} == "#" ]] && return # 주석선택시 취소
 
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then # !!! check
-        echo && echo "=============================================="
+        #echo && echo "=============================================="
+        echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
             (
@@ -1592,6 +1593,99 @@ cgrepn() {
             s/((\\S+\\s+){0,\$before}\$search(\\s+\\S+){0,\$after})/\$color_red\$1\$color_reset/g;
         }
     "
+}
+
+load() {
+    local BOLD=$(tput bold)
+    local RED="${BOLD}$(tput setaf 1)"
+    local GREEN="${BOLD}$(tput setaf 2)"
+    local YELLOW="${BOLD}$(tput setaf 3)"
+    local BLUE="${BOLD}$(tput setaf 4)"
+    local NC=$(tput sgr0)
+    local SIGNIFICANT_THRESHOLD=15
+
+    echo -e "\n${BLUE}=============================================="
+    echo "CPU Load Analysis Starting..."
+    echo -e "==============================================${NC}\n"
+
+    local cpu_line
+    cpu_line=$(LC_ALL=en_US.UTF-8 timeout 5 top -bn1 | grep '^%Cpu')
+
+    if [ -z "$cpu_line" ]; then
+        echo "${RED}Error: Failed to retrieve CPU stats or 'top' command failed.${NC}"
+        return 1
+    fi
+
+    echo "cpu_line: $cpu_line"
+
+    local us=0 sy=0 wa=0
+    us=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /us/) print int($i)}')
+    sy=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /sy/) print int($i)}')
+    wa=$(echo "$cpu_line" | awk -F',' '{for(i=1;i<=NF;i++) if($i ~ /wa/) print int($i)}')
+
+    if ! echo "$us$sy$wa" | grep -Eq '^[0-9]+$'; then
+        echo "${RED}Error: Failed to parse CPU usage values.${NC}"
+        echo "Parsed values -> us=$us, sy=$sy, wa=$wa"
+        return 1
+    fi
+
+    echo -e "\nParsed values -> us=${us}, sy=${sy}, wa=${wa}"
+    echo -e "${BLUE}CPU Usage Summary:${NC}"
+    echo " - User (us): ${YELLOW}${us}%${NC}"
+    echo " - System (sy): ${YELLOW}${sy}%${NC}"
+    echo " - I/O Wait (wa): ${YELLOW}${wa}%${NC}"
+    local total=$((us + sy + wa))
+    echo " - Total Load: ${YELLOW}${total}%${NC}"
+
+    if [ "$wa" -ge "$SIGNIFICANT_THRESHOLD" ] && [ "$wa" -ge "$sy" ] && [ "$wa" -ge "$us" ]; then
+        echo -e "\n${RED}High I/O wait detected. Possible disk bottleneck or NFS issue.${NC}"
+    else
+        echo -e "\n${GREEN}OK: CPU load looks normal.${NC}"
+        return 0
+    fi
+
+    while true; do
+
+        echo -e "\n${GREEN}=== Recommended Diagnostic Commands ===${NC}"
+        echo "1) iotop (View top I/O processes)"
+        echo "2) iostat -xz 1 (Detailed disk stats)"
+        echo "3) vmstat 1 (Watch 'b' and 'wa' columns)"
+        echo "4) free -h (Memory & swap usage)"
+        echo "5) Exit"
+        echo -n "Select an option [1-5]: "
+        trap 'echo;break' INT
+        read ans
+        trap - INT
+
+        case "$ans" in
+        1) CMD="sudo iotop" ;;
+        2) CMD="iostat -xz 1" ;;
+        3) CMD="vmstat 1" ;;
+        4) CMD="free -h" ;;
+        5) break ;;
+        *)
+            echo "${RED}Invalid option.${NC}"
+            continue
+            ;;
+        esac
+
+        ACTUAL=$(echo "$CMD" | awk '{print ($1=="sudo") ? $2 : $1}')
+        if ! command -v "$ACTUAL" >/dev/null 2>&1; then
+            echo "${RED}Error: '$ACTUAL' not found. Please install it.${NC}"
+            continue
+        fi
+
+        [[ $ACTUAL == "iotop" || $ACTUAL == "top" || $ACTUAL == "htop" ]] && clear
+
+        echo -e "\n${YELLOW}▶ Running: $CMD (Ctrl+C to stop)${NC}\n"
+
+        # 메뉴에서 Ctrl+C 눌렀을 때 루프 재시작
+        trap 'echo -e "\n${YELLOW}Returning to menu...${NC}";continue' INT
+        bash -c "$CMD"
+        trap - INT
+
+        echo -e "\n${GREEN}=== Command finished. Returning to menu ===${NC}\n"
+    done
 }
 
 # 줄긋기 draw line
@@ -3785,7 +3879,7 @@ dfmonitor() {
         echo -e "System Uptime:\n--------------"
         uptime
         echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"
-        ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep
+        ps -ef | grep -E "\<(pv|cp|tar|zst|zstd|rsync|dd|mv)\>" | grep -v grep
         echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL"
         echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"
         DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available|overlay|/snap/")
