@@ -1538,6 +1538,9 @@ ffc() {
     ff "$@" | { batcat -l bash 2>/dev/null || cat; }
 }
 
+#find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{if($1>10)printf "\033[1;31m%-60s %s MB\033[0m\n",$2,$1;else printf "%-60s %s MB\n",$2,$1}' || command find "$@"; }
+find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{c="\033[0m"; if($1>1000)c="\033[1;31m"; else if($1>100)c="\033[1;33m"; else if($1>10)c="\033[1;37m"; printf "%s%-60s %s MB\033[0m\n", c, $2, $1}' | less -RX || command find "$@"; }
+
 # colored ip (1 line multi ip apply)
 cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null ||
     awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}'; }
@@ -2331,28 +2334,6 @@ readv() {
 }
 
 # bashcomm .bashrc 의 alias 사용가능 // history 사용가능
-#bashcomm() {
-#    echo
-#    local original_aliases
-#    original_aliases=$(shopt -p expand_aliases)
-#    shopt -s expand_aliases
-#    source ${HOME}/.bashrc
-#    unalias q 2>/dev/null
-#    HISTFILE="$gotmp/go_history.txt"
-#    history -r "$HISTFILE"
-#    while :; do
-#        CYN
-#        pwdv=$(pwd)
-#        echo "pwd: $([ -L $pwdv ] && ls -al $pwdv | awk '{print $(NF-2),$(NF-1),$NF}' || echo $pwdv)"
-#        RST
-#        IFS="" read -rep 'BaSH_Command_[q] > ' cmd
-#        if [[ $cmd == "q" || -z $cmd ]]; then eval "$original_aliases" && break; else {
-#            history -s "$cmd"
-#            eval "process_commands \"$cmd\" y nodone"
-#            history -a "$HISTFILE"
-#        }; fi
-#    done
-#}
 bashcomm() {
     IN_BASHCOMM=1
     echo
@@ -2376,8 +2357,11 @@ bashcomm() {
         [[ -L $pwdv ]] && ls -al "$pwdv" | awk '{print $(NF-2),$(NF-1),$NF}' || echo "$pwdv"
         RST
 
+        #trap 'stty sane;break' SIGINT
+        trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
         IFS="" read -rep 'BaSH_Command_[q] > ' cmd
         [[ $? -eq 1 ]] && cmd="q"
+        trap - INT
 
         if [[ $cmd == "q" ]]; then
             exit_loop=true
