@@ -741,10 +741,14 @@ menufunc() {
                                     var_value=""
                                     dvar_value=""
                                     #echo "init_var_name: $var_name" && readx
+                                    IFS=" :"
                                     var_name="var${var#var}"
+                                    #echo "IFS var_name: $var_name" && read x
+                                    unset IFS
 
                                     # 변수조정 varVAR.conf -> varVAR ( 변수이름에 점사용 쩨한 ) varVAR.conf -> varVAR 이 변수
-                                    if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
+                                    if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}" && var_name="${var_name%%:*}" && var_name="${var_name%%-*}"; fi
+                                    #if [[ $var_name != *__* ]]; then var_name="${var_name%%.*}"; fi
                                     # 변수조정 varVAR@localhost -> varVAR ( 변수이름에 @사용 제한 )
                                     if [[ $var_name != *__* ]]; then var_name="${var_name#@}" && var_name="${var_name%%@*}"; fi
                                     # 변수조정 varVAR__ -> varAVR ( 변수에__ 이 있지만 기본값이 없을때 )
@@ -886,6 +890,7 @@ menufunc() {
                                             # 이미 설정한 변수는 pass
                                             if [ "$(eval echo \"\${flagof_"${var_name%%__*}"}\")" == "set" ]; then
                                                 var_value="$dvar_value"
+                                                :
                                             else
                                                 # 이전에 사용했던 값이 있을때 // 그중 비밀번호 변수 일때
                                                 if echo "${var_name}" | grep -Eq "varPassword|varPW"; then
@@ -944,35 +949,18 @@ menufunc() {
                                     fi
 
                                     # varVAR 를 실제값으로 변환
-                                    # echo "var_namme: //$var_name// var_valuue: //$var_value//" && read x < /dev/tty
-
-                                    #cmd=${cmd//$var_name/$var_value} -> 경로등 특수문자 변환 문제
-                                    #cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g") -> varA_ -> varA 인식못함
-
-                                    #escaped_value=$(printf '%s\n' "$var_value" | sed 's/[&/\]/\\&/g')
-                                    #cmd=$(echo "$cmd" | sed "s|\b$var_name\b|$escaped_value|g")
-                                    #
                                     # 1. var_name을 sed 정규식 패턴에 안전하게 사용하도록 이스케이프 (동일)
                                     regex_safe_var_name=$(printf '%s' "$var_name" | sed 's/[.^$*\[\]\\]/\\&/g')
 
                                     # 2. var_value를 sed 치환 문자열에 안전하게 사용하도록 이스케이프 (구분자 # 포함 - 동일)
                                     escaped_value=$(printf '%s' "$var_value" | sed -e 's/\\/\\\\/g' -e 's/&/\\&/g' -e 's/#/\\#/g')
 
-                                    # 3. 캡처 그룹을 사용하여 cmd 업데이트 (Lookaround 대신)
-                                    #    (^|[^a-zA-Z0-9]): 시작(^) 이거나 영숫자가 아닌 문자(그룹 1)
-                                    #    ([^a-zA-Z0-9]|$): 영숫자가 아닌 문자 이거나 끝($)(그룹 2)
-                                    #    치환 시 \1$escaped_value\2 로 원래 경계 문자를 다시 넣어줌
-                                    #cmd=$(printf '%s' "$cmd" | sed -E "s#(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)#\1$escaped_value\2#g")
-                                    #cmd=$(printf '%s' "$cmd" | sed -E "s:(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$):\1$escaped_value\2:g")
-                                    #cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
-                                    #	printf '%s' "$cmd" | od -c
-                                    #	set -x
-                                    #    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\1$escaped_value\2:g")
                                     # 순환하면서 varVAR 변환 11:11 같이 숫자: 이 포함된 경우 sed 에서 발작증상 \1 와 충돌
                                     tmp_token="__REPL_TOKEN__"
-                                    cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:g")
-                                    cmd="${cmd//${tmp_token}/$escaped_value}"
-
+                                    while [[ $cmd =~ (^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$) ]]; do
+                                        cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:")
+                                        cmd="${cmd//$tmp_token/$escaped_value}"
+                                    done
                                     #echo "===before====" ; declare -f "$escaped_value"
                                     # unset bug?? .. delete func()
                                     #unset $escaped_value
@@ -2784,63 +2772,56 @@ idpw() {
     [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" || echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"
 }
 
-
-
-
-
-
-
-
-idinfo () {
+idinfo() {
     if [ -z "$1" ] || [ "$1" = "--help" ]; then
-        echo -e "\e[1mUsage:\e[0m idinfo <username> [section]"
+        printf "\033[1mUsage:\033[0m idinfo <username> [section]\n"
         echo "Sections: all (default), basic, activity, resources"
         return 1
     fi
-
     USERNAME="$1"
     SECTION="${2:-all}"
     USERINFO=$(getent passwd "$USERNAME")
     if [ -z "$USERINFO" ]; then
-        echo -e "\e[1;31m[!] 사용자 '$USERNAME' 정보를 찾을 수 없습니다.\e[0m"
+        printf "\033[1;31m[!] 사용자 '%s' 정보를 찾을 수 없습니다.\033[0m\n" "$USERNAME"
         return 1
     fi
 
-    IFS=':' read -r NAME PASS USER_UID GID INFO HOME SHELL <<< "$USERINFO"
-    OUTPUT=""
+    # <<< 제거 → echo + read 로 대체
+    OLDIFS="$IFS"
+    IFS=':'
+    echo "$USERINFO" | while read NAME PASS USER_UID GID INFO HOME SHELL; do
+        OUTPUT=""
 
-    print_section () {
-        local title="$1"
-        local content="$2"
-        local formatted_content
-        OUTPUT="${OUTPUT}\e[1;34m\n╔══════════════════════════════════════╗\n║  $title\n╚══════════════════════════════════════╝\e[0m\n"
-        if [ -z "$content" ]; then
-            formatted_content="  (정보 없음)\n"
-        else
-            formatted_content=$(echo "$content" | awk -F':' '
-                NF == 0 { next }
-                NF == 1 { printf "  %s\n", $0; next }
-                NF > 1 {
-                    key = $1
-                    sub(/^[^:]+:[ \t]*/, "")
-                    value = $0
-                    gsub(/^[ \t]+|[ \t]+$/, "", key)
-                    gsub(/^[ \t]+|[ \t]+$/, "", value)
-                    if (value == "") value = "(없음)"
-                    printf "  \033[1;37m%-30s\033[0m: \033[1;36m%s\033[0m\n", key, value
-                }
-            ')
-            [ -z "$formatted_content" ] && formatted_content="  (정보 없음)\n"
-        fi
-        OUTPUT="${OUTPUT}${formatted_content}\n"
-    }
+        print_section() {
+            title="$1"
+            content="$2"
+            OUTPUT="${OUTPUT}\033[1;34m\n╔══════════════════════════════════════╗\n║  $title\n╚══════════════════════════════════════╝\033[0m\n"
+            if [ -z "$content" ]; then
+                formatted_content="  (정보 없음)\n"
+            else
+                formatted_content=$(echo "$content" | awk -F':' '
+                    NF == 0 { next }
+                    NF == 1 { printf "  %s\n", $0; next }
+                    NF > 1 {
+                        key = $1
+                        sub(/^[^:]+:[ \t]*/, "")
+                        value = $0
+                        gsub(/^[ \t]+|[ \t]+$/, "", key)
+                        gsub(/^[ \t]+|[ \t]+$/, "", value)
+                        if (value == "") value = "(없음)"
+                        printf "  \033[1;37m%-30s\033[0m: \033[1;36m%s\033[0m\n", key, value
+                    }
+                ')
+                [ -z "$formatted_content" ] && formatted_content="  (정보 없음)\n"
+            fi
+            OUTPUT="${OUTPUT}${formatted_content}\n"
+        }
 
-    if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
-        ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
-        LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
-        CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | sed 's/ : /:/g')
-        BASIC_CONTENT="$(cat <<EOF
-사용자명: $NAME
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
+            ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
+            LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
+            CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | sed 's/ : /:/g')
+            BASIC_CONTENT="사용자명: $NAME
 UID: $USER_UID
 GID: $GID
 전체 이름: $INFO
@@ -2852,26 +2833,23 @@ GID: $GID
 최근 변경일: $LAST_CHANGED_DATE
 
 --- 비밀번호 정책 ---
-$CHAGE_INFO
-EOF
-)"
-        print_section "������ 기본 정보 (Basic)" "$BASIC_CONTENT"
-    fi
-
-    if [ "$SECTION" = "all" ] || [ "$SECTION" = "activity" ]; then
-        WHO_INFO=$(who | grep "$USERNAME" || echo "현재 로그인 정보 없음")
-        LAST_LOG=$(last "$USERNAME" | head -n 5 || echo "로그인 이력 없음")
-        PROCESS_INFO=$(ps -u "$USERNAME" --forest -o pid,tty,stat,time,cmd 2>/dev/null || echo "실행 중인 프로세스 없음")
-        if [ -r /var/log/maillog ]; then
-            MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
-        elif [ -r /var/log/mail.log ]; then
-            MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
-        else
-            MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음 (/var/log/maillog, /var/log/mail.log)"
+$CHAGE_INFO"
+            print_section "➤ 기본 정보 (Basic)" "$BASIC_CONTENT"
         fi
-        [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
-        ACTIVITY_CONTENT="$(cat <<EOF
---- 현재 로그인 세션 ---
+
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "activity" ]; then
+            WHO_INFO=$(who | grep "$USERNAME" || echo "현재 로그인 정보 없음")
+            LAST_LOG=$(last "$USERNAME" | head -n 5 || echo "로그인 이력 없음")
+            PROCESS_INFO=$(ps -u "$USERNAME" --forest -o pid,tty,stat,time,cmd 2>/dev/null || echo "실행 중인 프로세스 없음")
+            if [ -r /var/log/maillog ]; then
+                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
+            elif [ -r /var/log/mail.log ]; then
+                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
+            else
+                MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음 (/var/log/maillog, /var/log/mail.log)"
+            fi
+            [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
+            ACTIVITY_CONTENT="--- 현재 로그인 세션 ---
 $WHO_INFO
 
 --- 최근 로그인 로그 (최대 5회) ---
@@ -2881,20 +2859,17 @@ $LAST_LOG
 $PROCESS_INFO
 
 --- 메일 관련 로그 (최대 5줄, sudo 필요) ---
-$MAIL_LOG
-EOF
-)"
-        print_section "������ 활동 정보 (Activity)" "$ACTIVITY_CONTENT"
-    fi
+$MAIL_LOG"
+            print_section "➤ 활동 정보 (Activity)" "$ACTIVITY_CONTENT"
+        fi
 
-    if [ "$SECTION" = "all" ] || [ "$SECTION" = "resources" ]; then
-        ID_INFO=$(id "$USERNAME")
-        GROUPS_INFO=$(groups "$USERNAME")
-        HOME_INFO=$(ls -ld "$HOME")
-        HOME_USAGE=$(du -sh "$HOME" 2>/dev/null || echo "홈 디렉토리 사용량 확인 불가 (권한 또는 존재 여부)")
-        SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
-        RESOURCES_CONTENT="$(cat <<EOF
---- ID 및 그룹 정보 ---
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "resources" ]; then
+            ID_INFO=$(id "$USERNAME")
+            GROUPS_INFO=$(groups "$USERNAME")
+            HOME_INFO=$(ls -ld "$HOME")
+            HOME_USAGE=$(du -sh "$HOME" 2>/dev/null || echo "홈 디렉토리 사용량 확인 불가 (권한 또는 존재 여부)")
+            SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
+            RESOURCES_CONTENT="--- ID 및 그룹 정보 ---
 $ID_INFO
 소속 그룹: $GROUPS_INFO
 
@@ -2906,37 +2881,27 @@ $HOME_USAGE
 
 --- 비밀번호 정보 (/etc/shadow, sudo 필요) ---
 $SHADOW_INFO
-(형식: username:password_hash:last_change:min_days:max_days:warn_days:inactive_days:expire_date)
-EOF
-)"
-        print_section "������ 권한 및 리소스 (Resources)" "$RESOURCES_CONTENT"
-    fi
-
-    if [ "$SECTION" != "all" ] && ! echo " basic activity resources " | grep -q " $SECTION "; then
-        echo -e "\e[1;31m[!] 잘못된 섹션: '$SECTION'\e[0m"
-        echo "사용 가능한 섹션: all, basic, activity, resources"
-        return 1
-    fi
-
-    if [ -n "$OUTPUT" ]; then
-        echo -e "$OUTPUT" | less -RX
-    else
-        if ! echo " basic activity resources all " | grep -q " $SECTION "; then
-            :
-        else
-            echo -e "\e[1;33m[!] 출력할 내용이 없습니다. 섹션 '$SECTION'을 확인하세요.\e[0m"
+(형식: username:password_hash:last_change:min_days:max_days:warn_days:inactive_days:expire_date)"
+            print_section "➤ 권한 및 리소스 (Resources)" "$RESOURCES_CONTENT"
         fi
-    fi
 
+        if [ "$SECTION" != "all" ] && ! echo " basic activity resources " | grep -q " $SECTION "; then
+            printf "\033[1;31m[!] 잘못된 섹션: '%s'\033[0m\n" "$SECTION"
+            echo "사용 가능한 섹션: all, basic, activity, resources"
+            return 1
+        fi
+
+        if [ -n "$OUTPUT" ]; then
+            echo -e "$OUTPUT" | less -RX
+        else
+            if echo " basic activity resources all " | grep -q " $SECTION "; then
+                printf "\033[1;33m[!] 출력할 내용이 없습니다. 섹션 '%s'을 확인하세요.\033[0m\n" "$SECTION"
+            fi
+        fi
+    done
+    IFS="$OLDIFS"
     return 0
 }
-
-
-
-
-
-
-
 
 qssh() {
     # --- 설정 ---
