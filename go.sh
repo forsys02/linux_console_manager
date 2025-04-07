@@ -170,7 +170,7 @@ process_commands() {
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-        [ "${command%% *}" = "cd" ] && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && ls -ltr | tail -n5
+        echo "${command%% *}" | grep -qE "cd|rm|mkdir" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && ls -ltr | tail -n5
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
@@ -2783,6 +2783,160 @@ idpw() {
     { expect -c "set timeout 3;log_user 0; spawn ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=QUIET $id@$host; expect -re \"password:\" { sleep 0.2 ; send \"$pw\r\" } -re \"key fingerprint\" { sleep 0.2 ; send \"yes\r\" ; expect -re \"password:\" ; sleep 0.2 ; send \"$pw\r\" }; expect \"*Last login*\" { exit 0 } \"*Welcome to *\" { exit 0 } timeout { exit 1 } eof { exit 1 };"; }
     [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" || echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"
 }
+
+
+
+
+
+
+
+
+idinfo () {
+    if [ -z "$1" ] || [ "$1" = "--help" ]; then
+        echo -e "\e[1mUsage:\e[0m idinfo <username> [section]"
+        echo "Sections: all (default), basic, activity, resources"
+        return 1
+    fi
+
+    USERNAME="$1"
+    SECTION="${2:-all}"
+    USERINFO=$(getent passwd "$USERNAME")
+    if [ -z "$USERINFO" ]; then
+        echo -e "\e[1;31m[!] 사용자 '$USERNAME' 정보를 찾을 수 없습니다.\e[0m"
+        return 1
+    fi
+
+    IFS=':' read -r NAME PASS USER_UID GID INFO HOME SHELL <<< "$USERINFO"
+    OUTPUT=""
+
+    print_section () {
+        local title="$1"
+        local content="$2"
+        local formatted_content
+        OUTPUT="${OUTPUT}\e[1;34m\n╔══════════════════════════════════════╗\n║  $title\n╚══════════════════════════════════════╝\e[0m\n"
+        if [ -z "$content" ]; then
+            formatted_content="  (정보 없음)\n"
+        else
+            formatted_content=$(echo "$content" | awk -F':' '
+                NF == 0 { next }
+                NF == 1 { printf "  %s\n", $0; next }
+                NF > 1 {
+                    key = $1
+                    sub(/^[^:]+:[ \t]*/, "")
+                    value = $0
+                    gsub(/^[ \t]+|[ \t]+$/, "", key)
+                    gsub(/^[ \t]+|[ \t]+$/, "", value)
+                    if (value == "") value = "(없음)"
+                    printf "  \033[1;37m%-30s\033[0m: \033[1;36m%s\033[0m\n", key, value
+                }
+            ')
+            [ -z "$formatted_content" ] && formatted_content="  (정보 없음)\n"
+        fi
+        OUTPUT="${OUTPUT}${formatted_content}\n"
+    }
+
+    if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
+        ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
+        LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
+        CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | sed 's/ : /:/g')
+        BASIC_CONTENT="$(cat <<EOF
+사용자명: $NAME
+UID: $USER_UID
+GID: $GID
+전체 이름: $INFO
+홈 디렉토리: $HOME
+기본 쉘: $SHELL
+
+--- 계정 상태 ---
+계정 상태: $ACCOUNT_STATUS
+최근 변경일: $LAST_CHANGED_DATE
+
+--- 비밀번호 정책 ---
+$CHAGE_INFO
+EOF
+)"
+        print_section "������ 기본 정보 (Basic)" "$BASIC_CONTENT"
+    fi
+
+    if [ "$SECTION" = "all" ] || [ "$SECTION" = "activity" ]; then
+        WHO_INFO=$(who | grep "$USERNAME" || echo "현재 로그인 정보 없음")
+        LAST_LOG=$(last "$USERNAME" | head -n 5 || echo "로그인 이력 없음")
+        PROCESS_INFO=$(ps -u "$USERNAME" --forest -o pid,tty,stat,time,cmd 2>/dev/null || echo "실행 중인 프로세스 없음")
+        if [ -r /var/log/maillog ]; then
+            MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
+        elif [ -r /var/log/mail.log ]; then
+            MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
+        else
+            MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음 (/var/log/maillog, /var/log/mail.log)"
+        fi
+        [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
+        ACTIVITY_CONTENT="$(cat <<EOF
+--- 현재 로그인 세션 ---
+$WHO_INFO
+
+--- 최근 로그인 로그 (최대 5회) ---
+$LAST_LOG
+
+--- 사용자 프로세스 ---
+$PROCESS_INFO
+
+--- 메일 관련 로그 (최대 5줄, sudo 필요) ---
+$MAIL_LOG
+EOF
+)"
+        print_section "������ 활동 정보 (Activity)" "$ACTIVITY_CONTENT"
+    fi
+
+    if [ "$SECTION" = "all" ] || [ "$SECTION" = "resources" ]; then
+        ID_INFO=$(id "$USERNAME")
+        GROUPS_INFO=$(groups "$USERNAME")
+        HOME_INFO=$(ls -ld "$HOME")
+        HOME_USAGE=$(du -sh "$HOME" 2>/dev/null || echo "홈 디렉토리 사용량 확인 불가 (권한 또는 존재 여부)")
+        SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
+        RESOURCES_CONTENT="$(cat <<EOF
+--- ID 및 그룹 정보 ---
+$ID_INFO
+소속 그룹: $GROUPS_INFO
+
+--- 홈 디렉토리 상태 ---
+$HOME_INFO
+
+--- 홈 디렉토리 사용량 ---
+$HOME_USAGE
+
+--- 비밀번호 정보 (/etc/shadow, sudo 필요) ---
+$SHADOW_INFO
+(형식: username:password_hash:last_change:min_days:max_days:warn_days:inactive_days:expire_date)
+EOF
+)"
+        print_section "������ 권한 및 리소스 (Resources)" "$RESOURCES_CONTENT"
+    fi
+
+    if [ "$SECTION" != "all" ] && ! echo " basic activity resources " | grep -q " $SECTION "; then
+        echo -e "\e[1;31m[!] 잘못된 섹션: '$SECTION'\e[0m"
+        echo "사용 가능한 섹션: all, basic, activity, resources"
+        return 1
+    fi
+
+    if [ -n "$OUTPUT" ]; then
+        echo -e "$OUTPUT" | less -RX
+    else
+        if ! echo " basic activity resources all " | grep -q " $SECTION "; then
+            :
+        else
+            echo -e "\e[1;33m[!] 출력할 내용이 없습니다. 섹션 '$SECTION'을 확인하세요.\e[0m"
+        fi
+    fi
+
+    return 0
+}
+
+
+
+
+
+
+
 
 qssh() {
     # --- 설정 ---
