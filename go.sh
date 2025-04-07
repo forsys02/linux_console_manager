@@ -24,16 +24,15 @@ base="$(dirname "$basefile")"
 gofile="$base/go.sh"
 envorg="$base/go.env"
 
-# envtmp="$base/.go.env"
-# envtmp 파일을 메모리에 상주 cat 부하 감소
+# env="$base/.go.env"
+# env 파일을 메모리에 상주 cat 부하 감소
 shm_env_file="/dev/shm/.go.env"
 fallback_env_file="$base/.go.env"
 if rm -f "$shm_env_file" 2>/dev/null; then
-    envtmp="$shm_env_file"
+    env="$shm_env_file"
 else
-    envtmp="$fallback_env_file"
+    env="$fallback_env_file"
 fi
-env="$envtmp"
 
 # 서버별로 별도의 추가 go.env 가 필요한 경우, 기본 go.env 와 추가로 불러오는 go.my.env
 # 메뉴구성전 cat go.my.env >> go.env 합쳐서 파싱
@@ -170,7 +169,7 @@ process_commands() {
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-        echo "${command%% *}" | grep -qE "cd|rm|mkdir" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && ls -ltr | tail -n5
+        echo "${command%% *}" | grep -qE "cd|rm|mkdir" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
@@ -957,7 +956,7 @@ menufunc() {
 
                                     # 순환하면서 varVAR 변환 11:11 같이 숫자: 이 포함된 경우 sed 에서 발작증상 \1 와 충돌
                                     tmp_token="__REPL_TOKEN__"
-                                    while [[ $cmd =~ (^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$) ]]; do
+                                    while echo "$cmd" | grep -Eq "(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)"; do
                                         cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:")
                                         cmd="${cmd//$tmp_token/$escaped_value}"
                                     done
@@ -1965,7 +1964,7 @@ godiff() {
     fdiff $gofile
     ls -al $gofile $envorg
 }
-goodiff() {
+godifff() {
     fdiff $envorg
     ls -al $gofile $envorg
 }
@@ -6133,10 +6132,10 @@ EOF
         ;;
 
     example.com.conf)
-        cat >"$file_path" <<'EOF'
+        cat >"$file_path" <<EOF
 <VirtualHost *:80>
-    ServerName example.com
-    ServerAlias www.example.com
+    ServerName $yourdomain
+    ServerAlias www.$yourdomain
     DocumentRoot /var/www/html
 
     <Directory /var/www/html>
@@ -6144,8 +6143,8 @@ EOF
         Require all granted
     </Directory>
 
-    ErrorLog ${APACHE_LOG_DIR}/example.com_error.log
-    CustomLog ${APACHE_LOG_DIR}/example.com_access.log combined
+    ErrorLog \${APACHE_LOG_DIR}/${yourdomain}_error.log
+    CustomLog \${APACHE_LOG_DIR}/${yourdomain}_access.log combined
 </VirtualHost>
 EOF
         ;;
@@ -6281,7 +6280,7 @@ EOF
         cat >"$file_path" <<'EOF'
 ;
 ;
-$TTL    604800 ; 기본 TTL (Time To Live) 값 (단위: 초, 예: 1주일)
+$TTL    3600 ; 기본 TTL (Time To Live) 값 (단위: 초, 예: 1시간3600)
 @       IN      SOA     ns1.namedomain.com. admin.namedomain.com. (
                      2023102701      ; Serial (파일 변경 시 반드시 1씩 증가시켜야 함 - YYYYMMDDNN 형식 권장)
                          604800      ; Refresh (Secondary 서버가 Primary 서버 정보 갱신 주기)
