@@ -1,7 +1,7 @@
 #!/bin/bash
 # bash2 하위 호환성 유지 (redhat7/oops1)
 #
-#debug="y"
+#debug=y
 
 echo
 who am i && sleep 0.2
@@ -151,7 +151,9 @@ process_commands() {
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
             (
-                trap 'stty sane' SIGINT
+                echo "ctrl c trap process..."
+                #trap 'stty sane' SIGINT
+                trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
                 # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
@@ -2484,7 +2486,7 @@ initVAR() {
 
 }
 format() {
-    shfmt -i 4 -s -w $gofile
+    shfmt -i 4 -s -w $gofile || ay shfmt && shfmt -i 4 -s -w $gofile
 }
 newtemp() {
     echo "template_edit $1
@@ -3583,78 +3585,54 @@ hash_add() {
 }
 
 hash_remove() {
-    # --- Arguments & Basic Validation ---
     local fpath="$1" search="$2" num_arg="$3"
-    # Default: Uncomment 1 line (the matched one)
     local num_lines=1
-    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff" # Assume cdiff exists
-
-    # Validate number of arguments
+    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff"
     if [ $# -lt 2 ] || [ $# -gt 3 ]; then
-        echo "Usage: hash_remove <filepath> <search> [total_lines]" >&2
-        echo "  - uncomments matched line if it starts with '# ' and contains <search>." >&2
-        echo "  - if total_lines >= 1, attempts to uncomment that many lines total," >&2
-        echo "    starting with the matched one. Only removes leading '# ' if present." >&2
+        echo "Usage: hash_remove <filepath> <search> [total_lines]" 1>&2
         return 1
     fi
-
-    # Validate optional total_lines argument
     if [ $# -eq 3 ]; then
-        # Must be an integer >= 1
         if ! echo "$num_arg" | grep -Eq '^[1-9][0-9]*$'; then
-            echo "Error: total_lines must be an integer >= 1." >&2
+            echo "Error: total_lines must be an integer >= 1." 1>&2
             return 1
         fi
         num_lines="$num_arg"
     fi
-
-    # Validate file exists
     if [ ! -f "$fpath" ]; then
-        echo "Error: File not found: $fpath" >&2
+        echo "Error: File not found: $fpath" 1>&2
         return 1
     fi
-
-    # --- Setup ---
+    if [ ! -w "$fpath" ]; then
+        echo "Error: File not writable: $fpath" 1>&2
+        return 1
+    fi
     ts=$(date +%Y%m%d_%H%M%S)
     bk_suffix="_${ts}.bak"
     bk_fname="${fpath}${bk_suffix}"
-    # Quote search pattern for Perl regex
     quoted_s=$(perl -e 'print quotemeta shift' "$search")
     [ -z "$quoted_s" ] && {
-        echo "Error: Failed to quote search pattern (empty?)." >&2
+        echo "Error: Failed to quote search pattern (empty?)." 1>&2
         return 1
     }
-
-    # --- Perl Script (concise, uses env vars P and N) ---
-    # $c: counter for lines remaining to process *after* the matched line.
-    # $ENV{P}: Quoted search Pattern (expected content *after* '# ').
-    # $ENV{N}: Total number of lines to attempt uncommenting.
-    # On match, set counter c to N-1 (remaining lines).
+    echo "Debug: Searching for pattern: $quoted_s" 1>&2
     perl_p='
-    BEGIN { $c = 0 }
-    # Match lines starting with optional space(s) + "#" (+ optional space), containing search
-    if (m/^\s*#.*?\Q$ENV{P}\E/) {
-         # Remove leading "#" and optional whitespace
-         s/^(\s*)#\s*/$1/;
-         $c = $ENV{N} - 1;
-    } elsif ($c-- > 0) {
-         s/^(\s*)#\s*/$1/ if m/^\s*#\s*/;
-    }
-    print;
-'
-    # One-liner version:
-    # perl_p='BEGIN{$c=0} if(m/^\s*# .*?\Q$ENV{P}\E/){s/^(\s*)# /$1/; $c=$ENV{N}-1} elsif($c-->0){s/^(\s*)# /$1/ if m/^\s*# /} print'
-
-    # --- Execution ---
-    export P="$quoted_s" N="$num_lines" # Pass total lines N
+        BEGIN { $c = 0 }
+        if (m/^\s*#\s*.*?\Q$ENV{P}\E/) {
+             s/^(\s*)#\s*/$1/;
+             $c = $ENV{N} - 1;
+             print STDERR "Debug: Matched and modified: $_";
+        } elsif ($c-- > 0) {
+             s/^(\s*)#\s*/$1/ if m/^\s*#\s*/;
+        }
+        print;
+    '
+    export P="$quoted_s" N="$num_lines"
     perl "-i${bk_suffix}" -n -e "$perl_p" "$fpath"
     ret=$?
-    unset P N # Clean up environment
-
-    # --- Reporting ---
+    unset P N
     if [ $ret -eq 0 ]; then
         echo "Hash Remove potentially done. Backup: $bk_fname"
-        # Check if backup exists and differs before showing diff
         if [ -f "$bk_fname" ]; then
             if ! cmp -s "$bk_fname" "$fpath"; then
                 echo "--- Diff (${DIFF_CMD}) ---"
@@ -3668,7 +3646,7 @@ hash_remove() {
         fi
         return 0
     else
-        echo "Error during Hash Remove (code: $ret). Check backup: $bk_fname" >&2
+        echo "Error during Hash Remove (code: $ret). Check backup: $bk_fname" 1>&2
         return $ret
     fi
 }
