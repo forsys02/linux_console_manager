@@ -164,7 +164,7 @@ process_commands() {
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
-            eval "$command"
+            echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
         lastarg=""
@@ -180,7 +180,7 @@ process_commands() {
         # sleep 1 or [Enter]
         if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then
             nodone=y && sleep 1
-        elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd|pwd|ls'; then
+        elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd|pwd'; then
             bashcomm
         fi
 
@@ -900,7 +900,7 @@ menufunc() {
                                                     masked_dvar_value="${dvar_value}"
                                                 fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name} env Default:$masked_dvar_value] \e[0m:"
+                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[ ${var_name} env Default:$masked_dvar_value ] \e[0m:"
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
@@ -1616,7 +1616,7 @@ cgrep3137() {
     awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;37m"); print $0;}'
 }
 
-cgrepn() {
+__cgrepn() {
     local args=("$@")    # 모든 인자를 배열로 저장
     local search_strs=() # 검색할 문자열 배열
     local num_cols=0     # 기본값을 1로 설정
@@ -1659,6 +1659,45 @@ cgrepn() {
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
+cgrepn() {
+    local args=("$@")
+    local search_strs=()
+    local num_cols=0
+
+    if [ "${#args[@]}" -eq 0 ]; then
+        echo "Usage: cgrepn [search_strings...] [num_cols]"
+        return 1
+    fi
+
+    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
+        num_cols="${args[-1]}"
+        search_strs=("${args[@]:0:${#args[@]}-1}")
+    else
+        search_strs=("${args[@]}")
+    fi
+
+    if [ "${#search_strs[@]}" -eq 0 ]; then
+        echo "Error: No search strings provided."
+        return 1
+    fi
+
+    perl -s -pe '
+        BEGIN {
+            $color_red = "\e[1;31m";
+            $color_reset = "\e[0m";
+            @search_words = split / /, $search_strs;
+            $num = $num_cols;
+            if ($num < 0) { $before = -$num; $after = 0; }
+            elsif ($num > 0) { $before = 0; $after = $num; }
+            else { $before = 0; $after = 0; }
+        }
+        foreach my $search (@search_words) {
+            my $pattern = "(?:\\S+[\\s\\t]*){0,$before}" . quotemeta($search) . "(?:[\\s\\t]*\\S+){0,$after}";
+            s/($pattern)/$color_red$1$color_reset/g;
+        }
+    ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
+}
+
 load() {
     local BOLD=$(tput bold)
     local RED="${BOLD}$(tput setaf 1)"
@@ -1673,14 +1712,16 @@ load() {
     echo -e "==============================================${NC}\n"
 
     local cpu_line
-    cpu_line=$(LC_ALL=en_US.UTF-8 timeout 5 top -bn1 | grep '^%Cpu')
+    cpu_line=$(LC_ALL=en_US.UTF-8 top -bn1 | grep '^%Cpu' | tr -s ' ' | sed 's/[[:space:]]*$//')
 
     if [ -z "$cpu_line" ]; then
         echo "${RED}Error: Failed to retrieve CPU stats or 'top' command failed.${NC}"
         return 1
     fi
 
-    echo "cpu_line: $cpu_line" | cgrepn us sy wa -1
+    #echo "$cpu_line" | od -c
+    echo "$cpu_line" | cgrep us sy wa
+    #echo "cpu_line: $cpu_line" | cgrepn us sy wa -1
     echo
 
     local us=0 sy=0 wa=0
@@ -1920,10 +1961,15 @@ cdiff() {
         old="$f1"
         new="$f2"
     }
-    R='\033[1;31m'
-    Y='\033[1;33m'
-    N='\033[0m'
-    diff -u "$old" "$new" | while IFS= read -r l; do case "$l" in "-"*) printf "${R}${l}${N}\n" ;; "+"*) printf "${Y}${l}${N}\n" ;; *) printf "${l}\n" ;; esac done
+    #    R='\033[1;31m'
+    #    Y='\033[1;33m'
+    #    N='\033[0m'
+    #    diff -u "$old" "$new" | while IFS= read -r l; do case "$l" in "-"*) printf "${R}${l}${N}\n" ;; "+"*) printf "${Y}${l}${N}\n" ;; *) printf "${l}\n" ;; esac done
+    R=$'\033[1;31m'
+    Y=$'\033[1;33m'
+    N=$'\033[0m'
+    diff -u "$old" "$new" | while IFS= read -r l; do case "$l" in "-"*) printf "%s%s%s\n" "$R" "$l" "$N" ;; "+"*) printf "%s%s%s\n" "$Y" "$l" "$N" ;; *) printf "%s\n" "$l" ;; esac done
+
 }
 
 # .vim/backup 의 최신 백업파일과 현재 파일의 차이를 보여줌
