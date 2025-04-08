@@ -171,7 +171,16 @@ process_commands() {
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-        echo "${command%% *}" | grep -qE "cd|rm|mkdir" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
+        # cd 명령이 들어왔을때 현재 위치의 ls
+        echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
+        # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
+        echo "${command%% *}" | grep -qE "rm|mkdir" >/dev/null 2>&1 && (
+            command_args=($command)
+            last_arg="${command_args[@]:$((${#command_args[@]} - 1))}"
+            target_dir=$(dirname "$last_arg")
+            [ ! -d "$target_dir" ] && target_dir="."
+            echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
+        )
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
@@ -2542,6 +2551,7 @@ template_view $1
 }
 # vi2 envorg && restart go.sh
 conf() {
+    saveVAR
     vi2 "$envorg" $scut
     savescut && exec "$gofile" "$scut"
 }
@@ -2550,6 +2560,7 @@ confmy() {
     savescut && exec "$gofile" "$scut"
 }
 conff() {
+    saveVAR
     [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
     savescut && exec "$gofile" "$scut"
 }
@@ -6191,30 +6202,30 @@ EOF
         ;;
 
     php_db_con_test.php)
-        cat >"$file_path" <<'EOF'
+        cat >"$file_path" <<EOF
 <?php
 ini_set('display_errors', 1); // 화면에 오류 표시 켜기
 ini_set('display_startup_errors', 1); // 시작 오류도 표시 켜기
 error_reporting(E_ALL); // 모든 종류의 오류 보고
 
 // --- !!! 중요: 실제 데이터베이스 정보로 변경하세요 !!! ---
-$servername = "localhost";    // 또는 127.0.0.1
-$username = "your_db_user";   // 권한 부여한 데이터베이스 사용자 이름
-$password = "your_db_password"; // 해당 사용자의 비밀번호
-$dbname = "your_db_name";     // 연결할 데이터베이스 이름
+\$servername = "localhost";    // 또는 127.0.0.1
+\$username = "$your_db_user";   // 권한 부여한 데이터베이스 사용자 이름
+\$password = "$your_db_password"; // 해당 사용자의 비밀번호
+\$dbname = "$your_db_name";     // 연결할 데이터베이스 이름
 // ---------------------------------------------------------
 
-$tableName = "php_test_table_" . time(); // 고유한 임시 테이블 이름 생성
+\$tableName = "php_test_table_" . time(); // 고유한 임시 테이블 이름 생성
 
 echo "<h1>PHP-데이터베이스 연동 테스트 (테이블 생성/삭제)</h1>";
 echo "<hr>";
 
 // 1. 데이터베이스 연결 시도
 echo "<h2>1. 데이터베이스 연결 시도</h2>";
-$conn = mysqli_connect($servername, $username, $password, $dbname);
+\$conn = mysqli_connect(\$servername, \$username, \$password, \$dbname);
 
 // 연결 확인
-if (!$conn) {
+if (!\$conn) {
     echo "<p style='color:red;'><strong>데이터베이스 연결 실패:</strong> " . mysqli_connect_error() . "</p>";
     echo "<p>스크립트를 종료합니다.</p>";
     exit; // 연결 실패 시 종료
@@ -6224,56 +6235,56 @@ echo "<hr>";
 
 // 2. 테스트 테이블 생성 시도
 echo "<h2>2. 테스트 테이블 생성 시도</h2>";
-echo "<p>테이블 이름: " . htmlspecialchars($tableName) . "</p>";
+echo "<p>테이블 이름: " . htmlspecialchars(\$tableName) . "</p>";
 
-$sql_create = "CREATE TABLE " . $tableName . " (
+\$sql_create = "CREATE TABLE " . \$tableName . " (
     id INT AUTO_INCREMENT PRIMARY KEY,
     test_message VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )";
 
-if (mysqli_query($conn, $sql_create)) {
-    echo "<p style='color:green;'><strong>테이블 '" . htmlspecialchars($tableName) . "' 생성 성공!</strong></p>";
+if (mysqli_query(\$conn, \$sql_create)) {
+    echo "<p style='color:green;'><strong>테이블 '" . htmlspecialchars(\$tableName) . "' 생성 성공!</strong></p>";
 } else {
-    echo "<p style='color:red;'><strong>테이블 생성 오류:</strong> " . mysqli_error($conn) . "</p>";
+    echo "<p style='color:red;'><strong>테이블 생성 오류:</strong> " . mysqli_error(\$conn) . "</p>";
     echo "<p>스크립트를 종료합니다. (생성 실패 시 삭제 시도 안 함)</p>";
-    mysqli_close($conn); // 연결 닫고 종료
+    mysqli_close(\$conn); // 연결 닫고 종료
     exit;
 }
 echo "<hr>";
 
 // 3. 생성된 테이블 확인 (선택 사항, 하지만 좋은 테스트)
 echo "<h2>3. 생성된 테이블 확인</h2>";
-$sql_check = "SHOW TABLES LIKE '" . $tableName . "'";
-$result_check = mysqli_query($conn, $sql_check);
+\$sql_check = "SHOW TABLES LIKE '" . \$tableName . "'";
+\$result_check = mysqli_query(\$conn, \$sql_check);
 
-if ($result_check && mysqli_num_rows($result_check) > 0) {
-    echo "<p style='color:blue;'>테이블 '" . htmlspecialchars($tableName) . "' 존재 확인됨.</p>";
-    mysqli_free_result($result_check); // 결과 집합 해제
+if (\$result_check && mysqli_num_rows(\$result_check) > 0) {
+    echo "<p style='color:blue;'>테이블 '" . htmlspecialchars(\$tableName) . "' 존재 확인됨.</p>";
+    mysqli_free_result(\$result_check); // 결과 집합 해제
 } else {
     // 생성 직후인데 확인이 안 되면 문제가 있을 수 있음
-    echo "<p style='color:orange;'><strong>경고:</strong> 테이블 '" . htmlspecialchars($tableName) . "' 존재 확인 실패 (또는 결과 없음). 계속 진행합니다.</p>";
-    if (!$result_check) {
-        echo "<p style='color:orange;'>SHOW TABLES 쿼리 오류: " . mysqli_error($conn) . "</p>";
+    echo "<p style='color:orange;'><strong>경고:</strong> 테이블 '" . htmlspecialchars(\$tableName) . "' 존재 확인 실패 (또는 결과 없음). 계속 진행합니다.</p>";
+    if (!\$result_check) {
+        echo "<p style='color:orange;'>SHOW TABLES 쿼리 오류: " . mysqli_error(\$conn) . "</p>";
     }
 }
 echo "<hr>";
 
 // 4. 테스트 테이블 삭제 시도
 echo "<h2>4. 테스트 테이블 삭제 시도</h2>";
-$sql_drop = "DROP TABLE " . $tableName;
+\$sql_drop = "DROP TABLE " . \$tableName;
 
-if (mysqli_query($conn, $sql_drop)) {
-    echo "<p style='color:green;'><strong>테이블 '" . htmlspecialchars($tableName) . "' 삭제 성공!</strong></p>";
+if (mysqli_query(\$conn, \$sql_drop)) {
+    echo "<p style='color:green;'><strong>테이블 '" . htmlspecialchars(\$tableName) . "' 삭제 성공!</strong></p>";
 } else {
-    echo "<p style='color:red;'><strong>테이블 삭제 오류:</strong> " . mysqli_error($conn) . "</p>";
+    echo "<p style='color:red;'><strong>테이블 삭제 오류:</strong> " . mysqli_error(\$conn) . "</p>";
     // 삭제 실패는 심각할 수 있으므로 경고 강조
 }
 echo "<hr>";
 
 // 5. 데이터베이스 연결 닫기
 echo "<h2>5. 데이터베이스 연결 닫기</h2>";
-mysqli_close($conn);
+mysqli_close(\$conn);
 echo "<p>데이터베이스 연결을 닫았습니다.</p>";
 echo "<hr>";
 echo "<p><strong>테스트 완료.</strong></p>";
