@@ -3675,6 +3675,9 @@ hash_remove() {
     fi
 }
 
+hash-add() { hash_add $@; }
+hash-remove() { hash_remove $@; }
+
 eprintf() {
     # 사용자 안내 메시지 (stderr)
     echo "설정 내용을 입력하세요. 입력 완료 후 Ctrl+D를 누르세요:" >&2
