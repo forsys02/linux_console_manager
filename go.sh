@@ -3631,19 +3631,17 @@ hash_remove() {
     # $ENV{N}: Total number of lines to attempt uncommenting.
     # On match, set counter c to N-1 (remaining lines).
     perl_p='
-        BEGIN { $c = 0 }
-        # Check if line starts with optional space(s) + "# " AND contains the pattern P afterwards
-        if (m/^\s*# .*?\Q$ENV{P}\E/) {
-             # Remove the leading "# " prefix (preserving leading whitespace)
-             s/^(\s*)# /$1/;
-             # Set counter for remaining lines to process
-             $c = $ENV{N} - 1;
-        } elsif ($c-- > 0) {
-             # For subsequent lines, remove leading "# " only IF present
-             s/^(\s*)# /$1/ if m/^\s*# /;
-        }
-        print;
-    '
+    BEGIN { $c = 0 }
+    # Match lines starting with optional space(s) + "#" (+ optional space), containing search
+    if (m/^\s*#.*?\Q$ENV{P}\E/) {
+         # Remove leading "#" and optional whitespace
+         s/^(\s*)#\s*/$1/;
+         $c = $ENV{N} - 1;
+    } elsif ($c-- > 0) {
+         s/^(\s*)#\s*/$1/ if m/^\s*#\s*/;
+    }
+    print;
+'
     # One-liner version:
     # perl_p='BEGIN{$c=0} if(m/^\s*# .*?\Q$ENV{P}\E/){s/^(\s*)# /$1/; $c=$ENV{N}-1} elsif($c-->0){s/^(\s*)# /$1/ if m/^\s*# /} print'
 
