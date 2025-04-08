@@ -2468,7 +2468,7 @@ viewVAR() { declare -p | grep "^declare -x var[A-Z]"; }
 saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     chmod 600 ~/.go.private.var
-    awk '!seen[$0]++' ~/.go.private.var >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var
+    cat ~/.go.private.var | lastseen >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var
 }
 loadVAR() {
     [ -f ~/.go.private.var ] && tail -n10 ~/.go.private.var && source ~/.go.private.var
@@ -3754,6 +3754,22 @@ unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
+
+readxy() {
+    while true; do
+        [ "$1" ] && printf "%s " "$1" # 메시지 있으면 줄바꿈 없이 출력
+        read -p "[Enter/y/Y = OK, n = Cancel] " x </dev/tty
+        case "$x" in
+        [yY] | "") return 0 ;; # 진행
+        [nN])
+            echo "Cancelled."
+            return 1
+            ;; # 중단
+        *) echo "Please enter y, n or just Enter." ;;
+        esac
+    done
+}
+
 #readxx() { :; }
 # debug -> readxx
 readxx() { [ -n "$debug" ] && {
