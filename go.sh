@@ -164,17 +164,23 @@ process_commands() {
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
-			echo "$command" | grep -Eq 'Cancel' || eval "$command"
+            echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
         lastarg=""
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-		# cd 명령이 들어왔을때 현재 위치의 ls
+        # cd 명령이 들어왔을때 현재 위치의 ls
         echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
-		# rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
-		echo "${command%% *}" | grep -qE "rm|mkdir" > /dev/null 2>&1 && ( command_args=($command) ; last_arg="${command_args[@]:$((${#command_args[@]} - 1))}" ; target_dir=$(dirname "$last_arg") ; [ ! -d "$target_dir" ] && target_dir="." ; echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo )
+        # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
+        echo "${command%% *}" | grep -qE "rm|mkdir" >/dev/null 2>&1 && (
+            command_args=($command)
+            last_arg="${command_args[@]:$((${#command_args[@]} - 1))}"
+            target_dir=$(dirname "$last_arg")
+            [ ! -d "$target_dir" ] && target_dir="."
+            echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
+        )
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
@@ -1799,7 +1805,7 @@ load() {
 
 # 줄긋기 draw line
 dline() {
-    num_characters="${1:-50}"
+    num_characters="${1:-46}"
     delimiter="${2:-=}"
     printf "%.0s$delimiter" $(seq "$num_characters")
     printf "\n"
@@ -2545,7 +2551,7 @@ template_view $1
 }
 # vi2 envorg && restart go.sh
 conf() {
-	saveVAR
+    saveVAR
     vi2 "$envorg" $scut
     savescut && exec "$gofile" "$scut"
 }
@@ -2554,7 +2560,7 @@ confmy() {
     savescut && exec "$gofile" "$scut"
 }
 conff() {
-	saveVAR
+    saveVAR
     [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
     savescut && exec "$gofile" "$scut"
 }
@@ -3786,9 +3792,10 @@ unsetvar varl
 readx() { read -p "[Enter] " x </dev/tty; }
 
 readxy() {
+    dline
     while true; do
         [ "$1" ] && printf "%s " "$1" # 메시지 있으면 줄바꿈 없이 출력
-        read -p "[Enter/y/Y = OK, n = Cancel] " x </dev/tty
+        read -p "preceed? [Enter/y/Y = OK, n = Cancel] " x </dev/tty
         case "$x" in
         [yY] | "") return 0 ;; # 진행
         [nN])
@@ -6342,7 +6349,7 @@ $TTL    3600 ; 기본 TTL (Time To Live) 값 (단위: 초, 예: 1시간3600)
 ; 자체 네임서버 구축한 도메인에 대해서 A 레코드 설정 주석해제
 ; 위임된 도메인은 주석처리
 ;ns1     IN      A       YOUR_1ST_NAME_SERVER_IP        ; ns1.namedomain.com 의 IP 주소
-;ns2     IN      A       YOUR_2ND_NAME_SERVER_IP        ; na2.namedomain.com 의 IP 주소
+;ns2     IN      A       YOUR_2ND_NAME_SERVER_IP        ; ns2.namedomain.com 의 IP 주소
 
 ; 도메인 자체 및 서브도메인 A 레코드 (웹서버 등)
 @       IN      A       YOUR_SERVER_IP        ; Domain 자체의 IP 주소
@@ -6524,7 +6531,7 @@ EOF
 </head>
 <body>
   <div class="container">
-    <h1>$id 계정이 정상적으로 생성되었습니다 ������</h1>
+    <h1>$id 계정이 정상적으로 생성되었습니다</h1>
 
     <div class="info">
       <p><strong>등록일:</strong> $created_at</p>
@@ -6534,7 +6541,7 @@ EOF
       <p><strong>홈 디렉토리:</strong> $webroot</p>
       <p><strong>MYSQL DB 이름:</strong> $dbid</p>
       <p><strong>MYSQL 사용자:</strong> $dbid</p>
-      <p><strong>MYSQL 호스트:</strong> $hostname</p>
+      <p><strong>MYSQL 호스트:</strong> $dbhostname</p>
     </div>
 
     <div class="links">
@@ -6553,6 +6560,51 @@ EOF
 </body>
 </html>
 
+EOF
+
+        ;;
+
+    fpm_pool.conf)
+        cat >"$file_path" <<EOF
+[$id]
+user = $id
+group = $id
+
+listen = /run/php/php8.3-fpm-${id}.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+pm = ondemand
+pm.max_children = 5
+pm.process_idle_timeout = 10s
+pm.max_requests = 500
+
+chdir = /
+EOF
+
+        ;;
+
+    db.yourdomain.com)
+        cat >"$file_path" <<EOF
+\$TTL    3600
+@   IN  SOA ${name1st}. admin.${yourdomain}. (
+            $(date +%Y%m%d)01 ; Serial
+            3600       ; Refresh
+            1800       ; Retry
+            1209600    ; Expire
+            86400 )
+
+    IN  NS  ${name1st}.
+    IN  NS  ${name2nd}.
+
+@   IN  A     $serverip
+www IN  A     $serverip
+mail IN  A     $serverip
+webmail IN  A     $serverip
+
+@   IN  MX 10 mail
+@   IN  TXT "v=spf1 ip4:$serverip -all"
 EOF
 
         ;;
