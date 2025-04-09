@@ -6548,7 +6548,7 @@ EOF
       <a href="ftp://$server_ip">FTP 접속</a>
       <a href="http://mail.$yourdomain/">Webmail</a>
       <a href="telnet://$server_ip">Telnet 접속</a>
-      <a href="http://$yourdomain/mym/">Web Manager</a>
+      <a href="http://$yourdomain/phpmyadmin/">DB Manager</a>
       <a href="http://$yourdomain/throttle-me">트래픽 확인</a>
     </div>
 
