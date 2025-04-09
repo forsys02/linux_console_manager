@@ -6123,6 +6123,13 @@ EOF
                 SetHandler cband-status
         </Location>
 
+        <Location /cband-status-me>
+                SetHandler cband-status-me
+         </Location>
+         <Location /~*/cband-status-me>
+                SetHandler cband-status-me
+         </Location>
+
         <Location /throttle-me>
                 SetHandler cband-status-me
         </Location>
