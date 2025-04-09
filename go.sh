@@ -164,23 +164,17 @@ process_commands() {
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
-            echo "$command" | grep -Eq 'Cancel' || eval "$command"
+			echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
         lastarg=""
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
-        # cd 명령이 들어왔을때 현재 위치의 ls
+		# cd 명령이 들어왔을때 현재 위치의 ls
         echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
-        # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
-        echo "${command%% *}" | grep -qE "rm|mkdir" >/dev/null 2>&1 && (
-            command_args=($command)
-            last_arg="${command_args[@]:$((${#command_args[@]} - 1))}"
-            target_dir=$(dirname "$last_arg")
-            [ ! -d "$target_dir" ] && target_dir="."
-            echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
-        )
+		# rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
+		echo "${command%% *}" | grep -qE "rm|mkdir" > /dev/null 2>&1 && ( command_args=($command) ; last_arg="${command_args[@]:$((${#command_args[@]} - 1))}" ; target_dir=$(dirname "$last_arg") ; [ ! -d "$target_dir" ] && target_dir="." ; echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo )
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
@@ -2551,7 +2545,7 @@ template_view $1
 }
 # vi2 envorg && restart go.sh
 conf() {
-    saveVAR
+	saveVAR
     vi2 "$envorg" $scut
     savescut && exec "$gofile" "$scut"
 }
@@ -2560,7 +2554,7 @@ confmy() {
     savescut && exec "$gofile" "$scut"
 }
 conff() {
-    saveVAR
+	saveVAR
     [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
     savescut && exec "$gofile" "$scut"
 }
@@ -6188,9 +6182,9 @@ EOF
 <VirtualHost *:80>
     ServerName $yourdomain
     ServerAlias www.$yourdomain
-    DocumentRoot /var/www/html
+    DocumentRoot $webroot
 
-    <Directory /var/www/html>
+    <Directory $webroot>
         AllowOverride All
         Require all granted
     </Directory>
@@ -6450,6 +6444,115 @@ RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+        ;;
+
+    webindex.html)
+        cat >"$file_path" <<EOF
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>$id 계정 정보</title>
+  <style>
+    body {
+      font-family: "Segoe UI", "Pretendard", sans-serif;
+      background: #f9fafb;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 60px auto;
+      background: white;
+      padding: 40px 50px;
+      border-radius: 16px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 1.9em;
+      margin-bottom: 1em;
+      color: #2c3e50;
+    }
+
+    .info {
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .info p {
+      margin: 0.5em 0;
+    }
+
+    .info strong {
+      color: #34495e;
+    }
+
+    .links {
+      margin-top: 2em;
+      font-size: 0.95rem;
+    }
+
+    .links a {
+      display: inline-block;
+      margin: 6px 10px 6px 0;
+      padding: 8px 14px;
+      background: #3498db;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      transition: background 0.3s;
+    }
+
+    .links a:hover {
+      background: #2980b9;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #777;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>$id 계정이 정상적으로 생성되었습니다 ������</h1>
+
+    <div class="info">
+      <p><strong>등록일:</strong> $created_at</p>
+      <p><strong>도메인:</strong> $yourdomain</p>
+      <p><strong>서버 IP:</strong> $server_ip</p>
+      <p><strong>계정 ID:</strong> $id</p>
+      <p><strong>홈 디렉토리:</strong> $webroot</p>
+      <p><strong>MYSQL DB 이름:</strong> $dbid</p>
+      <p><strong>MYSQL 사용자:</strong> $dbid</p>
+      <p><strong>MYSQL 호스트:</strong> $hostname</p>
+    </div>
+
+    <div class="links">
+      <a href="ftp://$server_ip">FTP 접속</a>
+      <a href="http://mail.$yourdomain/">Webmail</a>
+      <a href="telnet://$server_ip">Telnet 접속</a>
+      <a href="http://$yourdomain/mym/">Web Manager</a>
+      <a href="http://$yourdomain/throttle-me">트래픽 확인</a>
+    </div>
+
+    <footer>
+      PHP 기본 설정: <code>register_globals = On</code><br>
+      <small>.htaccess 에 의해 적용됨. 보안이 필요하면 public_html 내에서 제거하세요.</small>
+    </footer>
+  </div>
+</body>
+</html>
+
 EOF
 
         ;;
