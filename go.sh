@@ -161,6 +161,11 @@ process_commands() {
                 eval "$command"
             )
             trap - SIGINT
+        # flow 메뉴 구성을 위한 분기
+        elif [ -n "$command" ] && [ "$command" = "${command%% *}" ] && echo "$shortcutstr" | grep -q "@@@$command|"; then
+            echo "→ 내부 메뉴 [$command] 로 점프"
+            menufunc "$(scutsub "$command")" "$(scuttitle "$command")" "$(notscutrelay "$command")"
+            continue
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
@@ -645,6 +650,7 @@ menufunc() {
                             old_cmd_choice="$cmd_choice"
                             cmd_choice=""
                             # readcmd_choice
+
                             if [ -z "$pre_commands" ]; then
                                 while :; do
                                     trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
@@ -652,6 +658,8 @@ menufunc() {
                                     IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                     #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                    # flow 메뉴 하부 메뉴 종료
+                                    [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to the flow menu.. [$ooldscut]"
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
@@ -661,6 +669,8 @@ menufunc() {
                                 IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                # flow 메뉴 하부 메뉴 종료
+                                [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "back to the flow menu.."
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -1233,6 +1243,7 @@ menufunc() {
                             fi
                             ;;
                         esac
+
                     echo "no hook cmd_choice: $cmd_choice --- pre_commands refresh loop"
                     #unset cmd_choice cmd_choice1
                     cmd_choice=""
@@ -4416,6 +4427,94 @@ EOF
     done
 
     [ "$INTERFACES" ] && echo "Files created successfully." || echo "INTERFACES not found"
+}
+
+domchg() {
+    local id="$1" olddomain="$2" newdomain="$3"
+    local homedir oldconf newconf userinfo tmp
+
+    # 인수 확인
+    if [ -z "$id" ] || [ -z "$olddomain" ] || [ -z "$newdomain" ]; then
+        echo "❌ 사용법: domchg <id> <old-domain> <new-domain>"
+        echo "예시: domchg myuser oldsite.com newsite.com"
+        return 1
+    fi
+
+    # 기본 경로 설정
+    homedir="$(getent passwd "$id" | cut -d: -f6)"
+    [ -z "$homedir" ] && echo "❌ 사용자 $id의 홈디렉토리를 찾을 수 없습니다." && return 1
+
+    oldconf="/etc/httpd/conf.d/$olddomain.conf"
+    newconf="/etc/httpd/conf.d/$newdomain.conf"
+    userinfo="$homedir/.userinfo"
+
+    ### 1. Apache conf 변경
+    if [ -f "$oldconf" ]; then
+        tmp="$(mktemp)"
+        sed "s/$olddomain/$newdomain/g" "$oldconf" >"$tmp"
+
+        echo "--- Apache conf 변경 전후 diff ($oldconf → $newconf) ---"
+        cdiff "$oldconf" "$tmp"
+        readxy "[Apache conf 변경을 적용할까요?]" && {
+            mv "$tmp" "$newconf"
+            rm -f "$oldconf"
+            echo "✓ 변경 완료: $newconf"
+        } || rm -f "$tmp"
+    fi
+
+    ### 2. .userinfo 업데이트
+    if [ -f "$userinfo" ]; then
+        echo "--- .userinfo 도메인 기록 ---"
+        echo "[마지막 도메인] $(grep DOMAIN= "$userinfo" | tail -n1)"
+        echo "[추가 예정] DOMAIN=$newdomain"
+        readxy "[.userinfo에 이 도메인 정보를 추가할까요?]" && {
+            echo "DOMAIN=$newdomain" >>"$userinfo"
+            echo "✓ .userinfo 업데이트 완료"
+        }
+    fi
+
+    ### 3. certbot 재발급 명령 미리보기
+    echo "--- Certbot SSL 재발급 명령 미리보기 ---"
+    echo "certbot --apache -d $newdomain -d www.$newdomain"
+    readxy "[Certbot을 실행할까요?]" && {
+        certbot --apache -d "$newdomain" -d "www.$newdomain"
+    }
+
+    ### 4. wp-config.php 내 URL 변경
+    local wpconfig="$homedir/public_html/wp-config.php"
+    if [ -f "$wpconfig" ]; then
+        tmp="$(mktemp)"
+        sed "s|http://$olddomain|http://$newdomain|g" "$wpconfig" >"$tmp"
+        echo "--- wp-config.php 변경 전후 diff ---"
+        cdiff "$wpconfig" "$tmp"
+        readxy "[wp-config.php를 업데이트할까요?]" && {
+            mv "$tmp" "$wpconfig"
+            echo "✓ wp-config.php 변경 완료"
+        } || rm -f "$tmp"
+    fi
+
+    ### 5. 리디렉션 conf (선택 사항)
+    local redirconf="/etc/httpd/conf.d/${olddomain}_redirect.conf"
+    if [ -f "$redirconf" ]; then
+        echo "--- 리디렉션 conf 존재: $redirconf ---"
+        readxy "[기존 리디렉션 conf를 $newdomain용으로 복사할까요?]" && {
+            cp "$redirconf" "/etc/httpd/conf.d/${newdomain}_redirect.conf"
+            sed -i "s/$olddomain/$newdomain/g" "/etc/httpd/conf.d/${newdomain}_redirect.conf"
+            echo "✓ 리디렉션 conf 복사 완료"
+        }
+    fi
+
+    ### 6. 기타 도메인명 기반 파일/디렉토리 (옵션)
+    local basedir
+    for basedir in "$homedir/public_html/$olddomain" "$homedir/public_html/${olddomain}_logs"; do
+        if [ -e "$basedir" ]; then
+            newpath="${basedir/$olddomain/$newdomain}"
+            echo "--- 디렉토리 이름 변경: $basedir → $newpath ---"
+            readxy "[이 디렉토리를 변경할까요?]" && mv "$basedir" "$newpath"
+        fi
+    done
+
+    echo "--- 완료: '$olddomain' → '$newdomain' 에 대한 모든 변경이 처리되었습니다 ---"
 }
 
 ##############################################################################################################
