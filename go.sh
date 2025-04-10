@@ -150,7 +150,7 @@ process_commands() {
         #echo && echo "=============================================="
         echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
-        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs'; then
+        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
             (
                 echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
@@ -262,13 +262,18 @@ menufunc() {
     while true; do # choice loop
         oldchoice="$choice"
         choice=""
+        unset -v skipmain
         #[[ -n "$cmd_choice" && -z "$choice" ]] && choice="$cmd_choice" || choice=""
         cmd_choice=""
 
         if [ "$initvar" ]; then
+            # readxy "initvar ok"
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
             choice="$initvar" && initvar=""
+            # relay 메뉴가 아니면 main page skip
             [ -z "$title_of_menu_sub" ] && { skipmain="y" && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
+            [ -n "$(notscutrelay "$choice")" ] && skipmain="y" #&& readxy skipmain2
+            #[ -z "$title_of_menu_sub" ] && { skipmain="y" && readxy skipmain && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
             #[ -z "$title_of_menu_sub" ] && skipmain="y" || unset -v skipmain # && readxy "only initvar enter"
         fi
 
@@ -305,6 +310,29 @@ menufunc() {
             # i@@@%%% 시스템 초기설정과 기타 [i] -----> i@@@%%% 시스템 초기설정과 기타 [i]@@@{submenu_sys}
             # shortcut 있는 항목만 배열화
             IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+
+            scut_dups=$(echo "$allof_shortcut_item" | grep -o '\[[^]]\+\]' | sort | uniq -d | sed 's/^\[//;s/\]$//')
+
+            for scut in $scut_dups; do
+                echo -e "\n\033[1;31m⚠️ 중복된 scut 감지: [$scut]\033[0m"
+
+                grep -n "\[$scut\]" "$env" | awk 'NR==1 { print "\033[1;32m✅ 첫 번째 항목 (유지):\033[0m\n  ▶ " $0; next } { print "\033[1;33m⚠️ 중복 항목:\033[0m\n  ✂  " $0 }'
+
+                grep -n "\[$scut\]" "$env" | tail -n +2 | while IFS=":" read lineno line; do
+                    echo
+
+                    if readxy "라인 $lineno: 이 항목을 수정할래?"; then
+                        read -p "새로운 scut 입력 (예: ssl_alt): " newscut </dev/tty
+                        if [ -n "$newscut" ]; then
+                            sed -i "${lineno}s/\[$scut\]/\[$newscut\]/" "$env"
+                            echo -e "\033[1;32m✅ [$newscut] 으로 변경 완료 (라인 $lineno)\033[0m"
+                        fi
+                    else
+                        echo "⏩ 이 항목은 건너뜁니다."
+                    fi
+
+                done
+            done
 
             #echo "$allof_shortcut_item"
 
@@ -418,9 +446,8 @@ menufunc() {
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
             [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
-        else
-            unset -v skipmain
         fi
+        unset -v skipmain
 
         #shortcut 이 중복되더라도 첫번째 키만 가져옴
         key_idx=$(echo "${keysarr[*]}" | tr ' ' '\n' | awk -v target="$choice" '$0 == target {print(NR-1); exit}')
@@ -1059,7 +1086,13 @@ menufunc() {
                         done
 
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
-                        [ $num_commands -eq 1 ] && break
+                        #[ $num_commands -eq 1 ] && break
+                        if [ "$num_commands" -eq 1 ]; then
+                            if echo "$ooldscut" | grep -q '^flow_'; then
+                                menufunc "$ooldscut"
+                            fi
+                            break
+                        fi
 
                         # 아래 구문 skip
                         continue
@@ -2079,8 +2112,65 @@ godifff() {
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
 # cpipe -> courl && cip24 && cdir
-cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' 2>/dev/null ||
+old_cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' 2>/dev/null ||
     awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
+
+cpipe() {
+    awk -W interactive '
+BEGIN {
+    clr_rst = "\033[0m"
+    clr_red = "\033[1;31m"
+    clr_yel = "\033[1;33m"
+    clr_grn = "\033[1;32m"
+    clr_blu = "\033[1;36m"
+    clr_mag = "\033[1;35m"
+}
+{
+    line = $0
+
+    # --- 기본 강조 ---
+    gsub(/https?:\/\/[^ ]+/, clr_blu "&" clr_rst, line)
+    gsub(/ \/[^ )|]+/, clr_blu "&" clr_rst, line)
+
+    # --- IP 주소 강조 ---
+    while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+        IP = substr(line, RSTART, RLENGTH)
+        line = substr(line, RSTART+RLENGTH)
+        Prefix = IP; sub(/\.[0-9]+$/, "", Prefix)
+        if (!(Prefix in FC)) {
+            BN[Prefix] = 1
+            if (TC < 6) {
+                FC[Prefix] = 36 - TC
+            } else {
+                do {
+                    FC[Prefix] = 30 + (TC - 6) % 8
+                    BC[Prefix] = (40 + (TC - 6)) % 48
+                    TC++
+                } while (FC[Prefix] == BC[Prefix] - 10)
+                if (FC[Prefix] == 37) FC[Prefix]--
+            }
+            TC++
+        }
+        if (BC[Prefix] > 0)
+            CP = sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP)
+        else
+            CP = sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP)
+        gsub(IP, CP, $0)
+    }
+
+    # --- journalctl 특화 강조 ---
+    gsub(/\[  OK  \]/, clr_grn "[  OK  ]" clr_rst)
+    gsub(/\[FAILED\]/, clr_red "[FAILED]" clr_rst)
+    gsub(/\[WARN\]/, clr_yel "[WARN]" clr_rst)
+    gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst)
+
+    gsub(/denied|authentication failure|timed out|unreachable/, clr_red "&" clr_rst)
+    gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst)
+    gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst)
+
+    print $0
+}'
+}
 
 # cpipef() { sed -E "s/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;33m&\x1B[0m/g;  s/(https?:\/\/[^ ]+)/\x1B[1;36;04m&\x1B[0m/g" ; }
 cpipef() { sed "s/\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}/\x1B[1;33m&\x1B[0m/g;  s/\(https\?\:\/\/[^ ]\+\)/\x1B[1;36;04m&\x1B[0m/g"; }
@@ -4123,6 +4213,10 @@ hostinfo() {
 
 # ipban & ipallow
 ipcheck() { echo "$1" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
+ipbanlog() {
+    echo -e "\033[1;36m 최근 차단된 IP 관련 로그 (Fail2ban + iptables)\033[0m"
+    journalctl -u fail2ban -n 100 --no-pager | grep -iE 'ban|drop|fail|denied' | cpipe | less -RX
+}
 ipban() {
     valid_ips=true
     for ip in "$@"; do ipcheck ${ip%/*} && iptables -A INPUT -s ${ip%/*} -j DROP || {
@@ -4133,26 +4227,57 @@ ipban() {
 }
 ipban24() {
     valid_ips=true
-    for ip in "$@"; do ipcheck ${ip%/*} && iptables -A INPUT -s ${ip%/*}/24 -j DROP || {
-        valid_ips=false
-        break
-    }; done
+    for ip in "$@"; do
+        base=${ip%/*}
+        if ipcheck "$base"; then
+            net="${base%.*}.0/24"
+            iptables -A INPUT -s "$net" -j DROP
+        else
+            valid_ips=false
+            break
+        fi
+    done
     $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
 }
 ipban16() {
     valid_ips=true
-    for ip in "$@"; do ipcheck ${ip%/*} && iptables -A INPUT -s ${ip%/*}/16 -j DROP || {
-        valid_ips=false
-        break
-    }; done
+    for ip in "$@"; do
+        base=${ip%/*}
+        if ipcheck "$base"; then
+            net="$(echo "$base" | cut -d. -f1,2).0.0/16"
+            iptables -A INPUT -s "$net" -j DROP
+        else
+            valid_ips=false
+            break
+        fi
+    done
     $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
 }
-ipallow() {
+old_ipallow() {
     valid_ips=true
     for ip in "$@"; do ipcheck ${ip%/*} && iptables -D INPUT -s ${ip%/*} -j DROP || {
         valid_ips=false
         break
     }; done
+    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+}
+ipbanlist() {
+    echo -e "\033[1;36m현재 iptables DROP 룰 최근 목록 (마지막 50줄)\033[0m"
+    iptables -L INPUT -v -n | grep DROP | tail -n 50 | gip | cip
+}
+ipallow() {
+    valid_ips=true
+    for ip in "$@"; do
+        baseip=${ip%/*}
+        if ipcheck "$baseip"; then
+            iptables -D INPUT -s "$baseip" -j DROP 2>/dev/null
+            iptables -D INPUT -s "${baseip%.*}.0/24" -j DROP 2>/dev/null
+            iptables -D INPUT -s "${baseip%.*.*}.0.0/16" -j DROP 2>/dev/null
+        else
+            valid_ips=false
+            break
+        fi
+    done
     $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
 }
 ipallow24() {
