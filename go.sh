@@ -146,6 +146,7 @@ process_commands() {
     [[ ${command:0:1} == "#" ]] && return # 주석선택시 취소
 
     if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then # !!! check
+
         #echo && echo "=============================================="
         echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
@@ -161,11 +162,12 @@ process_commands() {
                 eval "$command"
             )
             trap - SIGINT
-        # flow 메뉴 구성을 위한 분기
-        elif [ -n "$command" ] && [ "$command" = "${command%% *}" ] && echo "$shortcutstr" | grep -q "@@@$command|"; then
-            echo "→ 내부 메뉴 [$command] 로 점프"
-            menufunc "$(scutsub "$command")" "$(scuttitle "$command")" "$(notscutrelay "$command")"
-            continue
+            # flow 메뉴 구성을 위한 분기
+            # elif [ "$command" = "${command%% *}" ] && st "$command" > /dev/null; then
+        elif partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
+            echo "→ 내부 메뉴 [$partcom] 로 점프"
+            menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
+            return 0
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
