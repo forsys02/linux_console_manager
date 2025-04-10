@@ -577,6 +577,7 @@ menufunc() {
                     # 명령줄이 1줄이면 바로 실행 1줄 이상이면 리스트 출력
                     # 1줄은 분기메뉴일때 relay 시켜 또다른 메뉴를 불러오는 효과 %%% %% 를 뺀 나머지가 {...} 한줄만 남을때
                     # readxx $LINENO chosen_command_sub $chosen_command_sub
+                    # 한줄짜리
                     if [ $num_commands -eq 1 ]; then
                         # relay
                         chosen_command=${chosen_commands[0]}
@@ -1085,10 +1086,12 @@ menufunc() {
                             unset ${flag}
                         done
 
+                        # 한줄짜리
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                         #[ $num_commands -eq 1 ] && break
                         if [ "$num_commands" -eq 1 ]; then
                             if echo "$ooldscut" | grep -q '^flow_'; then
+                                echo "go to $ooldscut"
                                 menufunc "$ooldscut"
                             fi
                             break
