@@ -2,9 +2,9 @@
 # bash2 하위 호환성 유지 (redhat7/oops1)
 #
 #debug=y
-
+#set -x
 echo
-who am i && sleep 0.2
+[ -z "$1" ] && who am i && sleep 0.2
 #[ -t 0 ] && stty sane && stty erase ^?
 
 # 존재 하는 파일의 절대경로 출력 readlink -f
@@ -230,15 +230,25 @@ declare -a shortcutarr shortcutstr
 # exec go.sh shortcut // or menufunc {submenu_sys} 제목 or menufunc {} 제목 choice
 
 menufunc() {
+    #set -x
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
     # $1 $2 $3 가 들어오면 $3(명령줄) 종속 메뉴로 바로 이동
-    readxx $LINENO menufunc input_value_input1:"$1" input2:"$2"
-    local chosen_command_sub="$1"     # ex) {submenu_lamp} or {}
-    local title_of_menu_sub="$2"      # ex) debian lamp set flow
+    readxx "$LINENO menufunc start input_value_input1:/$1/ input2:/$2/ input3:/$3/"
+    #readxy "$LINENO menufunc start input_value_input1:/$1/ input2:/$2/ input3:/$3/"
+    #readxy "$newscut"
+    local chosen_command_sub="$1" # ex) {submenu_lamp} or {}
+    local title_of_menu_sub="$2"  # ex) debian lamp set flow
+    local title_of_menu="$2"      # ex) debian lamp set flow
+    local title="$2"              # ex) debian lamp set flow
+    readxx "$LINENO // choice:$choice // title_of_menu:$title_of_menu // chosen_command_sub:$chosen_command_sub // title:$title"
+    #readxy "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+
     [ -n "$3" ] && local initvar="$3" # ex) 2 or scut
+    [ -z "$2" ] && [ -n "$1" ] && local initvar="$1"
     #[ "$1" == "{}" ] && local initvar="" # choice 가 불필요한경우 relaymenu mainmenu
     local choiceloop=0
+    #pre_commands=()
     # 히스토리 파일 정의하고 불러옴
     HISTFILE="$gotmp/go_history.txt"
     #history -r "$HISTFILE"
@@ -250,11 +260,14 @@ menufunc() {
     while true; do # choice loop
         oldchoice="$choice"
         choice=""
+        #[[ -n "$cmd_choice" && -z "$choice" ]] && choice="$cmd_choice" || choice=""
         cmd_choice=""
 
         if [ "$initvar" ]; then
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
             choice="$initvar" && initvar=""
+            [ -z "$title_of_menu_sub" ] && { skipmain="y" && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
+            #[ -z "$title_of_menu_sub" ] && skipmain="y" || unset -v skipmain # && readxy "only initvar enter"
         fi
 
         choiceloop=$((choiceloop + 1))
@@ -280,6 +293,7 @@ menufunc() {
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         # 쇼트컷 배열생성
+        readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
         if [ ${#shortcutarr[@]} -eq 0 ]; then
 
             readxx $LINENO shortcutarr.count.0: "${#shortcutarr[@]} 값없음체크"
@@ -315,79 +329,83 @@ menufunc() {
             clear || reset
             unset noclear
         }
-        echo
-        echo -n "=============================================="
-        echo -n " :$choiceloop"
-        echo ""
-        echo -e "* $title $flow"
-        echo "=============================================="
-        if [ ! "$title_of_menu_sub" ]; then
-            echo -ne "$([ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null | sort -u) - $(
-                WHT1
-                hostname
-                RST
-            )"
-            # offline print
-            if [ "$offline" == "offline" ]; then
-                echo -ne "==="
-                RED1
-                echo -ne " offline "
-                RST
-                echo "=================================="
-            else
-                echo "=============================================="
-            fi
-        else
-
-            # %% cmds -> pre_commands 검출및 실행 (submenu 일때만)
-            # listof_comm_submain
-            # pre excute
-            for items in "${pre_commands[@]}"; do
-                eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
-            done > >(
-                output=$(cat)
-                [ -n "$output" ] && { [ "$(echo "$output" | grep -E '0m')" ] && {
-                    echo "$output"
-                    echo "=============================================="
-                } || {
-                    CYN
-                    echo "$output"
+        if [ -z "$skipmain" ]; then
+            echo
+            echo -n "=============================================="
+            echo -n " :$choiceloop"
+            echo ""
+            echo -e "* $title $flow"
+            echo "=============================================="
+            if [ ! "$title_of_menu_sub" ]; then
+                echo -ne "$([ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null | sort -u) - $(
+                    WHT1
+                    hostname
                     RST
+                )"
+                # offline print
+                if [ "$offline" == "offline" ]; then
+                    echo -ne "==="
+                    RED1
+                    echo -ne " offline "
+                    RST
+                    echo "=================================="
+                else
                     echo "=============================================="
-                }; }
-            )
+                fi
+            else
+
+                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만)
+                # listof_comm_submain
+                # pre excute
+                for items in "${pre_commands[@]}"; do
+                    readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+                    eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
+                done > >(
+                    output=$(cat)
+                    [ -n "$output" ] && { [ "$(echo "$output" | grep -E '0m')" ] && {
+                        echo "$output"
+                        echo "=============================================="
+                    } || {
+                        CYN
+                        echo "$output"
+                        RST
+                        echo "=============================================="
+                    }; }
+                )
+            fi
+
+            local items
+            menu_idx=0
+            shortcut_idx=0
+            declare -a keysarr
+            declare -a idx_mapping
+
+            readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+            # 메인 or 서브 메뉴 리스트 구성 loop
+            while read line; do
+                #set +x
+                menu_idx=$((menu_idx + 1))
+                items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //')
+
+                # shortcut array keysarr make
+                # 노출된 메뉴 shortcut 생성 -> 번호와 연결
+                key=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
+                [ "$key" ] && {
+                    keysarr[$shortcut_idx]="$key"
+                    idx_mapping[$shortcut_idx]=$menu_idx
+                    ((shortcut_idx++))
+                }
+                # debug printarr keysarr
+
+                # titleansi
+                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
+
+                printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
+            done < <(print_menulist) # %%% 모음 가져와서 파싱
+
+            echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
+            echo "=============================================="
         fi
-
-        local items
-        menu_idx=0
-        shortcut_idx=0
-        declare -a keysarr
-        declare -a idx_mapping
-
-        # 메인 or 서브 메뉴 리스트 구성 loop
-        while read line; do
-            menu_idx=$((menu_idx + 1))
-            items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //')
-
-            # shortcut array keysarr make
-            # 노출된 메뉴 shortcut 생성 -> 번호와 연결
-            key=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
-            [ "$key" ] && {
-                keysarr[$shortcut_idx]="$key"
-                idx_mapping[$shortcut_idx]=$menu_idx
-                ((shortcut_idx++))
-            }
-            # debug printarr keysarr
-
-            # titleansi
-            items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
-
-            printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
-        done < <(print_menulist) # %%% 모음 가져와서 파싱
-
-        echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
-        echo "=============================================="
-
         ############## 메뉴 출력 끝 ###############
         [[ $chosen_command_sub == "{}" ]] && [[ "$cmd_choice_scut" ]] && choice="$cmd_choice_scut" && cmd_choice_scut=""
         #readxx $LINENO read "choice menu pre_choice:" $choice
@@ -398,6 +416,8 @@ menufunc() {
             IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
             [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
+        else
+            unset -v skipmain
         fi
 
         #shortcut 이 중복되더라도 첫번째 키만 가져옴
@@ -416,6 +436,7 @@ menufunc() {
         # 경유메뉴에서 호출시 작동오류 check
         #readxx $LINENO you choice? $choice
         # if [ "$choice" ] && (( ! $choice > 0 )) 2>/dev/null; then choice 에 영어가 들어오면 참인데 오작동 가끔발생
+        # readxy "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
         if [ "$choice" ] && { ! echo "$choice" | grep -Eq '^[1-9][0-9]*$' || echo "$choice" | grep -Eq '^[a-zA-Z]+$'; }; then
             #readxx $LINENO you choice? yes $choice
             # subshortcut 을 참조하여 title_of_menu 설정
@@ -423,6 +444,8 @@ menufunc() {
             for item in "${shortcutarr[@]}"; do
                 # echo $item
                 if [ "$choice" == "${item%%@@@*}" ]; then
+                    #newscut=$choice
+
                     # 형태 -> v@@@%%% proxmox / kvm / minecraft [v]@@@{submenu_virt}
                     itema2=$(echo "$item" | awk -F'@@@' '{print $2}')
                     readxx $LINENO itema2: "$itema2"
@@ -502,9 +525,11 @@ menufunc() {
                 readxx $LINENO "lisof_comm func in - IFS check title_of_menu: $title_of_menu sub_menu: $sub_menu {chosen_command_sub}:${chosen_command_sub-} chosen_command_relay_sub:$chosen_command_relay_sub"
                 # %%% 부터 빈줄까지 변수에
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
+                #unset IFS ; dline ; echo "$allof_chosen_commands" ; dline
                 # 제목배고 선명령 빼고 순서 명령문들 배열
                 IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
                 # 선명령 모듬 배열
+                # pre_commands=()
                 IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
             }
             listof_comm
@@ -716,6 +741,7 @@ menufunc() {
                     if [ "$(echo "$chosen_command" | grep "submenu_")" ]; then
 
                         readxx $LINENO relayrelay cmd_choice: $cmd_choice chosen_command $chosen_command
+                        #execute_relay_pre_commands "$title_of_menu" "$chosen_command_sub"
                         menufunc "$chosen_command" "${title_of_menu}"
 
                     ################ 실졍 명령줄이 넘어온경우
@@ -1181,8 +1207,18 @@ menufunc() {
                             if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
                                 readxx $LINENO cmd_choice:"$cmd_choice" shortcut_moving
                                 cmd_choice_scut=$cmd_choice
+
+                                #newscut=$cmd_choice
                                 #savescut && exec "$gofile" "$cmd_choice" # exec terminates
-                                menufunc "$(scutsub "$cmd_choice")" "$(scuttitle "$cmd_choice")" "$(notscutrelay "$cmd_choice")"
+                                #reaadxy $LINENO
+                                # readxy "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+                                if [ -n "$(notscutrelay "$cmd_choice")" ]; then
+                                    menufunc "$(scutsub "$cmd_choice")" "$(scuttitle "$cmd_choice")" "$(notscutrelay "$cmd_choice")"
+                                else
+                                    # relay 메뉴에서 pre_commands 가 이전 메뉴것을 가져오는 것을 방지
+                                    savescut && exec "$gofile" "$cmd_choice"
+                                    #menufunc "$cmd_choice"
+                                fi
 
                             # Check 2: Alarm? (Numeric, starts with 0, not just "0")
                             elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" ]]; then
@@ -2268,6 +2304,51 @@ scutrelay() {
     echo "$item" | awk '{if (match($0, /\{[^}]+\}$/)) print substr($0, RSTART, RLENGTH)}'
 }
 
+# 함수 이름: sub_to_scut
+# 기능: 주어진 submenu 태그에 해당하는 단축키(scut)를 찾아 반환합니다.
+# 인자: $1 - 찾고자 하는 submenu 태그 (예: {submenu_sys})
+# 반환: 찾은 단축키 문자열 (못 찾으면 빈 문자열)
+sub_to_scut() {
+    local target_sub="$1"
+    local item shortcut relay_tag menu_tag
+
+    # 인자 유효성 검사 (선택적)
+    if [[ -z $target_sub ]] || [[ $target_sub != "{"*"}" ]]; then
+        # echo "Error: Invalid submenu tag format: $target_sub" >&2
+        return 1 # 오류 또는 빈 값 반환 결정
+    fi
+
+    # shortcutarr 배열 순회
+    for item in "${shortcutarr[@]}"; do
+        # 형식: scut@@@%%% [{menu_tag}]title [scut]@@@{relay_tag}
+        # 또는: scut@@@%%% {menu_tag}title [scut]
+
+        shortcut="${item%%@@@*}" # 단축키 추출
+
+        # 릴레이 태그 추출 (@@@가 2개 있는 경우)
+        if [[ $item == *"@@@"* ]]; then
+            relay_tag=$(echo "$item" | awk -F'@@@' '{print $NF}') # 마지막 필드가 릴레이 태그
+            # 릴레이 태그가 목표 태그와 일치하는지 확인
+            if [[ $relay_tag == "$target_sub" ]]; then
+                echo "$shortcut"
+                return 0 # 찾았으므로 성공 종료
+            fi
+        fi
+
+        # 메뉴 태그 추출 (%%% 다음에 오는 {...})
+        menu_tag=$(echo "$item" | awk -F'%%% ' '{print $2}' | awk -F'}' '{print $1 "}"}' | grep '{submenu_')
+        # 메뉴 태그가 목표 태그와 일치하는지 확인
+        if [[ $menu_tag == "$target_sub" ]]; then
+            echo "$shortcut"
+            return 0 # 찾았으므로 성공 종료
+        fi
+    done
+
+    # 못 찾은 경우
+    # echo "Error: Shortcut for submenu tag '$target_sub' not found." >&2
+    return 1 # 실패 또는 빈 값 반환
+}
+
 # blkid -> fstab ex) blkid2fstab /dev/sdd1 /tmp
 blkid2fstab() {
     d=${2/\/\///}
@@ -2463,8 +2544,97 @@ rollback() {
     savescut && exec "$gofile" $scut
 }
 
-# shortcut view n> b<
 st() {
+    # 1. 인수가 없을 때 (`st`): 전체 문자열 출력 (기존과 동일)
+    if [ $# -eq 0 ]; then
+        if [ -z "$shortcutstr" ]; then
+            echo "오류: shortcutstr 변수가 정의되지 않았습니다." 1>&2
+            return 1
+        fi
+        echo "$shortcutstr"
+        return 0
+    fi
+
+    local shortcut="$1"
+
+    # 2. 인수가 하나일 때 (`st <shortcut>`): shortcut 존재 여부 확인 후 출력
+    if [ $# -eq 1 ]; then
+        if [ -z "$shortcutstr" ]; then
+            echo "오류: shortcutstr 변수가 정의되지 않았습니다." 1>&2
+            return 1
+        fi
+        # awk를 사용하여 shortcut이 첫 번째 필드로 존재하는지 확인
+        local found_shortcut=$(echo "$shortcutstr" | awk -v needle="$shortcut" -v RS='@@@' -F'|' '
+            # 문자열이 RS로 시작할 경우 첫 번째 빈 레코드 건너뛰기
+            NR <= 1 && $0 == "" { next }
+            # 첫 번째 필드가 주어진 shortcut(needle)과 일치하는지 확인
+            $1 == needle {
+                print needle  # 찾았으면 입력된 shortcut(needle) 자체를 출력
+                exit # 찾았으면 즉시 awk 종료
+            }
+        ') # awk의 출력을 변수에 저장
+
+        # awk가 무언가를 출력했는지 확인 (즉, shortcut을 찾았는지 확인)
+        if [ -n "$found_shortcut" ]; then
+            echo "$found_shortcut" # 찾은 shortcut 출력
+            return 0               # 성공 종료
+        else
+            # 찾지 못했으면 아무것도 출력하지 않고 실패(1) 반환 (선택 사항)
+            # 또는 성공(0)으로 간주하고 아무것도 출력하지 않을 수도 있음
+            return 1 # 예: 못 찾았으면 실패로 처리
+        fi
+    fi
+
+    # 3. 인수가 두 개일 때 (`st <shortcut> <n|b>`): 다음/이전 단축키 이름 출력 (기존 로직 활용)
+    if [ $# -eq 2 ]; then
+        local mode="$2"
+        if [ -z "$shortcutstr" ]; then
+            echo "오류: shortcutstr 변수가 정의되지 않았습니다." 1>&2
+            return 1
+        fi
+
+        # mode 유효성 검사
+        if [ "$mode" != "n" ] && [ "$mode" != "b" ]; then
+            echo "사용법: st <shortcut> [<n|b>] 또는 st" 1>&2
+            return 1
+        fi
+
+        # 다음/이전 항목의 *이름*($1)을 찾는 awk 로직
+        echo "$shortcutstr" | awk -v shortcut="$shortcut" -v mode="$mode" -v RS='@@@' -F'|' '
+            NR <= 1 && $0 == "" { next } # 첫 번째 빈 레코드 건너뛰기
+
+            mode == "n" {
+                if (print_next) {
+                    print $1 # 다음 항목의 이름($1) 출력
+                    exit # awk 종료
+                }
+                if ($1 == shortcut) {
+                    print_next = 1
+                }
+            }
+
+            mode == "b" {
+                if ($1 == shortcut) {
+                    if (prev_key != "") {
+                       print prev_key # 이전 항목의 이름(prev_key) 출력
+                    }
+                    exit # awk 종료
+                }
+                prev_key = $1
+            }
+        '
+        # awk의 종료 상태를 확인하여 성공/실패를 더 명확히 할 수 있지만,
+        # 여기서는 원본처럼 awk 실행 자체는 성공(0)으로 간주
+        return 0
+    fi
+
+    # 4. 인수가 너무 많을 때: 사용법 안내
+    echo "사용법: st <shortcut> [<n|b>] 또는 st" 1>&2
+    return 1
+}
+
+# shortcut view n> b<
+oldst() {
     # 인수가 없으면 전체 문자열 출력 (Bash 2 호환)
     if [ $# -eq 0 ]; then
         echo "$shortcutstr"
