@@ -155,7 +155,11 @@ process_commands() {
         #echo && echo "=============================================="
         echo "=============================================="
         # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
-        if echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
+        if partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
+            echo "→ 내부 메뉴 [$partcom] 로 점프"
+            menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
+            return 0
+        elif echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
             (
                 echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
@@ -164,19 +168,15 @@ process_commands() {
                 # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
                 readxx $LINENO "> command: $command"
-                eval "$command"
+                safe_eval "$command"
             )
             trap - SIGINT
             # flow 메뉴 구성을 위한 분기
             # elif [ "$command" = "${command%% *}" ] && st "$command" > /dev/null; then
-        elif partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
-            echo "→ 내부 메뉴 [$partcom] 로 점프"
-            menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
-            return 0
         else
             readxx $LINENO ">> command: $command"
             #command=$(command)
-            echo "$command" | grep -Eq 'Cancel' || eval "$command"
+            echo "$command" | grep -Eq 'Cancel' || safe_eval "$command"
         fi
         # log
         lastarg=""
@@ -317,7 +317,9 @@ menufunc() {
             IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
 
             # 바로가기 버튼 중복 체크
-            scut_dups=$(echo "$allof_shortcut_item" | grep -o '\[[^]]\+\]' | sort | uniq -d | sed 's/^\[//;s/\]$//')
+            #scut_dups=$(echo "$allof_shortcut_item" | grep -o '\[[^]]\+\]' | sort | uniq -d | sed 's/^\[//;s/\]$//')
+            scut_dups=$(echo "$allof_shortcut_item" | sed -n 's/.*\[\([^]]\+\)\].*/\1/p' | sort | uniq -d)
+
             for scut in $scut_dups; do
                 echo -e "\n\033[1;31m⚠️ 중복된 scut 감지: [$scut]\033[0m"
                 grep -n "\[$scut\]" "$env" | awk 'NR==1 { print "\033[1;32m✅ 첫 번째 항목 (유지):\033[0m\n  ▶ " $0; next } { print "\033[1;33m⚠️ 중복 항목:\033[0m\n  ✂  " $0 }'
@@ -1096,7 +1098,7 @@ menufunc() {
                         #[ $num_commands -eq 1 ] && break
                         if [ "$num_commands" -eq 1 ]; then
                             if echo "$ooldscut" | grep -q '^flow_'; then
-                                echo "go to $ooldscut"
+                                echo "go to $ooldscut" #; readxy
                                 menufunc "$ooldscut"
                             fi
                             break
@@ -1629,9 +1631,26 @@ ffc() {
 #find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{if($1>10)printf "\033[1;31m%-60s %s MB\033[0m\n",$2,$1;else printf "%-60s %s MB\n",$2,$1}' || command find "$@"; }
 find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{c="\033[0m"; if($1>1000)c="\033[1;31m"; else if($1>100)c="\033[1;33m"; else if($1>10)c="\033[1;37m"; printf "%s%-60s %s MB\033[0m\n", c, $2, $1}' | less -RX || command find "$@"; }
 
+# go.sh 스크립트 상단 함수 정의하는 곳에 추가
+
+# awk 명령어 래퍼 함수 (-W interactive 지원 체크 및 적용)
+# awkf 함수 - stderr 체크, 짧은 버전
+awkf() {
+    local error_output
+    # 테스트 실행하고 표준 에러만 변수에 저장
+    error_output=$(awk -W interactive -e 'BEGIN{exit}' </dev/null 2>&1 >/dev/null)
+
+    # 에러 메시지에 "unrecognized"가 **없으면**(! grep) 옵션 사용
+    if ! echo "$error_output" | grep -q "unrecognized"; then
+        awk -W interactive "$@"
+    else
+        # 에러 메시지가 있으면 옵션 없이 실행
+        awk "$@"
+    fi
+}
+
 # colored ip (1 line multi ip apply)
-cip() { awk -W interactive '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null ||
-    awk '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}'; }
+cip() { awkf '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null; }
 
 # 실시간 출력 tail -f 등에 즉각 반응
 #cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g'; }
@@ -1795,6 +1814,19 @@ cgrepn() {
             s/($pattern)/$color_red$1$color_reset/g;
         }
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
+}
+
+safe_eval() {
+    local cmd="$1" re='(^|[[:space:]])(rm[[:space:]]+-rf[[:space:]]+/[[:space:]]*($|[[:space:]]+|#)|reboot|shutdown|mkfs)([[:space:]]|$)|\>\s*/etc/(passwd|shadow|group)\b|\>\s*/dev/sd[a-z]+\b'
+    echo "$cmd" | grep -qE "$re" && {
+        echo
+        RED1
+        echo "!!! 위험 명령어 감지!"
+        echo "   $cmd"
+        RST
+        readxy "   실행하시겠습니까?" || return 1
+    }
+    eval "$cmd"
 }
 
 load() {
@@ -2120,11 +2152,9 @@ godifff() {
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
 # cpipe -> courl && cip24 && cdir
-old_cpipe() { awk -W interactive '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}' 2>/dev/null ||
-    awk '{gsub("https?:\\/\\/[^ ]+", "\033[1;36;04m&\033[0m"); gsub(" /[a-z0-9A-Z][^ ()|$]+", "\033[36m&\033[0m"); line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
 
 cpipe() {
-    awk -W interactive '
+    awkf '
 BEGIN {
     clr_rst = "\033[0m"
     clr_red = "\033[1;31m"
@@ -2361,11 +2391,18 @@ oneline() {
 # dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd] - cmd-choice
 # lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp} - relay - choice
 # scut2
-scutall() {
+old_scutall() {
+    # 밑줄 abc_bcd 같은 단축키 못찾음
     scut=$1
     scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
     scut_item="$([ -n "$scut_item_idx" ] && echo "${shortcutarr[$scut_item_idx]}")"   # 배열번호에 있는 값 추출
     echo "$scut_item"
+}
+scutall() {
+    scut=$1
+    for i in "${!shortcutarr[@]}"; do
+        [[ ${shortcutarr[$i]} == *"[$scut]"* ]] && echo "${shortcutarr[$i]}" && return
+    done
 }
 scuttitle() {
     scut=$1
@@ -2834,6 +2871,11 @@ template_view $1
 conf() {
     saveVAR
     vi2 "$envorg" $scut
+    savescut && exec "$gofile" "$scut"
+}
+conf1() {
+    saveVAR
+    vi2 "$envorg" $scut tailedit
     savescut && exec "$gofile" "$scut"
 }
 confmy() {
@@ -4127,13 +4169,16 @@ vi22() {
 }
 vi2() {
     [ ! -f "$1" ] && echo "Canceled..." && return 1
-
     rbackup "$1"
     # 문자열 찾고 그 위치에서 편집
     #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
-    # 문자열 찾고 그 위치의 문단끝에서 편집
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! }'" "$1"; else vim "$1" || vi "$1"; fi
-
+    if [ -n "$3" ]; then
+        # 문자열 찾고 그 위치의 문단끝에서 편집
+        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zz'" "$1"; else vim "$1" || vi "$1"; fi
+    else
+        # 문자열 찾고 그 위치의 처음에서 편집
+        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zz'" "$1"; else vim "$1" || vi "$1"; fi
+    fi
 }
 vi2e() {
     [ ! -f "$1" ] && return 1
