@@ -86,9 +86,14 @@ else
     cat "$envorg2" >>"$env" 2>/dev/null
 fi
 
-# cmd 라인뒤 주석제거 // 빈줄은 그대로 // 공백이 들어간 빈줄은 삭제
+# cmd 라인뒤 주석제거 // 빈줄은 그대로 //  trim
 #sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
-sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$env"
+#sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$env"
+
+sed -i \
+    -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' `# 주석 제거 (공백 뒤 # 포함)` \
+    -e 's/[[:blank:]]\+$//' `# 줄 끝 공백 제거 trim` \
+    "$env"
 
 # not kr
 # english menu tilte set
@@ -311,13 +316,12 @@ menufunc() {
             # shortcut 있는 항목만 배열화
             IFS=$'\n' allof_shortcut_item="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
 
+            # 바로가기 버튼 중복 체크
             scut_dups=$(echo "$allof_shortcut_item" | grep -o '\[[^]]\+\]' | sort | uniq -d | sed 's/^\[//;s/\]$//')
-
             for scut in $scut_dups; do
                 echo -e "\n\033[1;31m⚠️ 중복된 scut 감지: [$scut]\033[0m"
-
                 grep -n "\[$scut\]" "$env" | awk 'NR==1 { print "\033[1;32m✅ 첫 번째 항목 (유지):\033[0m\n  ▶ " $0; next } { print "\033[1;33m⚠️ 중복 항목:\033[0m\n  ✂  " $0 }'
-
+                # while
                 grep -n "\[$scut\]" "$env" | tail -n +2 | while IFS=":" read lineno line; do
                     echo
 
@@ -351,7 +355,7 @@ menufunc() {
             # printarr shortcutarr # debug
         fi
 
-        # choice 가 없을때 선택 메뉴 출력
+        # choice 가 없을때 선택할수 있는 메뉴 출력
 
         ############## 메뉴 출력 ###############
 
@@ -373,6 +377,7 @@ menufunc() {
                     RST
                 )"
                 # offline print
+                # 네트워크 단절시 바로 표시
                 if [ "$offline" == "offline" ]; then
                     echo -ne "==="
                     RED1
