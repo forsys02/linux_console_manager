@@ -154,12 +154,12 @@ process_commands() {
 
         #echo && echo "=============================================="
         echo "=============================================="
-        # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
         if partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
             echo "→ 내부 메뉴 [$partcom] 로 점프"
             menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
             return 0
         elif echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
+            # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
             (
                 #echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
@@ -176,6 +176,7 @@ process_commands() {
             # elif [ "$command" = "${command%% *}" ] && st "$command" > /dev/null; then
         else
             readxx $LINENO ">> command: $command"
+            #readxy $LINENO ">> command: $command"
             #command=$(command)
             echo "$command" | grep -Eq 'Cancel' || safe_eval "$command"
             #echo "$command" | grep -Eq 'Cancel' || eval "$command"
@@ -278,7 +279,8 @@ menufunc() {
             # 최초 실행시 특정 메뉴 shortcut 가져옴 ex) bash go.sh px
             choice="$initvar" && initvar=""
             # relay 메뉴가 아니면 main page skip
-            [ -z "$title_of_menu_sub" ] && { skipmain="y" && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
+            [ -z "$title_of_menu_sub" ] && { skipmain="y" && chosen_command_sub="$(scutsub "$choice")" && title_of_menu_sub="$(scuttitle "$choice")"; } || unset -v skipmain
+            #[ -z "$title_of_menu_sub" ] && { skipmain="y" && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
             [ -n "$(notscutrelay "$choice")" ] && skipmain="y" #&& readxy skipmain2
             #[ -z "$title_of_menu_sub" ] && { skipmain="y" && readxy skipmain && chosen_command_sub="$(scutsub "$command")" && title_of_menu_sub="$(scuttitle "$command")"; } || unset -v skipmain
             #[ -z "$title_of_menu_sub" ] && skipmain="y" || unset -v skipmain # && readxy "only initvar enter"
