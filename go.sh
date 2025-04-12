@@ -2189,6 +2189,7 @@ cpipe() {
         clr_red = "\033[1;31m"
         clr_yel = "\033[1;33m"
         clr_grn = "\033[1;32m"
+        clr_grn0 = "\033[0;32m"
         clr_blu = "\033[1;36m"
         clr_mag = "\033[1;35m"
 
@@ -2204,16 +2205,16 @@ cpipe() {
 
         # --- 경로 강조 (cpipe 로직, $0에 직접 적용) ---
         if ($0 ~ pat_url) {
-            gsub(pat_url, clr_blu "&" clr_rst, $0)
+            gsub(pat_url, clr_grn0 "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_paren) {
-            gsub(pat_path_in_paren, clr_blu "&" clr_rst, $0)
+            gsub(pat_path_in_paren, clr_grn0 "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_quotes) {
-            gsub(pat_path_in_quotes, "\"" clr_blu "\\1" clr_rst "\"", $0)
+            gsub(pat_path_in_quotes, "\"" clr_grn0 "\\1" clr_rst "\"", $0)
         }
         if ($0 ~ pat_path_standalone) {
-            gsub(pat_path_standalone, clr_blu "&" clr_rst, $0)
+            gsub(pat_path_standalone, clr_grn0 "&" clr_rst, $0)
         }
 
         # --- IP 주소 강조 (old_cpipe 원본 복원) ---
@@ -2976,8 +2977,9 @@ template_view $1
 }
 # vi2 envorg && restart go.sh
 conf() {
+    #readxy $cmd_choice1
     saveVAR
-    vi2 "$envorg" $scut
+    vi2 "$envorg" $scut $cmd_choice1
     savescut && exec "$gofile" "$scut"
 }
 conf1() {
@@ -2985,6 +2987,7 @@ conf1() {
     vi2 "$envorg" $scut tailedit
     savescut && exec "$gofile" "$scut"
 }
+confb() { conf1; }
 confmy() {
     vi2 "$envorg2" $scut
     savescut && exec "$gofile" "$scut"
@@ -4280,11 +4283,17 @@ vi2() {
     # 문자열 찾고 그 위치에서 편집
     #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
     if [ -n "$3" ]; then
-        # 문자열 찾고 그 위치의 문단끝에서 편집
-        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zz'" "$1"; else vim "$1" || vi "$1"; fi
+        #readxy "$3"
+        if [ "$3" == "tailedit" ]; then
+            # 문자열 찾고 그 위치의 문단끝에서 편집
+            if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zb'" "$1"; else vim "$1" || vi "$1"; fi
+        else
+            # $2 대신 $3 를 찾음
+            if [ -n "$3" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$3\]' | silent! normal! } zb'" "$1"; else vim "$1" || vi "$1"; fi
+        fi
     else
         # 문자열 찾고 그 위치의 처음에서 편집
-        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zz'" "$1"; else vim "$1" || vi "$1"; fi
+        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zt'" "$1"; else vim "$1" || vi "$1"; fi
     fi
 }
 vi2e() {
