@@ -161,7 +161,7 @@ process_commands() {
             return 0
         elif echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
             (
-                echo "ctrl c trap process..."
+                #echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
@@ -169,6 +169,7 @@ process_commands() {
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
                 readxx $LINENO "> command: $command"
                 safe_eval "$command"
+                #eval "$command"
             )
             trap - SIGINT
             # flow 메뉴 구성을 위한 분기
@@ -177,6 +178,7 @@ process_commands() {
             readxx $LINENO ">> command: $command"
             #command=$(command)
             echo "$command" | grep -Eq 'Cancel' || safe_eval "$command"
+            #echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
         lastarg=""
@@ -691,7 +693,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|batcat \|cat \|hash_add\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -1570,7 +1572,7 @@ menufunc() {
 ##############################################################################################################
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
-#ff() { declare -f "$@"; }
+fff() { declare -f "$@"; }
 
 ff() {
     if [ -z "$1" ]; then
@@ -1638,7 +1640,7 @@ find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{c="\033
 awkf() {
     local error_output
     # 테스트 실행하고 표준 에러만 변수에 저장
-    error_output=$(awk -W interactive -e 'BEGIN{exit}' </dev/null 2>&1 >/dev/null)
+    error_output=$(awk -W interactive -e "BEGIN{exit}" </dev/null 2>&1 >/dev/null)
 
     # 에러 메시지에 "unrecognized"가 **없으면**(! grep) 옵션 사용
     if ! echo "$error_output" | grep -q "unrecognized"; then
@@ -1674,6 +1676,14 @@ cgrep() {
     done
     awk "${awk_cmd}{print}"
 }
+cgrepi() {
+    awk_cmd=""
+    for word in "$@"; do
+        escaped_word=$(printf '%s\n' "$word" | sed 's/[]\/.^$*+?{}[]/\\&/g')
+        awk_cmd="${awk_cmd}BEGIN{IGNORECASE=1} {gsub(/$escaped_word/, \"\033[1;31m&\033[0m\")} "
+    done
+    awk "${awk_cmd}{print}"
+}
 # 검색문자열들 색칠(yellow)
 cgrep1() {
     for word in "$@"; do
@@ -1693,12 +1703,24 @@ cgrepl() {
 # 검색문자열줄을 색칠 (yellow)
 cgrepline() {
     pattern=$(echo "$*" | sed 's/ /|/g')
-    awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;33m&\033[0m"); print $0;}'
+    awk -v pat="($pattern)" '
+        $0 ~ pat {
+            print "\033[1;33m" $0 "\033[0m"
+            next
+        }
+        { print }
+    '
 }
 # 검색문자열줄을 색칠 (red)
 cgrepline1() {
     pattern=$(echo "$*" | sed 's/ /|/g')
-    awk -v pat="^.*${pattern}.*$" '{gsub(pat, "\033[1;31m&\033[0m"); print $0;}'
+    awk -v pat="($pattern)" '
+        $0 ~ pat {
+            print "\033[1;31m" $0 "\033[0m"
+            next
+        }
+        { print }
+    '
 }
 # 탈출코드를 특정색으로 지정
 cgrep3132() {
@@ -1826,7 +1848,12 @@ safe_eval() {
         RST
         readxy "   실행하시겠습니까?" || return 1
     }
-    eval "$cmd"
+    if echo "$cmd" | grep -qE '\|[[:space:]]*less(\s|$)'; then
+        #eval "$cmd"
+        eval "$cmd" </dev/tty
+    else
+        eval "$cmd"
+    fi
 }
 
 load() {
@@ -2152,9 +2179,87 @@ godifff() {
 cdir() { awk '{match_str="(/[a-zA-Z0-9][^ ()|$]+)"; gsub(match_str, "\033[36m&\033[0m"); print $0; }'; }
 
 # cpipe -> courl && cip24 && cdir
-
 cpipe() {
     awkf '
+    BEGIN {
+        # --- 색상 코드 정의 ---
+        clr_rst = "\033[0m"
+        clr_red = "\033[1;31m"
+        clr_yel = "\033[1;33m"
+        clr_grn = "\033[1;32m"
+        clr_blu = "\033[1;36m"
+        clr_mag = "\033[1;35m"
+
+        # --- 경로 패턴 정의 (cpipe에서 성공) ---
+        pat_path_in_paren = "\\(/[^():[:space:]]+:[0-9]+\\)" # 괄호 안 경로+라인번호
+        pat_path_in_quotes = "\"(/[^[:space:]]+)\"" # 따옴표 안 경로
+        pat_path_standalone = "/[[:alnum:]][[:alnum:]._/-]*[[:alnum:]._/-]" # 독립 경로
+        pat_url = "https?://[^[:space:]]+"  # URL
+    }
+    {
+        # 작업 라인 백업
+        line = $0
+
+        # --- 경로 강조 (cpipe 로직, $0에 직접 적용) ---
+        if ($0 ~ pat_url) {
+            gsub(pat_url, clr_blu "&" clr_rst, $0)
+        }
+        if ($0 ~ pat_path_in_paren) {
+            gsub(pat_path_in_paren, clr_blu "&" clr_rst, $0)
+        }
+        if ($0 ~ pat_path_in_quotes) {
+            gsub(pat_path_in_quotes, "\"" clr_blu "\\1" clr_rst "\"", $0)
+        }
+        if ($0 ~ pat_path_standalone) {
+            gsub(pat_path_standalone, clr_blu "&" clr_rst, $0)
+        }
+
+        # --- IP 주소 강조 (old_cpipe 원본 복원) ---
+        # 경로 강조 후 line에 저장된 원본으로 IP 처리
+        while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+            IP = substr(line, RSTART, RLENGTH)
+            line = substr(line, 1, RSTART-1) substr(line, RSTART+RLENGTH)
+            Prefix = IP; sub(/\.[0-9]+$/, "", Prefix)
+            if (!(Prefix in FC)) {
+                BN[Prefix] = 1
+                if (TC < 6) {
+                    FC[Prefix] = 36 - TC
+                } else {
+                    do {
+                        FC[Prefix] = 30 + (TC - 6) % 8
+                        BC[Prefix] = (40 + (TC - 6)) % 48
+                        TC++
+                    } while (FC[Prefix] == BC[Prefix] - 10)
+                    if (FC[Prefix] == 37) FC[Prefix]--
+                }
+                TC++
+            }
+            if (BC[Prefix] > 0)
+                CP = sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP)
+            else
+                CP = sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP)
+            # $0에 IP 색상 적용 (경로 색상 유지)
+            gsub(IP, CP, $0)
+        }
+
+        # --- journalctl 특화 강조 (old_cpipe 원본 유지) ---
+        gsub(/\[  OK  \]/, clr_grn "[  OK  ]" clr_rst, $0)
+        gsub(/\[FAILED\]/, clr_red "[FAILED]" clr_rst, $0)
+        gsub(/\[WARN\]/, clr_yel "[WARN]" clr_rst, $0)
+        gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst, $0)
+
+        # --- 기타 강조 (old_cpipe 원본 유지) ---
+        gsub(/denied|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
+        gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst, $0)
+        gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst, $0)
+
+        # 최종 결과 출력 (개행 보장)
+        printf "%s\n", $0
+    }'
+}
+
+old_cpipe() {
+    awk '
 BEGIN {
     clr_rst = "\033[0m"
     clr_red = "\033[1;31m"
@@ -2245,17 +2350,17 @@ noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null; } # Escape 문자(A
 selectmenu() { select item in $@; do echo $item; done; }
 
 # pipe 로 넘어온 줄의 모든 필드를 select 구분자-> 빈칸 빈줄 파이프(|}
-#pipemenu() {
-#    local prompt_message="$@"
-#    PS3="==============================================
-#>>> ${prompt_message:+"$prompt_message - "}Select No. : "
-#    IFS=$' \n|'
-#    export pipeitem=""
-#    items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
-#    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-#    unset IFS
-#    unset PS3
-#}
+old_pipemenu() {
+    local prompt_message="$@"
+    PS3="==============================================
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
+    IFS=$' \n|'
+    export pipeitem=""
+    items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
+    unset IFS
+    unset PS3
+}
 pipemenu() {
     local prompt_message="$@"
     PS3="==============================================
@@ -2266,7 +2371,7 @@ pipemenu() {
         echo "Cancel"
     )
 
-    [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty
+    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset IFS
     unset PS3
 }
