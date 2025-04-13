@@ -75,6 +75,7 @@ fi
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
 if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
     cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+    ad
     # cat go.my.env >> go.env
     cat "$envorg2" 2>/dev/null | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
 # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
@@ -208,7 +209,8 @@ process_commands() {
             bashcomm
         fi
 
-        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -r x; }
+        #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [60s.Enter] " && read -re -t 60 x ; }
+        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -re x; }
     else
         echo "$command"
         echo "Canceled..."
@@ -533,10 +535,10 @@ menufunc() {
         fi
 
         # 메인/서브 메뉴에서 정상 범위의 숫자가 입력된경우
-        # 0 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
+        # 1 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
         # if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
         # if (echo "$choice" | grep -Eq '^[1-9]$|^[1-9][0-9]$') && [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ] 2>/dev/null; then
-        if ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
+        if [[ $choice != 0* ]] && ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
@@ -695,7 +697,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -1127,6 +1129,7 @@ menufunc() {
                     readxx "번호를 선택받지 못하였다. cmd bottom"
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
+                    #[[ -n $cmd_choice && ( $cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/} ) ]] || ! (( cmd_choice >= 1 && cmd_choice <= 99 )) 2>/dev/null &&
                     [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] &&
                         {
                             YEL1
@@ -1177,7 +1180,7 @@ menufunc() {
                             #                        "bbbm")
                             #                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
                             #                            ;; # exec terminates
-                        "b")
+                        "b" | "00")
                             echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut &&
                                 menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
                             ;;
@@ -1226,7 +1229,7 @@ menufunc() {
                             ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
-                                { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrep1 /mnt/ | cper | column -t; } && readx && continue
+                                { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrepn /mnt/ 0 | cper | column -t; } && readx && continue
                             else
                                 /bin/df $cmd_choice1 && readx && continue
                             fi
@@ -1270,7 +1273,7 @@ menufunc() {
                                 fi
 
                             # Check 2: Alarm? (Numeric, starts with 0, not just "0")
-                            elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" ]]; then
+                            elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" || $cmd_choice != "00" ]]; then
                                 echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1
                                 alarm "$cmd_choice" "$cmd_choice1" && {
                                     echo
@@ -1397,7 +1400,7 @@ menufunc() {
                 #                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
                 #                savescut && exec $gofile $ooooldscut # back to previous menu
                 #                ;;
-            b)
+            b | 00)
                 echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
                 savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
                 ;;
@@ -1412,7 +1415,7 @@ menufunc() {
             df)
                 # Original condition checked for ! "$choice1"
                 if [ ! "$choice1" ]; then
-                    /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrep1 /mnt/ | cper | column -t && readx
+                    /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrepn /mnt/ 0 | cper | column -t && readx
                 else # Do nothing if choice1 exists, as per original logic implicit structure
                     /bin/df $choice1 && readx
                 fi
@@ -1496,7 +1499,8 @@ menufunc() {
                 savescut && exec "$gofile" "$scut"
                 ;;
             # alarm: Starts with 0, contains only digits, not just "0"
-            0[0-9]*)
+            #0[1-9][0-9]*)
+            0[0-9][0-9]* | 0[0-9]*)
                 # Verify it consists *only* of digits, matching original check: ! "${choice//[0-9]/}"
                 if [ -z "${choice//[0-9]/}" ]; then
                     echo "alarm set --> $choice $choice1" && sleep 1 && alarm "$choice" "$choice1" && {
@@ -1758,6 +1762,63 @@ cgrep3137() {
     awk -v pat="${pattern}" '{gsub(pat, "\033[1;31m&\033[0;37m"); print $0;}'
 }
 
+cgrepn() {
+    local args=("$@")
+    local search_strs=()
+    local num_cols=0
+    if [ "${#args[@]}" -eq 0 ]; then
+        echo "Usage: cgrepn [search_strings...] [num_cols]"
+        return 1
+    fi
+    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
+        num_cols="${args[-1]}"
+        search_strs=("${args[@]:0:${#args[@]}-1}")
+    else
+        search_strs=("${args[@]}")
+        num_cols=""
+    fi
+    if [ "${#search_strs[@]}" -eq 0 ]; then
+        echo "Error: No search strings provided."
+        return 1
+    fi
+    perl -s -pe '
+        BEGIN {
+            $color_yellow = "\e[1;33m";  # Bold yellow color
+            $color_reset = "\e[0m";      # Reset color
+            @search_words = split / /, $search_strs;  # Split search strings
+            $num = defined($num_cols) && $num_cols ne "" ? $num_cols : 0;  # Default to 0 if undefined
+            if ($num < 0) { $before = -$num; $after = 0; }  # Negative: words before
+            elsif ($num > 0) { $before = 0; $after = $num; }  # Positive: words after
+            else { $before = 0; $after = 0; }  # Zero: no extra words
+        }
+        # Highlight the first word only if num_cols=0 and any search word is present in the line
+        if (defined($num_cols) && $num_cols eq "0") {
+            my $line = $_;
+            my $should_highlight = 0;
+            foreach my $search (@search_words) {
+                if ($line =~ /\Q$search\E/) {
+                    $should_highlight = 1;
+                    last;
+                }
+            }
+            if ($should_highlight) {
+                s/^(\S+)/$color_yellow$1$color_reset/;
+            }
+        }
+        foreach my $search (@search_words) {
+            my $pattern;
+            if (!defined($num_cols) || $num_cols eq "0") {
+                # No num_cols or num_cols=0: highlight only search string
+                $pattern = quotemeta($search);
+            } else {
+                # Highlight search string with before/after words
+                $pattern = "(?:\\S+[\\s\\t]*){0,$before}" . quotemeta($search) . "(?:[\\s\\t]*\\S+){0,$after}";
+            }
+            s/($pattern)/$color_yellow$1$color_reset/g;  # Apply yellow color to matches
+        }
+    ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
+}
+
 __cgrepn() {
     local args=("$@")    # 모든 인자를 배열로 저장
     local search_strs=() # 검색할 문자열 배열
@@ -1801,7 +1862,7 @@ __cgrepn() {
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
-cgrepn() {
+old_cgrepn() {
     local args=("$@")
     local search_strs=()
     local num_cols=0
@@ -3003,6 +3064,15 @@ conffc() { rollback "$gofile"; }
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env; }
 
+# print conf
+pconf() {
+    if [ "$1" ]; then
+        awk -v key="$1" '$0 ~ "\\[" key "\\]$" {p=1} p && /^$/ {exit} p' "$envorg" | cpipe
+    else
+        awk -v key="$scut" '$0 ~ "\\[" key "\\]$" {p=1} p && /^$/ {exit} p' "$envorg" | cpipe
+    fi
+}
+
 ver() { ls -al $basefile; }
 verr() { cdiff $basefile $basefile.1.bak; }
 
@@ -3263,9 +3333,113 @@ idpw() {
     [ $? == "0" ] && echo -e "\e[1;36m>>> ID: $id PW: $pw HOST: $host Success!!! \e[0m" || echo -e "\e[1;31m>>> ID: $id PW: $pw HOST:$host FAIL !!! \e[0m"
 }
 
-idinfo() {
+userinfo() {
+    dline() {
+        num_characters="${1-46}"
+        delimiter="${2-=}"
+        i=1
+        while [ "$i" -le "$num_characters" ]; do
+            printf "%s" "$delimiter"
+            i=$((i + 1))
+        done
+        printf "\n"
+    }
+
     if [ -z "$1" ] || [ "$1" = "--help" ]; then
-        printf "\033[1mUsage:\033[0m idinfo <username> [section]\n"
+        echo -e "\033[1mUsage:\033[0m userinfo <username> [section]"
+        echo "Sections: all (default), basic, activity, resources"
+        return 1
+    fi
+    USERNAME="$1"
+    SECTION="${2-all}"
+    USERINFO=$(getent passwd "$USERNAME")
+    if [ -z "$USERINFO" ]; then
+        echo -e "\033[1;31m[!] 사용자 '$USERNAME' 정보를 찾을 수 없습니다.\033[0m"
+        return 1
+    fi
+
+    # Replace <<< with echo | read for bash2 compatibility
+    echo "$USERINFO" | (
+        IFS=':' read NAME PASS USER_UID GID INFO HOME SHELL
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
+            ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
+            case "$ACCOUNT_STATUS" in
+            P) ACCOUNT_STATUS_DESC="Password set" ;;
+            L) ACCOUNT_STATUS_DESC="Locked" ;;
+            NP) ACCOUNT_STATUS_DESC="No password" ;;
+            *) ACCOUNT_STATUS_DESC="Unknown" ;;
+            esac
+            LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
+            CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | awk -F': ' '
+                /Last password change/ { printf "Last change: %s; ", $2 }
+                /Password expires/ { printf "Expires: %s; ", $2 }
+                /Minimum/ { printf "Min days: %s; ", $2 }
+                /Maximum/ { printf "Max days: %s; ", $2 }
+                /warning/ { printf "Warn days: %s", $2 }')
+            echo -e "\033[1;34m기본 정보\033[0m"
+            dline
+            echo -e "\033[1;37m사용자명\033[0m: \033[1;36m$NAME\033[0m"
+            echo -e "\033[1;37mUID\033[0m: \033[1;36m$USER_UID\033[0m"
+            echo -e "\033[1;37mGID\033[0m: \033[1;36m$GID\033[0m"
+            echo -e "\033[1;37m전체 이름\033[0m: \033[1;36m$INFO\033[0m"
+            echo -e "\033[1;37m홈 디렉토리\033[0m: \033[1;36m$HOME\033[0m"
+            echo -e "\033[1;37m기본 쉘\033[0m: \033[1;36m$SHELL\033[0m"
+            echo -e "\033[1;37m계정 상태\033[0m: \033[1;36m$ACCOUNT_STATUS_DESC\033[0m"
+            echo -e "\033[1;37m최근 변경일\033[0m: \033[1;36m$LAST_CHANGED_DATE\033[0m"
+            echo -e "\033[1;37m비밀번호 정책\033[0m: \033[1;36m$CHAGE_INFO\033[0m"
+        fi
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "activity" ]; then
+            WHO_INFO=$(who | grep "^$USERNAME" || echo "현재 로그인 정보 없음")
+            LAST_LOG=$(last -w -n 5 "$USERNAME" 2>/dev/null | grep . || echo "로그인 이력 없음")
+            PROCESS_INFO=$(ps -u "$USERNAME" -o pid,tty,stat,time,cmd 2>/dev/null | grep -v "PID" || echo "실행 중인 프로세스 없음")
+            if [ -r /var/log/maillog ]; then
+                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
+                [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
+            else
+                if [ -r /var/log/mail.log ]; then
+                    MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
+                    [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
+                else
+                    MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음"
+                fi
+            fi
+            dline
+            echo -e "\033[1;34m활동 정보\033[0m"
+            dline
+            echo -e "\033[1;37m현재 로그인 세션\033[0m: \033[1;36m$WHO_INFO\033[0m"
+            echo -e "\033[1;37m최근 로그인 로그 (최대 5회)\033[0m:"
+            echo -e "\033[1;36m$LAST_LOG\033[0m"
+            echo -e "\033[1;37m사용자 프로세스\033[0m:"
+            echo -e "\033[1;36m$PROCESS_INFO\033[0m"
+            echo -e "\033[1;37m메일 관련 로그 (최대 5줄)\033[0m:"
+            echo -e "\033[1;36m$MAIL_LOG\033[0m"
+        fi
+        if [ "$SECTION" = "all" ] || [ "$SECTION" = "resources" ]; then
+            ID_INFO=$(id "$USERNAME")
+            GROUPS_INFO=$(groups "$USERNAME" | cut -d: -f2 | sed 's/^[ 	]*//')
+            HOME_INFO=$(ls -ld "$HOME" | awk '{print $1, $3, $4, $6, $7, $8, $9}')
+            HOME_USAGE=$(du -sh "$HOME" 2>/dev/null | cut -f1 || echo "사용량 확인 불가")
+            SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
+            dline
+            echo -e "\033[1;34m권한 및 리소스\033[0m"
+            dline
+            echo -e "\033[1;37mID 및 그룹 정보\033[0m: \033[1;36m$ID_INFO\033[0m"
+            echo -e "\033[1;37m소속 그룹\033[0m: \033[1;36m$GROUPS_INFO\033[0m"
+            echo -e "\033[1;37m홈 디렉토리 상태\033[0m: \033[1;36m$HOME_INFO\033[0m"
+            echo -e "\033[1;37m홈 디렉토리 사용량\033[0m: \033[1;36m$HOME_USAGE\033[0m"
+            echo -e "\033[1;37m비밀번호 정보\033[0m: \033[1;36m$SHADOW_INFO\033[0m"
+        fi
+        if [ "$SECTION" != "all" ] && ! echo " basic activity resources " | grep -q " $SECTION "; then
+            echo -e "\033[1;31m[!] 잘못된 섹션: '$SECTION'\033[0m"
+            echo "사용 가능한 섹션: all, basic, activity, resources"
+            return 1
+        fi
+    )
+}
+
+old_userinfo() {
+    if [ -z "$1" ] || [ "$1" = "--help" ]; then
+        printf "\033[1mUsage:\033[0m userinfo <username> [section]\n"
         echo "Sections: all (default), basic, activity, resources"
         return 1
     fi
@@ -3278,7 +3452,6 @@ idinfo() {
     fi
 
     # <<< 제거 → echo + read 로 대체
-    OLDIFS="$IFS"
     IFS=':'
     echo "$USERINFO" | while read NAME PASS USER_UID GID INFO HOME SHELL; do
         OUTPUT=""
@@ -3310,6 +3483,12 @@ idinfo() {
 
         if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
             ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
+            case "$ACCOUNT_STATUS" in
+            P) ACCOUNT_STATUS_DESC="Password set" ;;
+            L) ACCOUNT_STATUS_DESC="Locked" ;;
+            NP) ACCOUNT_STATUS_DESC="No password" ;;
+            *) ACCOUNT_STATUS_DESC="Unknown" ;;
+            esac
             LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
             CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | sed 's/ : /:/g')
             BASIC_CONTENT="사용자명: $NAME
@@ -3320,7 +3499,7 @@ GID: $GID
 기본 쉘: $SHELL
 
 --- 계정 상태 ---
-계정 상태: $ACCOUNT_STATUS
+계정 상태: $ACCOUNT_STATUS_DESC
 최근 변경일: $LAST_CHANGED_DATE
 
 --- 비밀번호 정책 ---
@@ -3383,16 +3562,16 @@ $SHADOW_INFO
         fi
 
         if [ -n "$OUTPUT" ]; then
-            echo -e "$OUTPUT" | less -RX
+            echo -e "$OUTPUT" # | less -RX
         else
             if echo " basic activity resources all " | grep -q " $SECTION "; then
                 printf "\033[1;33m[!] 출력할 내용이 없습니다. 섹션 '%s'을 확인하세요.\033[0m\n" "$SECTION"
             fi
         fi
     done
-    IFS="$OLDIFS"
-    return 0
+    unset IFS
 }
+idinfo() { userinfo $@; }
 
 qssh() {
     # --- 설정 ---
@@ -3983,6 +4162,145 @@ change() {
 }
 
 hash_add() {
+    local fpath="$1" search="$2" num_arg="$3"
+    local up=0 down=0 num=0
+    local ts bk_fname ret DIFF_CMD="cdiff" # cdiff 유지
+
+    # Check argument count
+    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+        echo "Usage: hash_add <filepath> <search> [range]" 1>&2
+        echo "  range=0 또는 생략      → 현재줄만" 1>&2
+        echo "  range=+N 또는 N        → 현재줄 + 아래 N줄 (예: +2 또는 2)" 1>&2
+        echo "  range=-N               → 현재줄 + 위 N줄 (예: -2)" 1>&2
+        echo "  range=+-N              → 현재줄 + 위 N줄 + 아래 N줄 (예: +-2)" 1>&2 # Changed from *N
+        return 1
+    fi
+
+    # Check if file exists
+    [ ! -f "$fpath" ] && {
+        echo "Error: File not found: $fpath" 1>&2
+        return 1
+    }
+
+    # Parse range argument (순서 중요: +- 가 + 보다 먼저 와야 함)
+    case "$num_arg" in
+    '' | 0)
+        up=0
+        down=0
+        ;;
+    +-*) # Matches +-N (먼저 검사)
+        num="${num_arg#+-}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be +- followed by a number)" 1>&2
+            return 1
+        fi
+        up="$num"
+        down="$num"
+        ;;
+    +*) # Matches +N
+        up=0
+        num="${num_arg#+}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be + followed by a number)" 1>&2
+            return 1
+        fi
+        down="$num"
+        ;;
+    -*) # Matches -N
+        down=0
+        num="${num_arg#-}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be - followed by a number)" 1>&2
+            return 1
+        fi
+        up="$num"
+        ;;
+    *[!0-9+-]*) # Catch completely invalid characters early
+        echo "Invalid range format: $num_arg. Use N, +N, -N, or +-N." 1>&2
+        return 1
+        ;;
+    *) # Matches N (interpreted as +N) or potentially invalid combinations like --, ++ if not caught above
+        if expr "$num_arg" : '^[0-9]\+$' >/dev/null; then
+            up=0
+            down="$num_arg"
+        else
+            echo "Invalid range format: $num_arg. Use N, +N, -N, or +-N." 1>&2
+            return 1
+        fi
+        ;;
+    esac
+
+    # Create backup
+    ts=$(date +%Y%m%d_%H%M%S)
+    bk_fname="${fpath}_${ts}.bak"
+    if ! cp -a "$fpath" "$bk_fname"; then
+        echo "Error: Failed to create backup $bk_fname" 1>&2
+        return 1
+    fi
+
+    # Process the file with awk
+    awk -v pat="$search" -v up="$up" -v down="$down" '
+    {
+        lines[NR] = $0
+        if ($0 ~ pat) {
+            match_lines[++mc] = NR # Store matched line numbers
+        }
+    }
+    END {
+        # Mark lines to be commented
+        for (j = 1; j <= mc; j++) {
+            m = match_lines[j] # Current matched line number
+            start_line = (m - up > 0) ? m - up : 1
+            end_line = (m + down < NR) ? m + down : NR
+
+            # Ensure end_line does not exceed total lines (NR)
+            if (end_line > NR) end_line = NR;
+
+            for (i = start_line; i <= end_line; i++) {
+                 # Check validity again just in case and mark
+                 if (i > 0 && i <= NR) {
+                    mark[i] = 1
+                 }
+            }
+        }
+
+        # Print lines, commenting marked ones
+        for (i = 1; i <= NR; i++) {
+            if (mark[i] && lines[i] !~ /^[[:space:]]*#/) {
+                print "# " lines[i]
+            } else {
+                print lines[i]
+            }
+        }
+    }' "$bk_fname" >"$fpath"
+    ret=$?
+
+    # Report results
+    if [ $ret -eq 0 ]; then
+        echo "Hash Add done. Backup: $bk_fname"
+        if ! cmp -s "$bk_fname" "$fpath"; then
+            echo "--- Diff (${DIFF_CMD}) ---"
+            "$DIFF_CMD" "$bk_fname" "$fpath" # cdiff 사용
+            echo "--------------------------"
+        else
+            echo "Info: No effective changes were made."
+            # Optionally remove the backup if no changes occurred
+            # rm "$bk_fname"
+        fi
+        return 0
+    else
+        echo "Error occurred during awk processing (code: $ret). Restoring from backup." 1>&2
+        # Attempt to restore from backup on error
+        if mv "$bk_fname" "$fpath"; then
+            echo "Restored original file from $bk_fname." 1>&2
+        else
+            echo "Error: Failed to restore from backup. Original file may be corrupted. Backup remains: $bk_fname" 1>&2
+        fi
+        return $ret
+    fi
+}
+
+old_hash_add() {
     # --- Arguments & Basic Validation ---
     local fpath="$1" search="$2" num_arg="$3"
     # Default: Comment 1 line (the matched one)
@@ -4073,8 +4391,166 @@ hash_add() {
         return $ret
     fi
 }
+hash_restore() {
+    local fpath="$1" latest_bak
+    if [ -z "$fpath" ]; then
+        echo "Usage: hash_restore <filepath>" 1>&2
+        return 1
+    fi
+    if [ ! -f "$fpath" ]; then
+        echo "Error: Target file does not exist: $fpath" 1>&2
+        return 1
+    fi
+    # 최신 백업 찾기
+    latest_bak=$(ls -t "${fpath}"_*.bak 2>/dev/null | head -n 1)
+    if [ -z "$latest_bak" ]; then
+        echo "No backup found for: $fpath" 1>&2
+        return 1
+    fi
+    echo "Restoring: $fpath ← $latest_bak"
+    cp -a "$latest_bak" "$fpath"
+    echo "Restore complete."
+}
 
 hash_remove() {
+    local fpath="$1" search="$2" num_arg="$3"
+    local up=0 down=0 num=0
+    local ts bk_fname ret DIFF_CMD="cdiff" # cdiff 유지
+
+    # Check argument count
+    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+        echo "Usage: hash_remove <filepath> <search> [range]" 1>&2
+        echo "  range=0 또는 생략      → 현재줄만" 1>&2
+        echo "  range=+N 또는 N        → 현재줄 + 아래 N줄 (예: +2 또는 2)" 1>&2
+        echo "  range=-N               → 현재줄 + 위 N줄 (예: -2)" 1>&2
+        echo "  range=+-N              → 현재줄 + 위 N줄 + 아래 N줄 (예: +-2)" 1>&2
+        return 1
+    fi
+
+    # Check if file exists
+    [ ! -f "$fpath" ] && {
+        echo "Error: File not found: $fpath" 1>&2
+        return 1
+    }
+
+    # Parse range argument (순서 중요: +- 가 + 보다 먼저 와야 함)
+    case "$num_arg" in
+    '' | 0)
+        up=0
+        down=0
+        ;;
+    +-*) # Matches +-N (먼저 검사)
+        num="${num_arg#+-}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be +- followed by a number)" 1>&2
+            return 1
+        fi
+        up="$num"
+        down="$num"
+        ;;
+    +*) # Matches +N
+        up=0
+        num="${num_arg#+}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be + followed by a number)" 1>&2
+            return 1
+        fi
+        down="$num"
+        ;;
+    -*) # Matches -N
+        down=0
+        num="${num_arg#-}"
+        if ! expr "$num" : '^[0-9]\+$' >/dev/null; then
+            echo "Invalid range format: $num_arg (must be - followed by a number)" 1>&2
+            return 1
+        fi
+        up="$num"
+        ;;
+    *[!0-9+-]*) # Catch completely invalid characters early
+        echo "Invalid range format: $num_arg. Use N, +N, -N, or +-N." 1>&2
+        return 1
+        ;;
+    *) # Matches N (interpreted as +N) or potentially invalid combinations
+        if expr "$num_arg" : '^[0-9]\+$' >/dev/null; then
+            up=0
+            down="$num_arg"
+        else
+            echo "Invalid range format: $num_arg. Use N, +N, -N, or +-N." 1>&2
+            return 1
+        fi
+        ;;
+    esac
+
+    # Create backup
+    ts=$(date +%Y%m%d_%H%M%S)
+    bk_fname="${fpath}_${ts}.bak"
+    if ! cp -a "$fpath" "$bk_fname"; then
+        echo "Error: Failed to create backup $bk_fname" 1>&2
+        return 1
+    fi
+
+    # Process the file with awk to remove comments
+    awk -v pat="$search" -v up="$up" -v down="$down" '
+    {
+        lines[NR] = $0
+        # 검색 패턴과 일치하는 라인 번호 저장 (주석 여부와 관계 없음)
+        if ($0 ~ pat) {
+            match_lines[++mc] = NR
+        }
+    }
+    END {
+        # 주석 해제할 라인 마킹
+        for (j = 1; j <= mc; j++) {
+            m = match_lines[j] # 현재 매치된 라인 번호
+            start_line = (m - up > 0) ? m - up : 1
+            end_line = m + down # NR 비교는 아래 루프에서 처리
+
+            for (i = start_line; i <= end_line; i++) {
+                 # 유효한 라인 번호 범위 내에서만 마킹
+                 if (i > 0 && i <= NR) {
+                    mark[i] = 1
+                 }
+            }
+        }
+
+        # 라인 출력, 마크된 라인이고 "# " 로 시작하면 제거 후 출력
+        for (i = 1; i <= NR; i++) {
+            # 라인이 마크되었고, 맨 앞에 (공백 포함 가능) "# "가 있으면 sub 함수로 제거
+            if (mark[i] && sub(/^[[:space:]]*# /, "", lines[i])) {
+                # sub()가 성공하면 (즉, "# "가 있었으면) 변경된 lines[i]를 출력
+                print lines[i]
+            } else {
+                # 마크되지 않았거나, 마크되었지만 "# "로 시작하지 않으면 원본 lines[i] 출력
+                print lines[i]
+            }
+        }
+    }' "$bk_fname" >"$fpath"
+    ret=$?
+
+    # Report results
+    if [ $ret -eq 0 ]; then
+        echo "Hash Remove done. Backup: $bk_fname"
+        if ! cmp -s "$bk_fname" "$fpath"; then
+            echo "--- Diff (${DIFF_CMD}) ---"
+            "$DIFF_CMD" "$bk_fname" "$fpath" # cdiff 사용
+            echo "--------------------------"
+        else
+            echo "Info: No effective changes were made."
+        fi
+        return 0
+    else
+        echo "Error occurred during awk processing (code: $ret). Restoring from backup." 1>&2
+        # Attempt to restore from backup on error
+        if mv "$bk_fname" "$fpath"; then
+            echo "Restored original file from $bk_fname." 1>&2
+        else
+            echo "Error: Failed to restore from backup. Original file may be corrupted. Backup remains: $bk_fname" 1>&2
+        fi
+        return $ret
+    fi
+}
+
+old_hash_remove() {
     local fpath="$1" search="$2" num_arg="$3"
     local num_lines=1
     local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff"
@@ -4251,6 +4727,40 @@ readxx() { [ -n "$debug" ] && {
 # sleepdot // ex) sleepdot 30 or sleepdot
 # $1 로 할당된 실제 시간(초)이 지나면 종료 되도록 개선 sleep $1 과 동일하지만 시각화
 sleepdot() {
+    echo -n "sleepdot $1 "
+    bashver=${BASH_VERSINFO[0]}
+    ((bashver < 3)) && real1sec=1 || real1sec=1
+    s=$(date +%s)
+    c=1
+    stopdot=0
+
+    # Ctrl+C 누르면 stopdot=1 설정
+    trap 'stopdot=1' INT
+
+    [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "
+
+    while [ -z "$x" ]; do
+        [ "$stopdot" = 1 ] && echo && echo "Canceled" && break
+        [ "$1" ] && sleep 1
+        echo -n "."
+        [ $((c % 5)) -eq 0 ] && echo -n " "
+        [ $((c % 30)) -eq 0 ] && echo $c
+        t=$(($(date +%s) - s))
+        [ $((c % 300)) -eq 0 ] && echo
+        c=$((c + 1))
+
+        if [ "$1" ] && [ $t -ge $1 ]; then
+            break
+        elif [ -z "$1" ]; then
+            IFS=z read -t$real1sec -n1 x && break
+        fi
+    done
+
+    trap - INT # trap 해제
+    echo
+}
+
+old_sleepdot() {
     echo -n "sleepdot $1 "
     bashver=${BASH_VERSINFO[0]}
     ((bashver < 3)) && real1sec=1 || real1sec=1
