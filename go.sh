@@ -217,7 +217,7 @@ process_commands() {
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         # cd 명령이 들어왔을때 현재 위치의 ls
-        echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo && ls -ltr | tail -n5 && echo
+        echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo $(pwd) >/dev/shm/pwd && echo && ls -ltr | tail -n5 && echo
         # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
         echo "${command%% *}" | grep -qE "rm|mkdir" >/dev/null 2>&1 && (
             command_args=($command)
@@ -234,7 +234,11 @@ process_commands() {
         # sleep 1 or [Enter]
         if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then
             nodone=y && sleep 1
-        elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd|pwd'; then
+            #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
+        elif [ -z "$IN_BASHCOMM" ] && (
+            set -- $command
+            [ "$1" = "cd" ] && [ -z "$3" ]
+        ); then
             bashcomm
         fi
 
@@ -726,7 +730,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -1253,9 +1257,6 @@ menufunc() {
                         "hh")
                             hh && read -rep "[Enter] " x && continue
                             ;;
-                        "e")
-                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && continue
-                            ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
                                 { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrepn /mnt/ 0 | cper | column -t; } && readx && continue
@@ -1275,8 +1276,17 @@ menufunc() {
                         "em")
                             { mc -b || { yyay mc && mc -b; }; } && continue
                             ;;
+                        "e")
+                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            ;;
                         "ee")
-                            { ranger /etc 2>/dev/null || explorer /etc; } && continue
+                            { ranger /etc 2>/dev/null || explorer /etc; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            ;;
+                        "eee")
+                            { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            ;;
+                        "cdr")
+                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.1 && continue
                             ;;
                         "ll")
                             { journalctl -n10000 -e; } && continue
@@ -1455,9 +1465,6 @@ menufunc() {
             h)
                 gohistory
                 ;;
-            e)
-                { ranger $choice1 2>/dev/null || explorer; }
-                ;;
             t)
                 { htop 2>/dev/null || top; }
                 ;;
@@ -1470,8 +1477,21 @@ menufunc() {
             em)
                 mc -b || { yyay mc && mc -b; }
                 ;;
-            ee)
+            "e")
+                { ranger $choice1 2>/dev/null || explorer; }
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                ;;
+            "ee")
                 { ranger /etc 2>/dev/null || explorer /etc; }
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                ;;
+            "eee")
+                #{ ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd) ; }
+                ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd)
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                ;;
+            "cdr")
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.1 && continue
                 ;;
             ll)
                 { journalctl -n10000 -e; }
@@ -5529,8 +5549,8 @@ domchg() {
 ##############################################################################################################
 
 template_edit() { conff $1; }
-template_view() { template_copy $1 /dev/stdout; }
-
+template_view() { template_copy "$1" /dev/stdout; }
+template_insert() { template_view "$1" | tee -a "$2" >/dev/null; }
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -7765,6 +7785,23 @@ webmail IN  A     $serverip
 
 @   IN  MX 10 mail
 @   IN  TXT "v=spf1 ip4:$serverip -all"
+EOF
+
+        ;;
+
+    commands.py)
+        cat >"$file_path" <<EOF
+from ranger.api.commands import Command
+
+def hook_ready(fm):
+    def update_pwd():
+        with open("$pwdpath", "w") as f:
+            f.write(fm.thisdir.path)
+    fm.signal_bind('cd', update_pwd)
+    update_pwd()  # 초기 경로 설정
+
+import ranger.api
+ranger.api.hook_ready = hook_ready
 EOF
 
         ;;
