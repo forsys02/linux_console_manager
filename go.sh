@@ -1481,7 +1481,7 @@ menufunc() {
                 mc -b || { yyay mc && mc -b; }
                 ;;
             "e")
-                if [ -f "$cmd_choice1" ]; then cmd_choice1=$(dirname "$cmd_choice1"); fi
+                if [ -f "$choice1" ]; then choice1=$(dirname "$choice1"); fi
                 { ranger $choice1 2>/dev/null || explorer; }
                 cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
                 ;;
