@@ -148,6 +148,7 @@ process_commands() {
     local command="$1"
     local cfm=$2
     local nodone=$3
+    #readxy "in process_commands"
 
     [[ ${command:0:1} == "#" ]] && return # 주석선택시 취소
 
@@ -240,6 +241,7 @@ process_commands() {
             [ "$1" = "cd" ] && [ -z "$3" ]
         ); then
             bashcomm
+            nodone=y
         fi
 
         #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [60s.Enter] " && read -re -t 60 x ; }
@@ -1277,6 +1279,7 @@ menufunc() {
                             { mc -b || { yyay mc && mc -b; }; } && continue
                             ;;
                         "e")
+                            if [ -f "$cmd_choice1" ]; then cmd_choice1=$(dirname "$cmd_choice1"); fi
                             { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
                             ;;
                         "ee")
@@ -1286,7 +1289,7 @@ menufunc() {
                             { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
                             ;;
                         "cdr")
-                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.1 && continue
+                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.5 && continue
                             ;;
                         "ll")
                             { journalctl -n10000 -e; } && continue
@@ -1478,6 +1481,7 @@ menufunc() {
                 mc -b || { yyay mc && mc -b; }
                 ;;
             "e")
+                if [ -f "$cmd_choice1" ]; then cmd_choice1=$(dirname "$cmd_choice1"); fi
                 { ranger $choice1 2>/dev/null || explorer; }
                 cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
                 ;;
@@ -1491,7 +1495,7 @@ menufunc() {
                 cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
                 ;;
             "cdr")
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.1 && continue
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.5 && continue
                 ;;
             ll)
                 { journalctl -n10000 -e; }
@@ -2070,6 +2074,42 @@ dline() {
     delimiter="${2:-=}"
     printf "%.0s$delimiter" $(seq "$num_characters")
     printf "\n"
+}
+
+# 줄긋기와 제목
+dlines() {
+    local total_len=46
+    local title=""
+    local last="${!#}"
+
+    if [ "$last" -eq "$last" ] 2>/dev/null && [ "$last" -ge 40 ]; then
+        total_len=$last
+        set -- "${@:1:$(($# - 1))}"
+    fi
+
+    # 줄바꿈 제거 + 양끝 공백 제거
+    title="$(echo "$*" | tr '\n' ' ' | sed 's/^ *//;s/ *$//')"
+
+    if [ -z "$title" ]; then
+        printf '%.0s=' $(seq "$total_len")
+        printf '\n'
+        return
+    fi
+
+    local middle=" [ $title ] "
+    local middle_len=${#middle}
+    local remain_len=$((total_len - middle_len))
+
+    if [ "$remain_len" -lt 0 ]; then
+        printf "%s\n" "$middle"
+    else
+        local left_len=$((remain_len / 2))
+        local right_len=$((remain_len - left_len))
+        printf '%.0s=' $(seq "$left_len")
+        printf "%s" "$middle"
+        printf '%.0s=' $(seq "$right_len")
+        printf '\n'
+    fi
 }
 
 # Function to hl percentages and optionally format KiB numbers human-readably (-h).
@@ -7536,13 +7576,12 @@ EOF
 <VirtualHost *:80>
     ServerName $SERVERNAME
     ServerAlias webmail.*
-    DocumentRoot $roundcubepath/roundcube
+    DocumentRoot $webroot/roundcube
 
-    <Directory $roundcubepath/roundcube/>
+    <Directory $webroot/roundcube/>
         Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
-        # PHP 설정 (필요시)
         # php_value memory_limit 64M
         # php_value upload_max_filesize 10M
         # php_value post_max_size 12M
