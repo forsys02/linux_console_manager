@@ -155,7 +155,36 @@ process_commands() {
 
         #echo && echo "=============================================="
         echo "=============================================="
-        if partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
+        #if partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
+        # scut 감지
+
+        # 명령어가 바로가기 scut 인시 판별
+        partcom=""
+        if [ "${command}" != "${command#:}" ]; then
+            partcom=$(echo "$command" | awk '
+    {
+        split($0, blocks, /[;:]/)
+        start = ($0 ~ /^:/) ? 2 : 1
+
+        for (i = start + 1; i <= length(blocks); i++) {
+            blk = blocks[i]
+            gsub(/^[ \t]+|[ \t]+$/, "", blk)
+            n = split(blk, a, /[ \t]+/)
+
+            if (n == 1 && a[1] ~ /^[a-zA-Z0-9_-]+$/) {
+                print a[1]
+                break
+            }
+        }
+    }')
+        else
+            if [ "${command%% *}" = "$command" ]; then
+                partcom="$command"
+            fi
+        fi
+        #		readxy "partcom: $partcom"
+
+        if [ -n "$partcom" ] && st "$partcom" >/dev/null; then
             echo "→ 내부 메뉴 [$partcom] 로 점프"
             menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
             return 0
@@ -1181,7 +1210,7 @@ menufunc() {
                             #                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
                             #                            ;; # exec terminates
                         "b" | "00")
-                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut &&
+                            echo "Back to previous menu.. [$ooldscut]" && savescut &&
                                 menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
                             ;;
                         "bb")
@@ -1192,11 +1221,11 @@ menufunc() {
                             echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut &&
                                 menufunc "$(scutsub "$ooooldscut")" "$(scuttitle "$ooooldscut")" "$(notscutrelay "$ooooldscut")"
                             ;;
-                        "<")
+                        "<" | "before")
                             beforescut=$(st $scut b)
                             echo "Move to Before menu.. [$beforescut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$beforescut")" "$(scuttitle "$beforescut")" "$(notscutrelay "$beforescut")"
                             ;;
-                        ">")
+                        ">" | "next")
                             nextscut=$(st $scut n)
                             echo "Move to Next menu.. [$nextscut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$nextscut")" "$(scuttitle "$nextscut")" "$(notscutrelay "$nextscut")"
                             ;;
@@ -1401,8 +1430,8 @@ menufunc() {
                 #                savescut && exec $gofile $ooooldscut # back to previous menu
                 #                ;;
             b | 00)
-                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
-                savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
+                echo "Back to previous menu.. [$ooldscut]" &&
+                    savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
                 ;;
             bb)
                 echo "Back two menus.. [$oooldscut]" && sleep 0.5
@@ -3055,7 +3084,7 @@ confmy() {
 }
 conff() {
     saveVAR
-    [ $1 ] && vi22 "$gofile" "$1" || vi22 "$gofile"
+    [ -n "$1" ] && vi22 "$gofile" "$1" || vi22 "$gofile"
     savescut && exec "$gofile" "$scut"
 }
 confc() { rollback "$envorg"; }
@@ -7486,6 +7515,7 @@ EOF
         cat >"$file_path" <<EOF
 <VirtualHost *:80>
     ServerName $SERVERNAME
+    ServerAlias webmail.*
     DocumentRoot $roundcubepath/roundcube
 
     <Directory $roundcubepath/roundcube/>
@@ -7500,7 +7530,55 @@ EOF
 
     ErrorLog ${APACHE_LOG_DIR}/roundcube_error.log
     CustomLog ${APACHE_LOG_DIR}/roundcube_access.log combined
+
+    #RewriteEngine on
+    #RewriteCond %{SERVER_NAME} ^webmail\..*$
+    #RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]
 </VirtualHost>
+EOF
+
+        ;;
+
+    teldrive.service)
+        cat >"$file_path" <<EOF
+[Unit]
+Description=Teldrive Service (run mode - Optimized)
+Documentation=https://github.com/divyam234/teldrive
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=teldrive
+Group=teldrive
+
+ExecStart=/usr/local/bin/teldrive run \
+    --tg-app-id "$telegramappid" \
+    --tg-app-hash "$telegramapphash" \
+    --jwt-secret "$jwtsecret" \
+    --tg-uploads-encryption-key "$tguploadsencryptionkey" \
+    --db-data-source "postgresql://$teldbuser:"$teldbpw"@$teldbhost:5432/$teldbname?sslmode=disable" \
+    --log-level INFO \
+    --tg-stream-multi-threads 4 \
+    --tg-stream-buffers 12 \
+    --server-port $webport
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        ;;
+
+    webmail.conf)
+        cat >"$file_path" <<EOF
+Alias /webmail $webroot/roundcube/public_html
+<Directory $webroot/roundcube/public_html>
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
 EOF
 
         ;;
@@ -7618,7 +7696,7 @@ EOF
     <div class="info">
       <p><strong>등록일:</strong> $created_at</p>
       <p><strong>도메인:</strong> $yourdomain</p>
-      <p><strong>서버 IP:</strong> $server_ip</p>
+      <p><strong>서버 IP:</strong> $publicip</p>
       <p><strong>계정 ID:</strong> $id</p>
       <p><strong>홈 디렉토리:</strong> $webroot</p>
       <p><strong>MYSQL DB 이름:</strong> $dbid</p>
