@@ -4823,6 +4823,46 @@ sleepdot() {
     c=1
     stopdot=0
 
+    trap 'stopdot=1' INT
+
+    [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "
+
+    while [ -z "$x" ]; do
+        if [ "$stopdot" = 1 ]; then
+            echo
+            echo "Canceled"
+            trap - INT
+            return 1 # Ctrl+C로 중단 시 실패로 종료
+        fi
+
+        [ "$1" ] && sleep 1
+        echo -n "."
+        [ $((c % 5)) -eq 0 ] && echo -n " "
+        [ $((c % 30)) -eq 0 ] && echo $c
+        t=$(($(date +%s) - s))
+        [ $((c % 300)) -eq 0 ] && echo
+        c=$((c + 1))
+
+        if [ "$1" ] && [ $t -ge $1 ]; then
+            break
+        elif [ -z "$1" ]; then
+            IFS=z read -t$real1sec -n1 x && break
+        fi
+    done
+
+    trap - INT
+    echo
+    return 0 # 정상 종료
+}
+
+old_sleepdot() {
+    echo -n "sleepdot $1 "
+    bashver=${BASH_VERSINFO[0]}
+    ((bashver < 3)) && real1sec=1 || real1sec=1
+    s=$(date +%s)
+    c=1
+    stopdot=0
+
     # Ctrl+C 누르면 stopdot=1 설정
     trap 'stopdot=1' INT
 
