@@ -1238,20 +1238,23 @@ menufunc() {
                         "chat" | "ai" | "hi" | "hello")
                             ollama run gemma3 2>/dev/null && continue
                             ;;
-                        "conf")
-                            conf && continue
-                            ;;
-                        "confmy")
-                            confmy && continue
-                            ;;
-                        "confc")
-                            confc && continue
-                            ;;
-                        "conff")
-                            conff && continue
-                            ;;
-                        "conffc")
-                            conffc && continue
+                            #"conf")
+                            #    conf && continue
+                            #    ;;
+                            #"confmy")
+                            #    confmy && continue
+                            #    ;;
+                            #"confc")
+                            #    confc && continue
+                            #    ;;
+                            #"conff")
+                            #    conff "$cmd_choice1" && continue
+                            #    ;;
+                            #"conffc")
+                            #    conffc && continue
+                            #    ;;
+                        "goo")
+                            echo "디시 인사이드 말투. 한글로" && readxy && continue
                             ;;
                         "h")
                             gohistory && continue
@@ -1289,7 +1292,7 @@ menufunc() {
                             { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
                             ;;
                         "cdr")
-                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.5 && continue
+                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && ls -ltr | tail && bashcomm && continue
                             ;;
                         "ll")
                             { journalctl -n10000 -e; } && continue
@@ -1324,7 +1327,8 @@ menufunc() {
                                 }
 
                             # Check 3: Valid Linux command? (Not purely numeric and exists)
-                            elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
+                            #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
+                            elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "${cmd_choice%%[|;]*}" &>/dev/null; then
                                 echo # Newline for formatting
                                 echo "Executing command: $cmd_choice $cmd_choice1"
                                 process_commands "$cmd_choice $cmd_choice1" y
@@ -1415,21 +1419,24 @@ menufunc() {
                     exit 0
                 fi
                 ;;
-            conf)
-                conf # vi.go.env
+                #conf)
+                #    conf # vi.go.env
+                #    ;;
+                #confmy)
+                #    confmy # vi.go.my.env
+                #    ;;
+                #confc)
+                #    confc # rollback go.env
+                #    ;;
+                #conff)
+                #    [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
+                #    ;;
+            "goo")
+                echo "디시 인사이드 말투. 한글로. 쉽게 이해할 수 있는 예를 들면서, 마무리에 결론만 내리지 말고,  꼬리를 무는 질문을 던져줘." && readxy goo
                 ;;
-            confmy)
-                confmy # vi.go.my.env
-                ;;
-            confc)
-                confc # rollback go.env
-                ;;
-            conff)
-                [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
-                ;;
-            conffc)
-                conffc # rollback go.sh
-                ;;
+                #conffc)
+                #    conffc # rollback go.sh
+                #    ;;
                 #            bm)
                 #                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
                 #                savescut && exec $gofile $ooldscut # back to previous menu
@@ -1495,7 +1502,7 @@ menufunc() {
                 cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
                 ;;
             "cdr")
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && sleep 0.5 && continue
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && ls -ltr | tail && bashcomm
                 ;;
             ll)
                 { journalctl -n10000 -e; }
@@ -3196,6 +3203,30 @@ push() {
         RST
     fi
     # 기본적으로 인자 출력
+    echo "$message"
+}
+
+push1() {
+    local message
+    message="$*"
+    [ ! "$message" ] && IFS='' read -d '' -t1 message
+    [ ! "$message" ] && message="$HOSTNAME"
+
+    if [[ -z ${telegram_token} || -z ${telegram_chatid} ]]; then
+        echo -e "\a[push1] $message" # 벨과 함께 메시지 출력
+        return 1
+    fi
+
+    curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
+        -d chat_id=${telegram_chatid} -d text="${message}" >/dev/null
+    result=$?
+    if [ "$result" == 0 ]; then
+        GRN1 && echo "push1 msg sent"
+    else
+        RED1 && echo "Err:$result -> push1 send error"
+    fi
+    RST
+
     echo "$message"
 }
 
@@ -4915,6 +4946,15 @@ vi22() {
     [ ! -f "$1" ] && return 1
     rbackup "$1"
     if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
+}
+# 인수중 하나 선택
+vi3() {
+    [ $# -eq 0 ] && echo "Usage: vi3 file1 [file2 ...]" && return 1
+    select f in "$@" "Cancel"; do
+        [ "$f" = "Cancel" ] && break
+        [ -n "$f" ] && [ -f "$f" ] && vi2 "$f" || echo "'$f' not found"
+        break
+    done
 }
 vi2() {
     [ ! -f "$1" ] && echo "Canceled..." && return 1
