@@ -238,17 +238,21 @@ process_commands() {
             #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
         elif [ -z "$IN_BASHCOMM" ] && (
             set -- $command
-            [ "$1" = "cd" ] && [ -z "$3" ]
+            [ "${1%% *}" = "cd" ] && [ -z "$3" ]
         ); then
+            #readxy "1:$1 2:$2 3:$3"
             bashcomm
             nodone=y
+        else
+            :
+            #readxy "1:$1 2:$2 3:$3 IN_BASHCOMM:$IN_BASHCOMM"
         fi
 
         #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [60s.Enter] " && read -re -t 60 x ; }
         [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -re x; }
     else
         echo "$command"
-        echo "Canceled..."
+        echo "process_commands -> Canceled..."
     fi
     cmd_choice=""
 }
@@ -732,7 +736,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -1254,7 +1258,7 @@ menufunc() {
                             #    conffc && continue
                             #    ;;
                         "goo")
-                            echo "디시 인사이드 말투. 한글로" && readxy && continue
+                            echo "디시 인사이드 말투. 한글로. 쉽게 이해할 수 있는 예를 들면서, 마무리에 결론만 내리지 말고,  꼬리를 무는 질문을 던져줘" && readxy && continue
                             ;;
                         "h")
                             gohistory && continue
@@ -5325,6 +5329,28 @@ vmipscan() {
 
 # explorer.sh
 explorer() {
+    [ $# -eq 0 ] && echo "Usage: explorer file1 [file2 ...]" && return 1
+
+    select f in "$@" "Cancel"; do
+        [ "$f" = "Cancel" ] && break
+        [ -n "$f" ] || continue
+
+        if command -v ranger &>/dev/null; then
+            ranger "$f"
+        else
+            explorer="$HOME/explorer.sh"
+            if [ -f "$explorer" ]; then
+                "$explorer" "$f"
+            else
+                curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$f"
+            fi
+        fi
+        break
+    done
+}
+
+old_explorer() {
+
     command -v ranger &>/dev/null && {
         ranger "$1"
         return
@@ -7921,6 +7947,62 @@ def hook_ready(fm):
 
 import ranger.api
 ranger.api.hook_ready = hook_ready
+EOF
+
+        ;;
+
+    hook.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+echo "[HOOK] 인증용 TXT 레코드 추가 중"
+export mydomain="\$CERTBOT_DOMAIN"
+export txt_value="\$CERTBOT_VALIDATION"
+export zone_file="$zone_file"
+export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+
+echo "\$txt_record" >> "\$zone_file"
+rndc reload "$mydomain"
+EOF
+
+        ;;
+
+    cleanup.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+
+echo "[CLEANUP] 인증용 TXT 레코드 제거 중..."
+
+export mydomain="\$CERTBOT_DOMAIN"
+export txt_value="\$CERTBOT_VALIDATION"
+export zone_file="$zone_file"
+export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+
+# 레코드 제거 (해당 줄 삭제)
+sed -i "/_acme-challenge.*IN TXT.*\$txt_value/d" "\$zone_file"
+
+# BIND 설정 재적용
+rndc reload "$mydomain"
+
+echo "[CLEANUP] 완료: $txt_record 삭제됨"
+EOF
+
+        ;;
+
+    renew.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+
+export CERTBOT_DOMAIN="$mydomain"
+export CERTBOT_EMAIL="$myemail"
+
+certbot renew \
+  --manual-auth-hook "$HOME/hook-${mydomain}.sh" \
+  --manual-cleanup-hook "$HOME/cleanup-${mydomain}.sh" \
+  --preferred-challenges dns \
+  --agree-tos \
+  --manual \
+  --deploy-hook "systemctl reload apache2" \
+  --cert-name $certpath
 EOF
 
         ;;
