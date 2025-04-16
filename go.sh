@@ -185,7 +185,7 @@ process_commands() {
         fi
         #		readxy "partcom: $partcom"
 
-        if [ -n "$partcom" ] && st "$partcom" >/dev/null; then
+        if [ -n "$partcom" ] && [ -z "$IN_BASHCOMM" ] && st "$partcom" >/dev/null; then
             echo "→ 내부 메뉴 [$partcom] 로 점프"
             menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
             return 0
@@ -688,7 +688,38 @@ menufunc() {
 
                                 # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
                                 #file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
-                                file_paths="$(echo "$c_cmd" | awk '/^[[:space:]]*#/{next} {for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath}}}}')"
+                                #file_paths="$(echo "$c_cmd" | awk '/^[[:space:]]*#/{next} {for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath}}}}')"
+                                # 파일경로에 $포함 변수경로는 제외
+                                file_paths="$(echo "$c_cmd" | awk '
+/^[[:space:]]*#/ { next }
+
+{
+    for (i = 1; i <= NF; i++) {
+        token = $i
+
+        # 따옴표 제거
+        gsub(/^["'"'"']|["'"'"']$/, "", token)
+
+        # $가 포함된 변수 경로는 제외
+        if (token ~ /\$/) continue
+
+        # URL 제외
+        if (token ~ /^https?:\/\//) continue
+
+        # 경로 형식 필터링
+        if (token ~ /^\/[^[:space:]]+$/ &&
+            token ~ /\/[^\/]+\/[^\/]+/ &&
+            token !~ /^\/dev\// &&
+            token !~ /^\/proc\// &&
+            token !~ /var[A-Z][a-zA-Z0-9_.-]*/) {
+
+            # 실제로 존재하는 파일인 경우만 출력
+            cmd = "[ -f \"" token "\" ]"
+            if (system(cmd) == 0)
+                print token
+        }
+    }
+}')"
 
                                 # 해당 서버에 없는 경로에 대해서는 음영처리 // 있는 경로는 밝게
                                 # 서버에 따라 환경파일의 경로가 달라 파일 존재 여부 밝음/어둠으로 체크
@@ -1257,9 +1288,11 @@ menufunc() {
                             #"conffc")
                             #    conffc && continue
                             #    ;;
-                        "goo")
-                            echo "디시 인사이드 말투. 한글로. 쉽게 이해할 수 있는 예를 들면서, 마무리에 결론만 내리지 말고,  꼬리를 무는 질문을 던져줘" && readxy && continue
-                            ;;
+                            #"goo")
+                            #    echo "
+                            #디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운 아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
+                            #" && readxy && continue
+                            #                            ;;
                         "h")
                             gohistory && continue
                             ;;
@@ -1435,9 +1468,11 @@ menufunc() {
                 #conff)
                 #    [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
                 #    ;;
-            "goo")
-                echo "디시 인사이드 말투. 한글로. 쉽게 이해할 수 있는 예를 들면서, 마무리에 결론만 내리지 말고,  꼬리를 무는 질문을 던져줘." && readxy goo
-                ;;
+                #            "goo")
+                #                echo "
+                #디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운 아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
+                #" && readxy && continue
+                #                ;;
                 #conffc)
                 #    conffc # rollback go.sh
                 #    ;;
@@ -1698,6 +1733,9 @@ ff() {
 
 ffc() {
     ff "$@" | { batcat -l bash 2>/dev/null || cat; }
+}
+fffc() {
+    fff "$@" | { batcat -l bash 2>/dev/null || cat; }
 }
 
 #find() { test -z "$1" && command find . -type f -exec du -m {} + | awk '{if($1>10)printf "\033[1;31m%-60s %s MB\033[0m\n",$2,$1;else printf "%-60s %s MB\n",$2,$1}' || command find "$@"; }
@@ -3163,6 +3201,12 @@ conffc() { rollback "$gofile"; }
 
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env; }
+
+goo() {
+    echo "
+디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
+"
+}
 
 # print conf
 pconf() {
@@ -4949,6 +4993,28 @@ old_sleepdot() {
 vi22() {
     [ ! -f "$1" ] && return 1
     rbackup "$1"
+    if [ -n "$2" ]; then
+        vim -c "autocmd VimEnter * ++once let @/ = '$2'" \
+            -c "autocmd VimEnter * ++once normal! n zt" "$1"
+    else
+        vim "$1" || vi "$1"
+    fi
+}
+
+old__vi22() {
+    [ ! -f "$1" ] && return 1
+    rbackup "$1"
+    if [ -n "$2" ]; then
+        vim -c "autocmd VimEnter * ++once execute '/$2'" \
+            -c "autocmd VimEnter * ++once normal! zt" "$1"
+    else
+        vim "$1" || vi "$1"
+    fi
+}
+
+old_vi22() {
+    [ ! -f "$1" ] && return 1
+    rbackup "$1"
     if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
 }
 # 인수중 하나 선택
@@ -5331,21 +5397,21 @@ vmipscan() {
 explorer() {
     [ $# -eq 0 ] && echo "Usage: explorer file1 [file2 ...]" && return 1
 
+    open() {
+        if command -v ranger &>/dev/null; then
+            ranger "$1"
+        else
+            sh="$HOME/explorer.sh"
+            [ -f "$sh" ] || curl -m1 http://byus.net/explorer.sh -o "$sh" && chmod 755 "$sh"
+            "$sh" "$1"
+        fi
+    }
+
+    [ $# -eq 1 ] && open "$1" && return
+
     select f in "$@" "Cancel"; do
         [ "$f" = "Cancel" ] && break
-        [ -n "$f" ] || continue
-
-        if command -v ranger &>/dev/null; then
-            ranger "$f"
-        else
-            explorer="$HOME/explorer.sh"
-            if [ -f "$explorer" ]; then
-                "$explorer" "$f"
-            else
-                curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$f"
-            fi
-        fi
-        break
+        [ -n "$f" ] && open "$f" && break
     done
 }
 
@@ -5694,7 +5760,15 @@ domchg() {
 ##############################################################################################################
 ##############################################################################################################
 
-template_edit() { conff $1; }
+old_template_edit() { conff $1; }
+template_edit() {
+    [ $# -eq 0 ] && echo "Usage: template_edit file1 [file2 ...]" && return 1
+    select f in "$@" "Cancel"; do
+        [ "$f" = "Cancel" ] && break
+        [ -n "$f" ] && conff "$f" || echo "'$f' not found"
+        break
+    done
+}
 template_view() { template_copy "$1" /dev/stdout; }
 template_insert() { template_view "$1" | tee -a "$2" >/dev/null; }
 template_copy() {
@@ -7996,8 +8070,8 @@ export CERTBOT_DOMAIN="$mydomain"
 export CERTBOT_EMAIL="$myemail"
 
 certbot renew \
-  --manual-auth-hook "$HOME/hook-${mydomain}.sh" \
-  --manual-cleanup-hook "$HOME/cleanup-${mydomain}.sh" \
+  --manual-auth-hook "/etc/letsencrypt/scripts/hook-${mydomain}.sh" \
+  --manual-cleanup-hook "/etc/letsencrypt/scripts/cleanup-${mydomain}.sh" \
   --preferred-challenges dns \
   --agree-tos \
   --manual \
