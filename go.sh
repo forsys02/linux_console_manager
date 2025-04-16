@@ -3216,9 +3216,39 @@ conffc() { rollback "$gofile"; }
 # confp # env 환경변수로 불러와 스크립트가 실행되는 동안 변수로 쓸수 있음
 confp() { vi2a $HOME/go.private.env; }
 
+# screen server // 스크립트에서 백그라운드로 계속 실행시키고자 하는 경우
+scserver() {
+    set -- $@ # 공백 기준으로 재파싱
+    local title_raw="${1}_${2}"
+    local title=$(echo "$title_raw" | sed 's/[^a-zA-Z0-9._-]/_/g')
+
+    screen -dmS "$title" bash -c "$* ;echo \"On Screen ---> $title\" ;echo;df -h; exec /bin/bash"
+    echo "Started screen session '$title' with: $*"
+    screen -list
+}
+# Detached 세션 번호만 순서대로 접속
+scra() {
+    screen -list | grep 'Detached)' | awk '{print $1}' | cut -d. -f1 | tac | while read s; do
+        echo "접속: $s"
+        screen -rx "$s" </dev/tty
+    done
+    scl
+}
+
+# 모든 세션 번호 순서대로 접속 (Attached + Detached)
+scraa() {
+    screen -list | grep -E '(Attached|Detached)\)' | awk '{print $1}' | cut -d. -f1 | tac | while read s; do
+        echo "접속: $s"
+        screen -rx "$s" </dev/tty
+    done
+    scl
+}
+
+scl() { screen -ls | cgrepline1 Attached | cgrepline Detached; }
+
 goo() {
     echo "
-디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
+디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스코드 부분에는 넣으면 안되.
 "
 }
 
