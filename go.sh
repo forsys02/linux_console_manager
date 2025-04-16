@@ -213,6 +213,7 @@ process_commands() {
             #echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
+        # cmd "/path/to/file" && echo $_ | xargs -I {} sh -c 'chmod +x {} && cat {}'
         lastarg=""
         lastarg="$(echo "$command" | awk99 | sed 's/"//g')" # 마지막 인수 재사용시 "제거 (ex.fileurl)
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
@@ -755,9 +756,10 @@ menufunc() {
                                 fi
 
                                 # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi 색칠 color
+                                # 줄길이 길면 다음줄로 fold
                                 printf "\e[1m%-3s\e[0m " ${pi}
                                 #echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
-                                echo "$processed_cmd" | cut -c 1-350 | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
+                                echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
                                     -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
                                     -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
@@ -767,7 +769,7 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
@@ -1116,8 +1118,20 @@ menufunc() {
 
                                     # 순환하면서 varVAR 변환 11:11 같이 숫자: 이 포함된 경우 sed 에서 발작증상 \1 와 충돌
                                     tmp_token="__REPL_TOKEN__"
-                                    while echo "$cmd" | grep -Eq "(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)"; do
-                                        cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:")
+                                    #readxy "before / regex_safe_var_name $regex_safe_var_name"
+                                    #while echo "$cmd" | grep -Eq "(^|[^a-zA-Z0-9])$regex_safe_var_name([^a-zA-Z0-9]|$)"; do
+                                    counter=0
+                                    while echo "$cmd" | grep -Eq "$regex_safe_var_name([^a-zA-Z0-9]|$)"; do
+                                        if ((counter++ > 20)); then
+                                            echo "ERROR: Possible infinite loop detected"
+                                            break
+                                        fi
+                                        #readxy "regex_safe_var_name $regex_safe_var_name // {tmp_token} ${tmp_token}"
+                                        #echo "DEBUG: Trying to replace '$regex_safe_var_name' in '$cmd'"
+                                        #cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:")
+                                        escaped_regex_safe_var_name=$(printf '%s' "$regex_safe_var_name" | sed -e 's/[]\/$*.^|[]/\\&/g')
+                                        cmd=$(printf '%s' "$cmd" | sed -E "s:$escaped_regex_safe_var_name([^a-zA-Z0-9]|$):${tmp_token}\\1:g")
+                                        #echo "DEBUG: After : '$cmd'"
                                         cmd="${cmd//$tmp_token/$escaped_value}"
                                     done
                                     #echo "===before====" ; declare -f "$escaped_value"
@@ -5018,6 +5032,14 @@ old_vi22() {
     if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
 }
 # 인수중 하나 선택
+cat3() {
+    [ $# -eq 0 ] && echo "Usage: cat3 file1 [file2 ...]" && return 1
+    select f in "$@" "Cancel"; do
+        [ "$f" = "Cancel" ] && break
+        [ -n "$f" ] && [ -f "$f" ] && cat "$f" || echo "'$f' not found"
+        break
+    done
+}
 vi3() {
     [ $# -eq 0 ] && echo "Usage: vi3 file1 [file2 ...]" && return 1
     select f in "$@" "Cancel"; do
