@@ -77,8 +77,8 @@ decrypt() {
     echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null
 }
 [ -f ~/.go.private.var ] && source ~/.go.private.var
-# 10분 이내 export 된 변수 재사용
-[ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +10 -exec rm -f "$HOME/.go.export.var" \;
+# +분 이내 export 된 변수 재사용
+[ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +3600 -exec rm -f "$HOME/.go.export.var" \;
 [ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
 [ -f ~/.go.export.var ] && source "$HOME/.go.export.var" #&& rm -f "$HOME/.go.export.var"
 
@@ -245,7 +245,8 @@ process_commands() {
         echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
-        if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]]; then
+        #if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then
+        if echo "$command" | egrep -q '^(vi.*|explorer.*|: nodone.*|bm)'; then
             nodone=y && sleep 1
             #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
         elif [ -z "$IN_BASHCOMM" ] && (
@@ -2828,7 +2829,7 @@ blkid2fstab() {
     echo "$fstabadd" >>/etc/fstab
 }
 
-# 명령어 사용가능여부 체크 acmd curl -m1 -o
+# 명령어 사용가능여부 체크 acmd curl -m3 -o
 able() { command -v "$1" &>/dev/null && return 0 || return 1; }
 
 # 명령어 이름 출력후 결과 출력
@@ -3320,9 +3321,9 @@ push() {
     fi
 
     if [[ ${telegram_token} && ${telegram_chatid} ]]; then
-        curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" >/dev/null
+        curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" >/dev/null
         result=$?
-        #curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
+        #curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
         [ "$result" == 0 ] && { GRN1 && echo "push msg sent"; } || { RED1 && echo "Err:$result ->  push send error"; }
         RST
     fi
@@ -3341,7 +3342,7 @@ push1() {
         return 1
     fi
 
-    curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
+    curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
         -d chat_id=${telegram_chatid} -d text="${message}" >/dev/null
     result=$?
     if [ "$result" == 0 ]; then
@@ -3437,7 +3438,7 @@ alarm() {
         local days="${input:8:2}"
         [ -z "$days" ] && days=0
         telegram_msg="${time_in_hours}:${time_in_minutes}-Alarm ${telegram_msg}"
-        echo ": alarm_task_$input && curl -m1 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at "$time_in_hours":"$time_in_minutes" "$( ((days > 0)) && echo "today + $days" days)" &>/dev/null
+        echo ": alarm_task_$input && curl -m3 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at "$time_in_hours":"$time_in_minutes" "$( ((days > 0)) && echo "today + $days" days)" &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
@@ -3459,7 +3460,7 @@ alarm() {
         adjusted_minutes=$((time_in_minutes))
         ((wait_seconds < 0)) && wait_seconds=$((60 + wait_seconds)) && adjusted_minutes=$((time_in_minutes - 1))
 
-        echo ": alarm_task_$input && sleep $wait_seconds && curl -m1 -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
+        echo ": alarm_task_$input && sleep $wait_seconds && curl -m3 -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
@@ -3476,7 +3477,7 @@ alarm() {
 
         date
         #echo "input: $input // msg: $telegram_msg"
-        sleepdot $time_in_seconds && curl -m1 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
+        sleepdot $time_in_seconds && curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
