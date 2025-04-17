@@ -80,7 +80,7 @@ decrypt() {
 # 10분 이내 export 된 변수 재사용
 [ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +10 -exec rm -f "$HOME/.go.export.var" \;
 [ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
-[ -f ~/.go.export.var ] && source "$HOME/.go.export.var" && rm -f "$HOME/.go.export.var"
+[ -f ~/.go.export.var ] && source "$HOME/.go.export.var" #&& rm -f "$HOME/.go.export.var"
 
 # 터미널 자동감지
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
@@ -8250,25 +8250,30 @@ check_mount() {
 }
 add_record() {
   check_mount
-  echo "_acme-challenge.\${CERTBOT_DOMAIN}. IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
+  TMPFILE="\${ZONEFILE}.tmp"
+  # 미삭제분 삭제
+  sed "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.\(\s\+[0-9]\+\)\?\s\+IN\s\+TXT/d" "\$ZONEFILE" > "\$TMPFILE" && mv "\$ZONEFILE" "\${ZONEFILE}.org" && mv "\$TMPFILE" "\$ZONEFILE"
+  # 추가 TTL 300 강제조정
+  echo "_acme-challenge.\${CERTBOT_DOMAIN}. 300 IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
   # SOA serial 자동 갱신 (YYYYMMDDHH)
-  sed -i '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE"
+  # sed -i '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE"
+  # sed '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE" > "\$TMPFILE" && mv "\$TMPFILE" "\$ZONEFILE"
   echo "trigger" > "\$TMPFLAG"
   echo "[✔] TXT 레코드 추가됨: _acme-challenge.\${CERTBOT_DOMAIN}"
 }
 
 remove_record() {
   check_mount
-  sed -i "/_acme-challenge.\${CERTBOT_DOMAIN}/d" "\$ZONEFILE"
+  #sed -i "/_acme-challenge.\${CERTBOT_DOMAIN}/d" "\$ZONEFILE"
   echo "[✔] TXT 레코드 제거됨"
 }
 
 wait_propagation() {
   for i in \$(seq 1 "\$MAX_RETRIES"); do
-    dig +short TXT _acme-challenge."\$CERTBOT_DOMAIN" @8.8.8.8 | grep -q "\$CERTBOT_VALIDATION" && {
+    dig +short TXT _acme-challenge."\$CERTBOT_DOMAIN" @\$sshrhost | grep -q "\$CERTBOT_VALIDATION" && {
       echo "[✔] DNS 전파 확인됨"; return 0;
     }
-    echo "[\$i/\$MAX_RETRIES] DNS 전파 대기 중... (\${PROPAGATION_WAIT_TIME}초 후 재시도)" # 10 -> MAX_RETRIES
+    echo "[\$i/\$MAX_RETRIES] DNS 전파 대기 중... (\${PROPAGATION_WAIT_TIME}초 후 재시도)"
     sleep "\$PROPAGATION_WAIT_TIME"
   done
   echo "[✖] 전파 실패 – 수동 확인 필요"; return 1
