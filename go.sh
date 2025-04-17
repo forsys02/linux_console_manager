@@ -69,7 +69,18 @@ fi
 
 # varVAR reuse -> saveVAR -> autoloadVAR
 # loadVAR
+decrypt() {
+    [ "$1" ] && local k="${!#}"
+    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" #echo "k: $k";
+    IFS='' read -d '' -t1 encrypted_message
+    [ "$2" ] && encrypted_message="$encrypted_message $(echo "${*:1:$(($# - 1))}")"
+    echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null
+}
 [ -f ~/.go.private.var ] && source ~/.go.private.var
+# 10분 이내 export 된 변수 재사용
+[ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +10 -exec rm -f "$HOME/.go.export.var" \;
+[ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
+[ -f ~/.go.export.var ] && source "$HOME/.go.export.var" && rm -f "$HOME/.go.export.var"
 
 # 터미널 자동감지
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
@@ -606,7 +617,9 @@ menufunc() {
                 [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
                 readxx $LINENO "lisof_comm func in - IFS check title_of_menu: $title_of_menu sub_menu: $sub_menu {chosen_command_sub}:${chosen_command_sub-} chosen_command_relay_sub:$chosen_command_relay_sub"
                 # %%% 부터 빈줄까지 변수에
-                IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
+                #IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
+                IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN { gsub(/[][().*+?^$\\|]/, "\\\\&", title_of_menu) } !flag && $0 ~ title_of_menu { flag=1; next } /^$/ { flag=0 } flag')"
+
                 #unset IFS ; dline ; echo "$allof_chosen_commands" ; dline
                 # 제목배고 선명령 빼고 순서 명령문들 배열
                 IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
@@ -836,7 +849,7 @@ menufunc() {
 
                     else
                         # 명령줄을 한줄도 찾지 못한경우 -> 오류판정
-                        echo "error : num_commands -> $num_commands // sub_menu: $sub_menu // debug: find -> chosen_commands="
+                        echo "error : num_commands -> $num_commands // sub_menu: $sub_menu // debug: find -> chosen_commands=" && readxy
                         echo ":459"
                         readxx $LINENO submenu 옵션:$sub_menu title_of_menu 필수: $title_of_menu
                         break
@@ -3163,11 +3176,16 @@ savescut() {
 viewVAR() { declare -p | grep "^declare -x var[A-Z]"; }
 saveVAR() {
     declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
-    chmod 600 ~/.go.private.var
+    #declare -p | grep "^declare -x" >~/.go.export.var
+    declare -p | grep "^declare -x" | encrypt >~/.go.export.var
     cat ~/.go.private.var | lastseen >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var
+    chmod 600 ~/.go.private.var
 }
 loadVAR() {
-    [ -f ~/.go.private.var ] && tail -n10 ~/.go.private.var && source ~/.go.private.var
+    [ -f ~/.go.private.var ] && source ~/.go.private.var
+    [ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +10 -exec rm -f "$HOME/.go.export.var" \;
+    [ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
+    [ -f ~/.go.export.var ] && source "$HOME/.go.export.var" && rm -f "$HOME/.go.export.var"
 }
 editVAR() {
     [ -f ~/.go.private.var ] && vim ~/.go.private.var
@@ -3246,9 +3264,23 @@ scraa() {
 
 scl() { screen -ls | cgrepline1 Attached | cgrepline Detached; }
 
+scrm() {
+    echo before
+    screen -ls
+    dline
+    for i in $(screen -ls | grep tach | grep "$1" | awk '{print $1}'); do screen -S $i -p 0 -X quit; done
+    echo "after"
+    screen -ls
+    dline
+}
+
 goo() {
     echo "
-디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스코드 부분에는 넣으면 안되.
+디시 인사이드 말투.  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게, 소스코드 부분에는 절대 그림 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게 안내해죠
+
+
+
+
 "
 }
 
@@ -5815,10 +5847,16 @@ domchg() {
 old_template_edit() { conff $1; }
 template_edit() {
     [ $# -eq 0 ] && echo "Usage: template_edit file1 [file2 ...]" && return 1
+
+    open() {
+        [ -n "$1" ] && conff "$1" || echo "'$1' not found"
+    }
+
+    [ $# -eq 1 ] && open "$1" && return
+
     select f in "$@" "Cancel"; do
         [ "$f" = "Cancel" ] && break
-        [ -n "$f" ] && conff "$f" || echo "'$f' not found"
-        break
+        [ -n "$f" ] && open "$f" && break
     done
 }
 template_view() { template_copy "$1" /dev/stdout; }
@@ -8092,6 +8130,59 @@ EOF
 
         ;;
 
+    hookremote.sh)
+        cat >"$file_path" <<EOF
+# 사용자가 사전에 export 해야 하는 값들:
+#mydomain="example.com"
+#remote_ns_host="byus.net"
+#zone_file="/mnt/byus/var/named/${mydomain}.zone"
+
+#!/bin/bash
+
+# 고정값: Certbot이 채워주는 변수
+DOMAIN="\$CERTBOT_DOMAIN"
+VALUE="\$CERTBOT_VALIDATION"
+FQDN="_acme-challenge.\$DOMAIN."
+RECORD="\$FQDN IN TXT \"\$VALUE\""
+EXPECTED="\"\$VALUE\""
+
+# 하드코딩된 설정
+REMOTE_NS_HOST="${remote_ns_host}"
+ZONE_FILE="${zone_file}"
+
+echo "[HOOK] 인증 도메인: \$DOMAIN"
+echo "[HOOK] 추가할 TXT 레코드: \$RECORD"
+echo "[HOOK] 존 파일: \$ZONE_FILE"
+
+echo "\$RECORD" >> "\$ZONE_FILE" || {
+  echo "[ERROR] ❌ 레코드 추가 실패!"; exit 1;
+}
+echo "[OK] ✅ 존 파일에 레코드 추가됨."
+
+ssh "\$REMOTE_NS_HOST" "rndc reload \$DOMAIN" || {
+  echo "[WARN] ⚠️ 원격 리로드 실패 (진행은 계속)";
+}
+
+echo "[INFO] DNS 전파 확인 중..."
+
+ns=\$(dig NS "\$DOMAIN." +short | head -n1)
+[ -z "\$ns" ] && dig_target="" || dig_target="@\$ns"
+
+for i in \$(seq 1 12); do
+  result=\$(dig \$dig_target TXT "\$FQDN" +short)
+  echo "\$result" | grep -Fxq "\$EXPECTED" && {
+    echo "[OK] ✅ DNS 전파 완료됨"; exit 0;
+  }
+  echo "[WAIT] ⏳ 전파 대기 중 (\$i/12)"
+  sleep 10
+done
+
+echo "[FAIL] ❌ 최대 대기 시간 초과 - Certbot 검증 실패 가능"
+exit 0
+EOF
+
+        ;;
+
     cleanup.sh)
         cat >"$file_path" <<EOF
 #!/bin/bash
@@ -8129,6 +8220,66 @@ certbot renew \
   --manual \
   --deploy-hook "systemctl reload apache2" \
   --cert-name $certpath
+EOF
+
+        ;;
+
+    hook-sslwr.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+# Certbot DNS-01 인증용 hook for $yourdoamin
+ZONEDIR="${zone_path:-/mnt/remote_name}"
+ZONEFILE="$zone_file"
+TMPFLAG="\$ZONEDIR/reload.flag"
+PROPAGATION_WAIT_TIME=5
+MAX_RETRIES=20
+
+check_mount() {
+  if ! mountpoint -q "\$ZONEDIR"; then
+    echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 마운트 안됨! " >&2
+    exit 1
+  fi
+  # 간단 쓰기 테스트
+  if ! touch "\$ZONEDIR/.tmp_write_test.\$\$" 2>/dev/null; then
+      echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 쓰기 권한 없음! ✋" >&2
+      exit 1
+  else
+      rm -f "\$ZONEDIR/.tmp_write_test.\$\$"
+  fi
+  # echo "[✔] 마운트/쓰기 권한 확인 완료." # 필요하면 주석 해제
+}
+add_record() {
+  check_mount
+  echo "_acme-challenge.\${CERTBOT_DOMAIN}. IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
+  # SOA serial 자동 갱신 (YYYYMMDDHH)
+  sed -i '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE"
+  echo "trigger" > "\$TMPFLAG"
+  echo "[✔] TXT 레코드 추가됨: _acme-challenge.\${CERTBOT_DOMAIN}"
+}
+
+remove_record() {
+  check_mount
+  sed -i "/_acme-challenge.\${CERTBOT_DOMAIN}/d" "\$ZONEFILE"
+  echo "[✔] TXT 레코드 제거됨"
+}
+
+wait_propagation() {
+  for i in \$(seq 1 "\$MAX_RETRIES"); do
+    dig +short TXT _acme-challenge."\$CERTBOT_DOMAIN" @8.8.8.8 | grep -q "\$CERTBOT_VALIDATION" && {
+      echo "[✔] DNS 전파 확인됨"; return 0;
+    }
+    echo "[\$i/\$MAX_RETRIES] DNS 전파 대기 중... (\${PROPAGATION_WAIT_TIME}초 후 재시도)" # 10 -> MAX_RETRIES
+    sleep "\$PROPAGATION_WAIT_TIME"
+  done
+  echo "[✖] 전파 실패 – 수동 확인 필요"; return 1
+}
+
+case "\$1" in
+  auth-hook)
+    add_record && wait_propagation ;;
+  cleanup-hook)
+    remove_record ;;
+esac
 EOF
 
         ;;
