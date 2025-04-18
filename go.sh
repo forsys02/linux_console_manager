@@ -8335,6 +8335,7 @@ EOF
 # Certbot DNS-01 인증용 hook for $yourdoamin
 ZONEDIR="${zone_path:-/mnt/remote_name}"
 ZONEFILE="$zone_file"
+TMPFILE="\${ZONEFILE}.tmp"
 TMPFLAG="\$ZONEDIR/reload.flag"
 PROPAGATION_WAIT_TIME=5
 MAX_RETRIES=20
@@ -8355,9 +8356,15 @@ check_mount() {
 }
 add_record() {
   check_mount
-  TMPFILE="\${ZONEFILE}.tmp"
   # 미삭제분 삭제
-  sed "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.\(\s\+[0-9]\+\)\?\s\+IN\s\+TXT/d" "\$ZONEFILE" > "\$TMPFILE" && mv "\$ZONEFILE" "\${ZONEFILE}.org" && mv "\$TMPFILE" "\$ZONEFILE"
+   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
+   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
+   n=\$((s+1)) &&
+   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.(\s+[0-9]+)?\s\+IN\s\+TXT/d" \
+       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
+   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
+   mv "\$TMPFILE" "\$ZONEFILE"
+
   # 추가 TTL 300 강제조정
   echo "_acme-challenge.\${CERTBOT_DOMAIN}. 300 IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
   # SOA serial 자동 갱신 (YYYYMMDDHH)
@@ -8369,7 +8376,13 @@ add_record() {
 
 remove_record() {
   check_mount
-  #sed -i "/_acme-challenge.\${CERTBOT_DOMAIN}/d" "\$ZONEFILE"
+   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
+   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
+   n=\$((s+1)) &&
+   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.(\s+[0-9]+)?\s\+IN\s\+TXT/d" \
+       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
+   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
+   mv "\$TMPFILE" "\$ZONEFILE"
   echo "[✔] TXT 레코드 제거됨"
 }
 
