@@ -1316,11 +1316,6 @@ menufunc() {
                             #"conffc")
                             #    conffc && continue
                             #    ;;
-                            #"goo")
-                            #    echo "
-                            #디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운 아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
-                            #" && readxy && continue
-                            #                            ;;
                         "h")
                             gohistory && continue
                             ;;
@@ -1496,11 +1491,6 @@ menufunc() {
                 #conff)
                 #    [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
                 #    ;;
-                #            "goo")
-                #                echo "
-                #디시 인사이드 말투. 약간의 존대. 한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운 아이디어 제안.  마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 각 섹션에 이모티콘을 충분히 활용하되, 내가 복사해야 소스코드 부분에는 넣으면 안되.
-                #" && readxy && continue
-                #                ;;
                 #conffc)
                 #    conffc # rollback go.sh
                 #    ;;
@@ -3277,7 +3267,7 @@ scrm() {
 
 goo() {
     echo "
-디시 인사이드 말투.  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게, 소스코드 부분에는 절대 그림 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게 안내해죠
+디시 인사이드 말투.  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 내가 한 질문을 기존 대화와 융합하여 왜 이런 질문을 했는지 심층 분석후 답변. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게, 소스코드 부분에는 절대 그림 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게. 한줄명령은 한줄명령으로 대응. 소스 변수는 되도록 최소화하여 직관적이게 표현
 
 
 
@@ -3380,7 +3370,8 @@ serialup() {
 
     # 현재 시리얼 찾기 (SOA 레코드에 있는 숫자 10자리)
     local current_serial
-    current_serial=$(grep -Eo '[0-9]{10}' "$zonefile")
+    #current_serial=$(grep -Eo '[0-9]{10}' "$zonefile" |head -n1)
+    current_serial=$(awk 'match($0, /[0-9]{10}/) { print substr($0, RSTART, RLENGTH); exit }' "$zonefile")
 
     # 현재 시리얼이 없으면 기본값 설정
     if [[ -z $current_serial ]]; then
@@ -3400,8 +3391,14 @@ serialup() {
         new_serial="${today}${new_nn}"
     fi
 
-    # 시리얼을 업데이트
-    sed -i "s/$current_serial/$new_serial/" "$zonefile"
+    # 시리얼을 업데이트 (sshfs 에서 sed -i 안됨)
+    #sed -i "s/$current_serial/$new_serial/" "$zonefile"
+    cp "$zonefile" "${zonefile}~~"                                       # 원본 파일을 ~~ 백업 파일로 복사
+    sed "s#$current_serial#$new_serial#" "${zonefile}~~" >"${zonefile}~" # ~~ 백업 파일을 수정하여 ~ 임시 파일로 저장
+    #mv "${zonefile}~" "$zonefile" # ~ 임시 파일을 원본 파일로 덮어쓰기
+    cp "${zonefile}~" "$zonefile" && rm "${zonefile}~"
+
+    cdiff ${zonefile}~~ ${zonefile}
 
     echo "업데이트 완료: $zonefile (새 시리얼: $new_serial)"
 }
@@ -3410,6 +3407,113 @@ isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|k
 
 urlencode() { od -t x1 -A n | tr " " %; }
 urldecode() { echo -en "$(sed 's/+/ /g; s/%/\\x/g')"; }
+
+# mv 동작을 최대한 모방하는 rmv (sshfs 환경용)
+rmv() {
+    local src src_normalized dest dest_type rsync_ret overall_ret=0 i=1
+
+    # --- 1. 인자 개수 확인 ---
+    if [ "$#" -lt 2 ]; then
+        echo "rmv: missing destination file operand after '$1'" >&2 # mv 에러 메시지 스타일
+        echo "Try 'rmv --help' for more information." >&2
+        return 1
+    fi
+
+    # --- 2. 목적지 인자 가져오기 (eval 사용 주의) ---
+    eval dest="\$$#"
+
+    # --- 3. 목적지 타입 판별 ---
+    if [ -d "$dest" ]; then
+        dest_type="directory"
+    elif [ -e "$dest" ]; then
+        dest_type="file"
+    else
+        dest_type="nonexistent"
+    fi
+
+    # --- 4. 소스 개수에 따른 동작 분기 ---
+    if [ $(($# - 1)) -gt 1 ]; then # 소스가 2개 이상일 때
+        # 소스 여러 개일 때 목적지는 반드시 디렉토리여야 함 (mv 규칙)
+        if [ "$dest_type" != "directory" ]; then
+            echo "rmv: target '$dest' is not a directory" >&2
+            return 1
+        fi
+
+        # 목적지가 디렉토리면 루프 돌면서 하나씩 rsync 시도
+        i=1
+        while [ $i -lt $# ]; do
+            eval src="\$$i"
+            src_normalized=${src%/} # 소스 슬래시 제거 (mv처럼)
+
+            if [ ! -e "$src_normalized" ]; then
+                echo "rmv: cannot stat '$src': No such file or directory" >&2
+                overall_ret=1 # 실패 기록
+                i=$((i + 1))
+                continue # 다음 소스로 넘어감
+            fi
+
+            echo "Moving '$src_normalized' to '$dest/'" # 간단한 메시지
+            rsync -a --progress --remove-source-files "$src_normalized" "$dest/"
+            rsync_ret=$?
+
+            if [ $rsync_ret -ne 0 ]; then
+                echo "rmv: failed to move '$src_normalized' to '$dest/' (rsync error $rsync_ret)" >&2
+                overall_ret=1 # 실패 기록
+            fi
+            i=$((i + 1))
+        done
+
+    else                        # 소스가 1개일 때
+        eval src="\$$1"         # 첫 번째 인자가 소스
+        src_normalized=${src%/} # 소스 슬래시 제거 (mv처럼)
+
+        if [ ! -e "$src_normalized" ]; then
+            echo "rmv: cannot stat '$src': No such file or directory" >&2
+            return 1 # 소스 없으면 바로 종료 (mv 동작)
+        fi
+
+        case "$dest_type" in
+        directory)
+            # 목적지가 디렉토리: 디렉토리 안으로 이동 (rsync 사용)
+            echo "Moving '$src_normalized' to '$dest/'"
+            rsync -a --progress --remove-source-files "$src_normalized" "$dest/"
+            rsync_ret=$?
+            if [ $rsync_ret -ne 0 ]; then
+                echo "rmv: failed to move '$src_normalized' to '$dest/' (rsync error $rsync_ret)" >&2
+                overall_ret=1
+            fi
+            ;;
+        file)
+            # 목적지가 파일: 덮어쓰기 시도 (rsync 사용 - 비원자적!)
+            # mv 는 보통 여기서 덮어쓸지 물어보지만(-i), rmv는 일단 덮어쓰는 것으로 구현 (-f 와 유사)
+            # 주의: 원자성이 보장되지 않음! cp + rm 과 유사하게 동작할 수 있음.
+            echo "Moving '$src_normalized' to '$dest' (overwriting existing file)"
+            # 파일을 파일로 rsync 할 때는 목적지 경로에 슬래시(/) 붙이면 안 됨!
+            rsync -a --progress --remove-source-files "$src_normalized" "$dest"
+            rsync_ret=$?
+            if [ $rsync_ret -ne 0 ]; then
+                echo "rmv: failed to move '$src_normalized' to '$dest' (rsync error $rsync_ret)" >&2
+                overall_ret=1
+            fi
+            ;;
+        nonexistent)
+            # 목적지 없음: Rename 시도 (rsync 사용 - 비원자적!)
+            echo "Renaming '$src_normalized' to '$dest'"
+            # 파일을 존재하지 않는 경로로 rsync (새 파일 생성)
+            rsync -a --progress --remove-source-files "$src_normalized" "$dest"
+            rsync_ret=$?
+            if [ $rsync_ret -ne 0 ]; then
+                echo "rmv: failed to rename '$src_normalized' to '$dest' (rsync error $rsync_ret)" >&2
+                overall_ret=1
+            fi
+            ;;
+        esac
+    fi
+
+    # --- 5. 최종 결과 반환 ---
+    # overall_ret 가 0이면 성공, 0이 아니면 실패 (mv와 유사)
+    return $overall_ret
+}
 
 alarm() {
     # 인수로 넘어올때 "$1" "$2" // $2에 read 나머지 모두
