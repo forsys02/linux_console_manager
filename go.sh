@@ -6397,6 +6397,25 @@ services:
       - lemp_network
     restart: unless-stopped
 
+  # --- phpMyAdmin 서비스 추가! ---
+  phpmyadmin:
+    image: phpmyadmin:latest # 최신 버전 사용 (실제론 버전 명시 추천!)
+    container_name: lemp_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80" # 호스트 8081 포트로 접속 (8080은 Nginx가 쓰니깐 피해서)
+    environment:
+      PMA_HOST: db # 여기가 핵심! 연결할 DB 호스트 = 서비스 이름 'db'
+      # PMA_PORT: 3306 # MySQL 기본 포트라 보통 생략 가능
+      MYSQL_ROOT_PASSWORD: myrootpassword # DB 루트 비번 알려줘야 함 (보안주의!)
+      #MYSQL_USER: myuser # 로그인 페이지에 기본 사용자명 제안 (선택)
+      #MYSQL_PASSWORD: mypassword # 로그인 페이지에 기본 비번 제안 (선택, 비추!)
+      UPLOAD_LIMIT: 1G # 혹시 phpMyAdmin으로 대용량 SQL 파일 업로드할 일 있으면 (선택)
+    networks:
+      - lemp_network # DB랑 같은 네트워크에 있어야 함
+    depends_on: # DB 서비스가 먼저 뜨도록 설정
+      - db
+
 # 네트워크 정의
 networks:
   lemp_network:
