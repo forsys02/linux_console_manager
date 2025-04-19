@@ -232,7 +232,7 @@ process_commands() {
         # cd 명령이 들어왔을때 현재 위치의 ls
         echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo $(pwd) >/dev/shm/pwd && echo && ls -ltr | tail -n5 && echo
         # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
-        echo "${command%% *}" | grep -qE "rm|mkdir" >/dev/null 2>&1 && (
+        echo "${command%% *}" | grep -qE "rm" >/dev/null 2>&1 && (
             command_args=($command)
             last_arg="${command_args[@]:$((${#command_args[@]} - 1))}"
             target_dir=$(dirname "$last_arg")
@@ -784,8 +784,8 @@ menufunc() {
                                     -e '/^#/! s/\(!!!\|eval\|exportvar\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
-                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
+                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|down\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
+                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|up\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
@@ -1251,7 +1251,7 @@ menufunc() {
                             #[ -n "$title_of_menu_sub" ] && title_of_menu="$title_of_menu_sub"
                             readxx $LINENO "quit cmd_choice - env: $env title_of_menu_sub:$title_of_menu_sub {chosen_command_sub}:${chosen_command_sub} SHLVL:$SHLVL "
                             #fi
-                            unsetvar varl
+                            #unsetvar varl
                             saveVAR
                             break # Exit the loop
                             ;;
@@ -2422,16 +2422,16 @@ cpipe() {
 
         # --- 경로 강조 (cpipe 로직, $0에 직접 적용) ---
         if ($0 ~ pat_url) {
-            gsub(pat_url, clr_grn0 "&" clr_rst, $0)
+            gsub(pat_url, clr_grn "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_paren) {
-            gsub(pat_path_in_paren, clr_grn0 "&" clr_rst, $0)
+            gsub(pat_path_in_paren, clr_grn "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_quotes) {
-            gsub(pat_path_in_quotes, "\"" clr_grn0 "\\1" clr_rst "\"", $0)
+            gsub(pat_path_in_quotes, "\"" clr_grn "\\1" clr_rst "\"", $0)
         }
         if ($0 ~ pat_path_standalone) {
-            gsub(pat_path_standalone, clr_grn0 "&" clr_rst, $0)
+            gsub(pat_path_standalone, clr_grn "&" clr_rst, $0)
         }
 
         # --- IP 주소 강조 (old_cpipe 원본 복원) ---
@@ -3194,7 +3194,12 @@ format() {
 newtemp() {
     echo "template_edit $1
 template_view $1
-!!! template_copy $1 $2 ;; cat "\$lastarg"
+!!! template_copy $1 $2 ;; cat \"\$lastarg\"
+
+$1)
+        cat >\"\$file_path\" <<'EOF'
+EOF
+;;
 "
 }
 # vi2 envorg && restart go.sh
@@ -3267,7 +3272,10 @@ scrm() {
 
 goo() {
     echo "
-디시 인사이드 말투.  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 내가 한 질문을 기존 대화와 융합하여 왜 이런 질문을 했는지 심층 분석후 답변. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면 함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게, 소스코드 부분에는 절대 그림 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게. 한줄명령은 한줄명령으로 대응. 소스 변수는 되도록 최소화하여 직관적이게 표현
+디시 인사이드 말투. 나 형인거 알지?  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 내가 한 질문을 기존 대화와 융합하여 왜 이런 질문을 했는지 심층 분석후 답변. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게,중요사항!! 소스코드 부분은 내가 복사를 할수 있기 때문에 절대 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게. 한줄명령은 한줄명령으로 대응. 소스 변수는 되도록 최소화하여 직관적이게 표현
+
+
+
 
 
 
@@ -5044,7 +5052,7 @@ unsetvar() {
     done
 }
 # 강제종료시 남아있을수 있는 로컬변수 선언 초기화
-unsetvar varl
+#unsetvar varl
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
@@ -5954,7 +5962,7 @@ template_edit() {
     [ $# -eq 0 ] && echo "Usage: template_edit file1 [file2 ...]" && return 1
 
     open() {
-        [ -n "$1" ] && conff "$1" || echo "'$1' not found"
+        [ -n "$1" ] && conff "$1)" || echo "'$1' not found"
     }
 
     [ $# -eq 1 ] && open "$1" && return
@@ -5964,7 +5972,20 @@ template_edit() {
         [ -n "$f" ] && open "$f" && break
     done
 }
-template_view() { template_copy "$1" /dev/stdout; }
+template_view() {
+    [ $# -eq 0 ] && echo "Usage: template_view file1 [file2 ...]" && return 1
+
+    # 인자가 하나일 경우 바로 처리
+    [ $# -eq 1 ] && dline && template_copy "$1" /dev/stdout | cpipe && return
+
+    # 여러 개일 경우 선택지 제공
+    select f in "$@" "Cancel"; do
+        [ "$f" = "Cancel" ] && break
+        [ -n "$f" ] && dline && template_copy "$f" /dev/stdout | cpipe && break
+    done
+}
+
+old_template_view() { template_copy "$1" /dev/stdout; }
 template_insert() { template_view "$1" | tee -a "$2" >/dev/null; }
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
@@ -6259,45 +6280,6 @@ services:
 EOF
         ;;
 
-    xxnpm.yml)
-        cat >"$file_path" <<'EOF'
-version: '3'
-services:
-  proxy:
-    image: nginx:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-
-  web:
-    image: nginx:latest
-    restart: always
-    volumes:
-      - ./source:/source
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-
-  php:
-    image: php:7.4-fpm
-    expose:
-      - "9000"
-    volumes:
-      - ./source:/source
-
-  db:
-    image: mariadb:latest
-    volumes:
-      - ./mysql:/var/lib/mysql
-    restart: unless-stopped
-    environment:
-      - MYSQL_ROOT_PASSWORD=gosh
-
-EOF
-        ;;
     nginx-proxy-manager.yml)
         cat >"$file_path" <<'EOF'
 version: '3.8'
@@ -6358,68 +6340,128 @@ services:
 EOF
         ;;
 
-    xxnginx.conf)
+    lemp.yml)
         cat >"$file_path" <<'EOF'
-user  nginx;
-worker_processes  1;
-error_log  /var/log/nginx/error.log warn;
-pid        /var/run/nginx.pid;
-events {
-    worker_connections  1024;
-}
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                      '$status $body_bytes_sent "$http_referer" '
-                      '"$http_user_agent" "$http_x_forwarded_for"';
-    access_log  /var/log/nginx/access.log  main;
+# /data/lemp/docker-compose.yml (Latest Version)
+version: '3.8'
 
-    sendfile        on;
-    keepalive_timeout  65;
-    include /etc/nginx/conf.d/*.conf;
-}
+services:
+  # 1. 웹서버 (Nginx - latest stable on Alpine)
+  web:
+    # 'alpine' 태그는 보통 해당 이미지의 최신 안정화 버전을 Alpine 기반으로 제공함
+    image: nginx:alpine
+    container_name: lemp_nginx_www_latest # 이름 뒤에 _latest 추가 (선택)
+    ports:
+      - "8080:80"
+    volumes:
+      - ./www:/var/www/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - lemp_network
+    depends_on:
+      - app
+    restart: unless-stopped
 
+  # 2. PHP 처리 엔진 (PHP-FPM - latest stable on Alpine)
+  app:
+    # 변경! 버전 번호 빼고 'fpm-alpine' -> 최신 안정 PHP FPM (Alpine) 이미지
+    # image: php:fpm-alpine
+    # image: php:8.1-fpm-alpine
+    build:
+      context: . # Dockerfile 이 있는 경로 (현재 폴더 .)
+      dockerfile: Dockerfile.php # 사용할 Dockerfile 이름 지정
+    container_name: lemp_php_www_latest # 이름 뒤에 _latest 추가 (선택)
+    volumes:
+      - ./www:/var/www/html
+    networks:
+      - lemp_network
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # 3. 데이터베이스 (MySQL - latest stable)
+  db:
+    # 변경! 버전 번호 빼고 'latest' -> 최신 안정 MySQL 이미지
+    image: mysql:latest
+    # image: mysql:8.0
+    container_name: lemp_mysql_www_latest # 이름 뒤에 _latest 추가 (선택)
+    environment:
+      # 경고: 실제 환경에서는 환경변수 파일을 사용하세요!
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: myuser
+      MYSQL_PASSWORD: mypassword
+      MYSQL_ROOT_PASSWORD: myrootpassword
+    volumes:
+      - ./db_data:/var/lib/mysql
+    networks:
+      - lemp_network
+    restart: unless-stopped
+
+# 네트워크 정의
+networks:
+  lemp_network:
+    driver: bridge
 EOF
         ;;
 
-    xxnginx.web.conf)
+    nginx.conf)
         cat >"$file_path" <<'EOF'
+# /data/lemp/nginx.conf
+server {
+    listen 80;
+    server_name localhost;
+    # 컨테이너 내부의 웹 루트 경로. docker-compose.yml 에서 호스트의 /data/lemp/www 와 연결됨.
+    root /var/www/html;
+    index index.php index.html index.htm;
 
-  server {
-    listen 80 ;
-    server_name example.com www.example.com;
-
-   location /.well-known/acme-challenge/ {
-      root     /var/www/certbot;
-      allow all;
-     }
-
-   location / {
-      return     301 https://$host$request_uri;
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
     }
-  }
-
-  server {
-    listen 443 ssl;
-    server_name example.com www.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
-
-    root /source;
 
     location ~ \.php$ {
-      fastcgi_pass php:9000;
-      fastcgi_index index.php;
-      include fastcgi_params;
-      fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass app:9000; # 서비스 이름 'app'으로 PHP-FPM 컨테이너 연결
+        fastcgi_index index.php;
+        include fastcgi_params;
+        # 컨테이너 내부 경로 기준 스크립트 파일명 지정
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
     }
 
-    error_log /var/log/nginx/api_error.log;
-    access_log /var/log/nginx/api_access.log;
-  }
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+        ;;
 
+    dk_lemp_index.php)
+        cat >"$file_path" <<'EOF'
+<?php
+
+// MySQL 접속 테스트
+$host = 'db'; // 서비스 이름 'db'
+$dbname = 'mydatabase'; // docker-compose.yml 에서 설정한 값
+$user = 'myuser';       // docker-compose.yml 에서 설정한 값
+$pass = 'mypassword';   // docker-compose.yml 에서 설정한 값 (주의!)
+
+try {
+    $dbh = new PDO("mysql:host=$host;dbname=$dbname", $user, $pass);
+    echo "<h1>LEMP Stack is working! (Web Root: ./www)</h1>";
+    echo "<p>PHP is processing files correctly.</p>";
+    echo "<p>Successfully connected to MySQL database '$dbname'!</p>";
+    $dbh = null;
+} catch (PDOException $e) {
+    echo "<h1>LEMP Stack - PHP OK, but DB Connection Failed!</h1>";
+    echo "<p>Could not connect to MySQL: " . $e->getMessage() . "</p>";
+    echo "<p>Check DB container status and docker-compose.yml environment variables.</p>";
+}
+
+// PHP 정보 출력
+phpinfo();
+
+?>
 EOF
         ;;
 
