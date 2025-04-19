@@ -93,7 +93,13 @@ Tired of memorizing complex commands?  Wish you had a streamlined way to handle 
 - **Network Tools (NFS, iSCSI, AutoFS, Open-vSwitch):**  Simplified configuration for network file sharing and virtualization technologies.
 - **And much more!**  See the `go.env` file for the full menu.
 
-## 🚀 Getting Started
+## ✨ Sneak Peek! (First Impression)
+
+Here's a glimpse of what the remote control looks like in action! (Pretty neat, huh?)
+
+![go.sh English Execution Screenshot](https://github.com/forsys02/linux_console_manager/blob/defc96351be3597eaf62beede15a21b39e966f8c/eng.png?raw=true)
+
+*(Gives you an idea, right? 😉)*
 
 ## 🚀 Getting Started
 
