@@ -21,6 +21,13 @@ This guide will walk you through everything you need to know to become a `go.sh`
 *   **Built-in Helpers! 🎁:** Comes packed with handy functions like `vi2` (auto-backup before editing), `push` (send Telegram messages), `alarm` (set timed alerts), `template_copy` (manage command templates), and more! Let the script do the heavy lifting! 😉
 
 ---
+## ✨ Sneak Peek! (First Impression)
+
+Here's a glimpse of what the remote control looks like in action! (Pretty neat, huh?)
+
+![go.sh English Execution Screenshot](https://github.com/forsys02/linux_console_manager/blob/defc96351be3597eaf62beede15a21b39e966f8c/eng.png?raw=true)
+
+*(Gives you an idea, right? 😉)*
 
 ## ⚙️ How Do I Use This Thing? (Getting Started)
 
