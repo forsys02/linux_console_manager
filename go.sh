@@ -251,7 +251,7 @@ process_commands() {
             #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
         elif [ -z "$IN_BASHCOMM" ] && (
             set -- $command
-            [ "${1%% *}" = "cd" ] && [ -z "$3" ]
+            [ "${1%% *}" = "cd" ] || [[ ${1} == "ls" && ${2} == "-al" ]] && [ -z "$3" ]
         ); then
             #readxy "1:$1 2:$2 3:$3"
             bashcomm
@@ -1251,7 +1251,7 @@ menufunc() {
                             #[ -n "$title_of_menu_sub" ] && title_of_menu="$title_of_menu_sub"
                             readxx $LINENO "quit cmd_choice - env: $env title_of_menu_sub:$title_of_menu_sub {chosen_command_sub}:${chosen_command_sub} SHLVL:$SHLVL "
                             #fi
-                            #unsetvar varl
+                            unsetvar varl
                             saveVAR
                             break # Exit the loop
                             ;;
@@ -6481,6 +6481,90 @@ try {
 phpinfo();
 
 ?>
+EOF
+        ;;
+
+    media.yml)
+        cat >"$file_path" <<'EOF'
+# /data/media_center/docker-compose.yml (File Browser 강화!)
+version: '3.8'
+
+services:
+  # --- 1. Jellyfin (기존 설정 유지 - 단, 볼륨 경로는 읽기/쓰기(rw)로!) ---
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: media_jellyfin
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Asia/Seoul
+    volumes:
+      - ./jellyfin_config:/config
+      - ./jellyfin_cache:/cache
+      # File Browser로 파일 변경할 거니깐 읽기/쓰기(rw) 권한 필요!
+      - ./movies:/media/movies:rw
+      - ./tvshows:/media/tvshows:rw
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    networks:
+      - media_network
+
+  # --- 2. Navidrome (기존 설정 유지 - 단, 볼륨 경로는 읽기/쓰기(rw)로!) ---
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: music_navidrome
+    user: "1000:1000"
+    ports:
+      - "4533:4533"
+    environment:
+      TZ: Asia/Seoul
+    volumes:
+      - ./navidrome_data:/data
+      # File Browser로 파일 변경할 거니깐 읽기/쓰기(rw) 권한 필요!
+      - ./music:/music:rw
+    restart: unless-stopped
+    networks:
+      - media_network
+
+  # --- 3. File Browser (웹 UI + WebDAV 서버) ---
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: file_browser
+    user: "1000:1000" # PUID:PGID (Jellyfin/Navidrome과 동일하게!)
+    ports:
+      # 웹 UI 접속 포트 (예: 8082)
+      - "8082:80"
+      # WebDAV 전용 포트를 따로 열 수도 있음 (선택사항)
+      # - "8083:80" # 만약 이렇게 열면 WebDAV 클라이언트는 8083으로 접속
+    volumes:
+      # 설정 DB 저장 (필수!)
+      - ./filebrowser/database.db:/database.db
+      # 관리할 호스트 폴더 연결 (필수! 읽기/쓰기!)
+      # - ./:/srv
+      - ./movies:/srv/movies:rw
+      - ./tvshows:/srv/tvshows:rw
+      - ./music:/srv/music:rw
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      # 기본 로그인 사용자 (admin) 비밀번호 설정 (선택, 초기 admin/admin)
+      # FB_PASSWORD: YourSecurePasswordHere
+      # WebDAV 접속 경로 설정 (기본값: /webdav)
+      FB_WEBDAV: "/webdav"
+      # 기본 웹 UI 접속 경로 설정 (선택, 기본값: /)
+      # FB_BASEURL: "/files"
+      # 시간대 설정
+      TZ: Asia/Seoul
+    # File Browser 설정 파일(config.json)을 직접 사용 시 command 주석 해제
+    # command: ["--config", "/config/config.json"]
+    restart: unless-stopped
+    networks:
+      - media_network
+
+networks:
+  media_network:
+    driver: bridge
 EOF
         ;;
 
