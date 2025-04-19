@@ -153,7 +153,7 @@ oooldscut=${oooldscut-}
 ooooldscut=${ooooldscut-}
 
 ############################################################
-# 최종 명령문을 실행하는 함수 process_commands // execf Process
+# 최종 명령문을 실행하는 함수 process_commands // exec Process
 ############################################################
 process_commands() {
     local command="$1"
@@ -170,7 +170,7 @@ process_commands() {
         #if partcom=$(echo "$command" | awk -F '[:;]' '{for (i = 1; i <= NF; i++) {gsub(/^[ \t]+|[ \t]+$/, "", $i); if ($i ~ /^[a-zA-Z0-9_-]+$/) {print $i; break}}}') && [ -n "$partcom" ] && st "$partcom" >/dev/null; then
         # scut 감지
 
-        # 명령어가 바로가기 scut 인시 판별
+        # 명령어가 바로가기 scut 인지 판별
         partcom=""
         if [ "${command}" != "${command#:}" ]; then
             partcom=$(echo "$command" | awk '
@@ -781,10 +781,10 @@ menufunc() {
                                     -e 's/@colon@/:/g' `# 변수에 @colon@ 를 쓸경우 변환 ` \
                                     -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
-                                    -e '/^#/! s/\(!!!\|eval\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
+                                    -e '/^#/! s/\(!!!\|eval\|exportvar\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
                                     -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
+                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
