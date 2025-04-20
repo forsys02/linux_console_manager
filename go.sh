@@ -230,7 +230,7 @@ process_commands() {
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         # cd 명령이 들어왔을때 현재 위치의 ls
-        echo "${command%% *}" | grep -qE "cd" && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo $(pwd) >/dev/shm/pwd && echo && ls -ltr | tail -n5 && echo
+        echo "${command%% *}" | grep -qE "cd" && echo && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo $(pwd) >/dev/shm/pwd && dline && ls -ltr | tail -n5 && echo
         # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
         echo "${command%% *}" | grep -qE "rm" >/dev/null 2>&1 && (
             command_args=($command)
@@ -783,8 +783,10 @@ menufunc() {
                                     -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
                                     -e '/^#/! s/\(!!!\|eval\|exportvar\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
                                     -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \|hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\|^: [^;]*\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|down\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
+                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
+                                    -e '/^#/! s/\(hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
+                                    -e '/^#/! s/\(^: [^;]*\|^\!\!\! : [^;]\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
+                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|down\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
                                     -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|up\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
@@ -6554,6 +6556,86 @@ try {
 phpinfo();
 
 ?>
+EOF
+        ;;
+
+    dockerfile-cms.php)
+        cat >"$file_path" <<'EOF'
+# ./Dockerfile.php (종합선물세트 최종 버전)
+
+# 안정적인 Debian 기반 PHP-Apache 이미지 선택 (예: PHP 8.2)
+# CMS 호환성을 위해 8.1 이나 8.0 도 고려 가능
+FROM php:8.2-apache
+
+# 시스템 라이브러리 업데이트 및 필요 패키지 설치
+# (gd, intl, mbstring, curl, xml, zip, sockets, exif, xsl, sodium 등 관련 라이브러리)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libzip-dev \
+    libxml2-dev \
+    libicu-dev \
+    libcurl4-openssl-dev \
+    libonig-dev \
+    libsodium-dev \
+    libxslt-dev \
+    # 이미지 처리 필요시: imagemagick libmagickwand-dev
+    # 기타 유틸리티 (선택 사항): git unzip wget vim nano
+    git unzip wget vim nano \
+    && rm -rf /var/lib/apt/lists/*
+
+
+ARG PHP_EXTENSIONS="gd mysqli pdo pdo_mysql mbstring curl xml zip iconv intl sodium xsl exif sockets opcache"
+
+# RUN 명령어 하나 안에서 셸 스크립트 실행
+RUN set -e; \
+    # 필요한 사전 설정 (예: gd)
+    docker-php-ext-configure gd --with-freetype --with-jpeg; \
+    \
+    # 확장 목록을 공백 기준으로 반복 처리
+    for ext in $PHP_EXTENSIONS; do \
+        echo "---------- Installing $ext ----------"; \
+        # docker-php-ext-install 실행 (동시 빌드 옵션 -j 는 빼는게 더 안정적일 수 있음)
+        docker-php-ext-install "$ext"; \
+        # 성공 메시지 (선택 사항)
+        echo "---------- Successfully installed $ext ----------"; \
+    done;
+
+    # 이미지매직 설치 (주석 처리됨 - 필요시 아래 라인 활성화)
+    # echo "---------- Installing imagick (optional) ----------";
+    # pecl install imagick && docker-php-ext-enable imagick; \
+    # echo "---------- Successfully installed imagick ----------";
+
+    # 설치 후 정리 (선택 사항)
+    # apt-get purge -y ... (빌드 의존성 제거)
+    # rm -rf /tmp/* /var/lib/apt/lists/*
+
+
+# 아파치 mod_rewrite 활성화 (htaccess 사용 위해 필수!)
+RUN a2enmod rewrite
+
+RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf \
+    && echo "Applied AllowOverride All to /etc/apache2/apache2.conf"
+
+# (선택 사항) 기본적인 PHP 설정 파일 복사
+#COPY ./configs/php-general.ini /usr/local/etc/php/conf.d/zz-general.ini
+
+# (선택 사항) 아파치 설정 커스터마이징 (예: AllowOverride 확인/변경)
+#COPY ./configs/apache-custom.conf /etc/apache2/conf-available/custom.conf
+#RUN a2enconf custom
+
+WORKDIR /var/www/html
+
+# 아파치 기본 실행 (베이스 이미지에 정의되어 있음)
+# CMD ["apache2-foreground"]
+EOF
+        ;;
+
+    dockerfile.php)
+        cat >"$file_path" <<'EOF'
+FROM php:8-apache
+RUN docker-php-ext-install pdo_mysql
 EOF
         ;;
 
