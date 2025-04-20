@@ -251,7 +251,7 @@ process_commands() {
             #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
         elif [ -z "$IN_BASHCOMM" ] && (
             set -- $command
-            [ "${1%% *}" = "cd" ] || [[ ${1} == "ls" && ${2} == "-al" ]] && [ -z "$3" ]
+            [ "${1%% *}" = "cd" ] || [[ ${1} == "ls" && ${2} == "-al" ]] || [[ ${1} == "ls" && ${2} == "" ]] && [ -z "$3" ]
         ); then
             #readxy "1:$1 2:$2 3:$3"
             bashcomm
@@ -2428,7 +2428,7 @@ cpipe() {
             gsub(pat_path_in_paren, clr_grn "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_quotes) {
-            gsub(pat_path_in_quotes, "\"" clr_grn "\\1" clr_rst "\"", $0)
+             gsub(pat_path_in_quotes, clr_grn "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_standalone) {
             gsub(pat_path_standalone, clr_grn "&" clr_rst, $0)
@@ -6340,6 +6340,79 @@ services:
 EOF
         ;;
 
+    lamp.yml)
+        cat >"$file_path" <<'EOF'
+# docker-compose.yml (php:8-apache 기반 + Dockerfile 빌드, mysql:8 사용)
+version: '3.8'
+
+services:
+  # 웹서버 + PHP 통합 (커스텀 Dockerfile 사용)
+  app: # 서비스 이름을 그냥 'app'으로 변경 (기존 apache+php 분리했을 때처럼)
+    build:
+      context: . # Dockerfile 이 있는 경로 (현재 폴더 .)
+      dockerfile: Dockerfile.php # 사용할 Dockerfile 이름 지정
+    container_name: lamp_php_apache_app # 컨테이너 이름은 원하는대로
+    ports:
+      - "8080:80" # 호스트 8080 -> 컨테이너 80 (Apache 기본 포트)
+    volumes:
+      # PHP/HTML 소스코드를 컨테이너의 기본 웹 루트에 마운트
+      - ./www:/var/www/html
+      # (선택) 필요한 PHP 커스텀 설정 (php.ini) 마운트
+      # - ./my-php.ini:/usr/local/etc/php/conf.d/custom.ini
+    networks:
+      - lamp_network
+    depends_on:
+      - db # DB 서비스가 먼저 시작되도록 의존성 설정
+    restart: unless-stopped
+    # environment: # PHP 스크립트에서 사용할 환경 변수 설정 (예시)
+    #   - DB_HOST=db
+    #   - DB_DATABASE=mydatabase
+    #   - DB_USERNAME=myuser
+    #   - DB_PASSWORD=mypassword # 실제로는 .env 파일 사용 권장!
+
+  # 데이터베이스 (MySQL 8 버전대 사용 - 특정 버전 명시 권장)
+  db:
+    image: mysql:latest # MySQL 8.0 버전 명시 (이걸 가장 추천!)
+    # image: mysql:8 # MySQL 8 버전대를 사용해도 되지만, 8.0 처럼 명시하는게 더 안정적
+    container_name: lamp_mysql_db
+    environment:
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: myuser
+      MYSQL_PASSWORD: mypassword # 실제로는 .env 파일 사용 권장!
+      MYSQL_ROOT_PASSWORD: myrootpassword # 실제로는 .env 파일 사용 권장!
+      MYSQL_DEFAULT_AUTHENTICATION_PLUGIN: mysql_native_password
+    volumes:
+      #- db_data:/var/lib/mysql # 이름있는 볼륨 사용 (추천!)
+      - ./db_data:/var/lib/mysql # 또는 로컬 바인드 마운트 사용
+    networks:
+      - lamp_network
+    restart: unless-stopped
+
+  # phpMyAdmin (버전 명시 권장)
+  phpmyadmin:
+    image: phpmyadmin:latest # 특정 버전 사용 권장
+    container_name: lamp_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80" # 호스트 8081 -> 컨테이너 80
+    environment:
+      PMA_HOST: db # 'db' 서비스 컨테이너에 연결
+      MYSQL_ROOT_PASSWORD: myrootpassword # 실제로는 .env 파일 사용 권장!
+    networks:
+      - lamp_network
+    depends_on:
+      - db # DB 서비스가 먼저 시작되도록 의존성 설정
+
+networks:
+  lamp_network:
+    driver: bridge
+
+volumes:
+  # MySQL 데이터 영속화를 위한 이름있는 볼륨 정의
+  db_data:
+EOF
+        ;;
+
     lemp.yml)
         cat >"$file_path" <<'EOF'
 # /data/lemp/docker-compose.yml (Latest Version)
@@ -6452,6 +6525,35 @@ server {
         deny all;
     }
 }
+EOF
+        ;;
+
+    dk_lamp_index.php)
+        cat >"$file_path" <<'EOF'
+<?php
+
+// MySQL 접속 테스트
+$host = 'db'; // 서비스 이름 'db'
+$dbname = 'mydatabase'; // docker-compose.yml 에서 설정한 값
+$user = 'myuser';       // docker-compose.yml 에서 설정한 값
+$pass = 'mypassword';   // docker-compose.yml 에서 설정한 값 (주의!)
+
+try {
+    $dbh = new PDO("mysql:host=$host;dbname=$dbname", $user, $pass);
+    echo "<h1>lamp Stack is working! (Web Root: ./www)</h1>";
+    echo "<p>PHP is processing files correctly.</p>";
+    echo "<p>Successfully connected to MySQL database '$dbname'!</p>";
+    $dbh = null;
+} catch (PDOException $e) {
+    echo "<h1>lamp Stack - PHP OK, but DB Connection Failed!</h1>";
+    echo "<p>Could not connect to MySQL: " . $e->getMessage() . "</p>";
+    echo "<p>Check DB container status and docker-compose.yml environment variables.</p>";
+}
+
+// PHP 정보 출력
+phpinfo();
+
+?>
 EOF
         ;;
 
