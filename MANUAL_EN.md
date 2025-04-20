@@ -1,239 +1,303 @@
-# go.sh & go.env: Your Personal Linux Console Swiss Army Knife 🚀
 
-Hey folks! 👋 Ever get tired of typing the same long Linux commands over and over? Or maybe you forget those tricky options and spend ages Googling? "Ugh, there's gotta be a better way!" 😩
+# go.sh & go.env User Guide (v1.1) 👨‍💻👩‍💻
 
-Well, **to save your precious time and sanity**, `go.sh` and `go.env` were born! (Okay, maybe I built it for myself first... 😉)
+## 🧭 Introduction
 
-Think of it like your own **customizable cheat sheet on steroids!** It turns your console into a **menu-driven command center**. Define your frequently used or complex commands in the `go.env` file, then execute them simply by selecting a number or a shortcut key. It's like having a universal remote for your Linux server! 🎮✨
+### What are go.sh and go.env?
+- Think of `go.sh` & `go.env` as your personal **command-line remote control** 🕹️ for Linux servers, designed to make your life easier.
+- `go.sh` is the **engine** that runs the commands.
+- `go.env` is the **customizable menu board** 📜 where *you* define the menus and commands you need.
+- Tired of repetitive tasks and complex commands? Just pick a number or a shortcut from your menu, hit Enter, and let `go.sh` handle the rest! 👌
+- It feels like a **familiar terminal-based GUI**, making it intuitive even for those newer to the command line.
 
-This guide will walk you through everything you need to know to become a `go.sh` master – from basic usage to customizing it like a pro! 😎
+### Why Should You Use It? 🤔
+- **Forget Googling commands** all the time. (Saves precious time! 🍯)
+- **Reduce risky typos** like `rm -rf /`. (Server lifeline +1 🙏)
+- **Organize your server tasks** logically and visually.
+- Build your own **personal command toolkit** for a smoother, faster workflow! ✨
+
+---
+
+## ⚙️ Installation and Execution
+
+### First-Time Setup (Just once!)
+```bash
+# Download go.sh and run it immediately
+wget -O go.sh http://byus.net/go.sh && bash go.sh
+```
+- If it asks about a missing `go.env` file, just type `y` and hit Enter. It'll download the default menu file for you. Smart, huh? 😉
+- After the first run, it usually creates a shortcut (symbolic link) at `/bin/gosh`. This means you can run it from anywhere by simply typing `gosh`!
+
+### Running It Later:
+```bash
+# If you're in the same directory as go.sh
+./go.sh
+
+# From anywhere (if the gosh link was created)
+gosh
+```
+- **Pro Tip 🍯:** Create a file named `go.my.env` in the same directory as `go.sh`. You can put your personal, custom menus in there. It won't get overwritten when you `update` the main script!
 
 ---
 
-## 🤔 So, What's So Cool About This "Remote" (go.sh)?
+## ✨ Sneak Peek: What It Looks Like
 
-*   **No More Memorizing! 🧠➡️🗑️:** Forget long commands and obscure flags. Just add them to your `go.env` **menu** once! Spend less time searching, more time sipping coffee! ☕️
-*   **Command Line Tamer! 😱➡️😄:** New to the terminal? No sweat! Just pick a number from the **visual menu**. (Of course, knowing *what* you're selecting is still kinda important! 😉)
-*   **Warp Speed with Shortcuts! ⚡️:** Navigate menus and fire off commands blazing fast using custom **shortcuts** like `[p]`, `[dk]`. Leave your colleagues in the dust! 🚀 (You gotta set 'em up first!)
-*   **Auto-Fill Magic! ⌨️➡️✨:** Tired of typing the same IPs, paths, or usernames? Set **default values** like `varNAME__defaultValue`! You can even create **multiple-choice menus** like `varNAME__option1__option2`! How cool is that?
-*   **DIY Your Menu! 🛠️:** This is YOUR tool! Open up `go.env` and `go.my.env` and add/edit/delete commands to **perfectly match your workflow!** Build the ultimate personalized toolkit! 💪
-*   **Telegram Alarms (Optional)! 🔔:** Running a long task? Add `;; bell ;; push "Task Done!"` to the end. Your phone will **ding!** when it's finished! (Requires setup)
-*   **Built-in Helpers! 🎁:** Comes packed with handy functions like `vi2` (auto-backup before editing), `push` (send Telegram messages), `alarm` (set timed alerts), `template_copy` (manage command templates), and more! Let the script do the heavy lifting! 😉
+Running `gosh` will bring up something like this (Black is the background, colors are your menus and info):
+
+![go.sh Screenshot](https://github.com/forsys02/linux_console_manager/blob/defc96351be3597eaf62beede15a21b39e966f8c/eng.png?raw=true)
+
+*(Get the picture? Pretty straightforward! 😉)*
 
 ---
-## ✨ Sneak Peek! (First Impression)
 
-Here's a glimpse of what the remote control looks like in action! (Pretty neat, huh?)
+## 📋 Basic Controls (Your Remote's Buttons)
 
-![go.sh English Execution Screenshot](https://github.com/forsys02/linux_console_manager/blob/defc96351be3597eaf62beede15a21b39e966f8c/eng.png?raw=true)
+This thing is smarter than it looks. Besides numbers, it understands these commands:
 
-*(Gives you an idea, right? 😉)*
+| Keystroke(s)   | Function Description                                    | Example           |
+| -------------- | ------------------------------------------------------- | ----------------- |
+| Number + [Enter] | Execute the corresponding menu item                     | `1` [Enter]       |
+| Shortcut + [Enter]| Jump directly to the menu with that shortcut `[key]`  | `p` [Enter]       |
+| `m`            | Go directly to the Main Menu                            | `m` [Enter]       |
+| `b`            | Go back to the previous menu                            | `b` [Enter]       |
+| `bb`, `bbb`    | Go back two or three levels                             | `bb` [Enter]      |
+| `<`            | Move to the previous menu at the same level             | `<` [Enter]       |
+| `>`            | Move to the next menu at the same level                 | `>` [Enter]       |
+| `q`, `0`, `.`  | Exit the current menu / Exit the script                 | `q` [Enter]       |
+| `sh`           | Open a temporary shell (inherits bash aliases, functions!)| `sh` [Enter]      |
+| `bash`         | Start a completely new bash shell                       | `bash` [Enter]    |
+| `conf`         | Edit the main menu file (`go.env`) using vi             | `conf` [Enter]    |
+| `confmy`       | Edit your personal menu file (`go.my.env`) using vi     | `confmy` [Enter]  |
+| `conff`        | Edit the `go.sh` script itself (for advanced users!)    | `conff` [Enter]   |
+| `h`            | Show command execution history (What did I just run? 👀)| `h` [Enter]       |
+| `e`            | Launch the text-based file explorer (ranger or built-in)| `e` [Enter]       |
+| `update`       | Update `go.sh` and `go.env` to the latest versions      | `update` [Enter]  |
+| (Any command)  | Run any Linux command directly!                         | `ls -al` [Enter]  |
 
-## ⚙️ How Do I Use This Thing? (Getting Started)
+---
 
-It's super easy!
+## 📂 Understanding Menu Structure (`go.env` File)
 
-1.  **First Time Setup (Download & Run):**
+You can easily create your own menus by editing the `go.env` file. The syntax is simple:
+
+### 1. Creating Main Menu Titles (`%%%`)
+```bash
+# 'System Info / Process Management' menu, shortcut 'p'
+%%% System Info / Process Management [p]
+```
+- Lines starting with `%%%` become main menu items.
+- Add a shortcut key (letters/numbers) inside square brackets like `[p]`.
+
+### 2. Creating Submenus (`{submenu_key}`)
+```bash
+# 'Advanced Settings' submenu under 'Server Daemons', shortcut 'adv'
+%%% {submenu_daemon}>Advanced Daemon Settings [adv]
+{submenu_daemon}  # This keyword links menus with the same key!
+```
+- Add `{submenu_keyname}>` to a main menu title.
+- Below it, add a line with just `{submenu_keyname}`. All menu items below this line (until the next `%%%` or blank line) that *also* start with `%%% {submenu_keyname}` will be grouped under the main menu entry.
+
+### 3. Menu Descriptions or Pre-execution Commands (`%%`)
+```bash
+# Before showing the menu list, print the current directory and date
+%% echo "Current Directory: $(pwd)" && date
+```
+- Lines starting with `%%` are executed *before* the menu items under it are displayed. Great for showing status or calculating values needed for the menu. (Any command works, not just `echo`!)
+
+### 4. Adding Executable Commands
+```bash
+# Just list the commands you want to run, one per line!
+ls -al
+pwd
+cat /etc/passwd | grep root
+```
+
+### 5. Sequential Command Execution (`;;`) - IMPORTANT!
+This is a key feature!
+- **The Problem:** If you write `ls ; cat varFile` (single semicolon), `bash` might ask you for the `varFile` input *before* the `ls` command even finishes and shows you the file list. Annoying, right?
+- **The Solution:** Use `ls ;; cat varFile` (double semicolon). `go.sh` will **execute `ls` completely first**, let you see the output, and *then* prompt you for the `varFile` input for the `cat` command.
+- **When to use `;;`:** Use it when you need to **see the result of the first command *before* providing input for the second command**.
+
+```bash
+# Example 1: See the file list, then enter a filename to view
+ls ;; cat varFile
+
+# Example 2: Find a process ID with ps, then enter the PID to kill it
+ps -ef | grep varProcessName ;; kill varPID
+```
+
+### 6. English Menu Titles (`%%%e`)
+```bash
+%%% 시스템 정보 / 프로세스 관리 [p]
+%%%e System Information / Process Management [p] # This shows up if the terminal LANG isn't Korean
+```
+- If you work in multi-language environments, `%%%e` provides an English alternative title automatically.
+
+---
+
+## 💡 Using Input Variables (`varNAME`, `varNAME__DefaultValue`, `varNAME__choice1__choice2`)
+
+Need user input within your commands? Use variables starting with `var`!
+
+### 1. Basic Variable (`varNAME`)
+```bash
+# Will prompt for an IP address for 'varIP' when executed
+ping varIP
+```
+- Use `var` followed by an **uppercase** letter, then any combination of letters, numbers, or underscores (e.g., `varUserID`, `varPath`).
+
+### 2. Variable with Default Value (`varNAME__DefaultValue`)
+```bash
+# If you just press Enter, it pings 8.8.8.8
+ping varTARGET__8.8.8.8
+```
+- Add `__` (double underscore) followed by the default value. Pressing Enter uses this default.
+
+### 3. Variable with Choices (`varNAME__choice1__choice2...`)
+```bash
+# Presents a numbered menu to choose between htop, mc, or ncdu
+apt install varPKG__htop__mc__ncdu
+```
+- List choices separated by `__` after the variable name. This pops up a `select` menu for the user to pick from. This provides *options* to choose from, distinct from a single *default* value.
+
+### 4. Handling Special Characters in Values
+Sometimes you need slashes, spaces, etc., in variable *values* or *defaults*. Use these replacements:
+
+- Slash `/` → `@@` (e.g., `varPath__@@etc@@passwd`)
+- Space ` ` → `@space@` (e.g., `varMessage__Hello@space@World`)
+- Colon `:` → `@colon@`
+- Dot `.` → `@dot@`
+
+```bash
+# When run, varPath will be converted to /etc/passwd
+ls -al varPath__@@etc@@passwd
+```
+
+### 5. Conditional Command Execution
+```bash
+# Only run systemctl start if the varMODE variable is exactly "enable"
+[ "varMODE" = "enable" ] && systemctl start varService
+```
+- You can use standard Bash conditional logic (`[ ]`, `[[ ]]`, `if`).
+
+---
+
+## 🚨 Danger Zone Warning (`!!!`)
+
+```bash
+# This will show a confirmation prompt before running!
+!!! rm -rf /important/files
+```
+- Prefixing a command with `!!!` makes `go.sh` ask "Are you sure?" before execution. A great safety net!
+
+---
+
+## 🎁 Built-in Functions (A Taste of Handy Tools)
+
+`go.sh` comes packed with useful functions. Here are a few highlights: ✨
+
+| Function Name | Description                                                     | Example Usage                         |
+| ------------- | ------------------------------------------------------------- | ------------------------------------- |
+| `vi2 <file>`  | Edits file with vi after auto-backing it up (`.1.bak`, etc.)  | `vi2 /etc/hosts`                      |
+| `cdiff <f1> <f2>`| Colorized diff between two files                             | `cdiff hosts hosts.bak`               |
+| `cip`         | Colorizes IP addresses in output                              | `ip addr | cip`                       |
+| `cpipe`       | Colorizes various patterns (IPs, URLs, paths) in piped output | `cat log.txt \| cpipe`                |
+| `pipemenu`    | Turns piped input lines into a numbered selection menu        | `ls \| pipemenu`                     |
+| `pipemenu1cancel`| Like `pipemenu`, but selects first word only + Cancel option | `ps aux \| pipemenu1cancel`          |
+| `push "msg"`  | Sends a message via your configured Telegram bot            | `df -h \| push`                      |
+| `alarm <code> [msg]`| Schedules a Telegram alert (e.g., `alarm 005 "Ramen ready!"`)| `alarm 0010 "10 min break over"` |
+| `explorer <dir>`| Launches a text-based file explorer (ranger or built-in)    | `explorer /etc/`                    |
+| `ff <func>`   | Displays the source code of a built-in function               | `ff vi2`                              |
+| `yyay <pkg>`  | Installs packages using `yum` or `apt` automatically          | `yyay htop mc`                        |
+| `rbackup <file>`| Versioned backup like `vi2` (up to 9 versions + dated)      | `rbackup important.conf`            |
+| `template_copy <tmpl> <dest>` | Copies a template block from `go.env` to a file | `template_copy lamp.yml config.yml` |
+| `insert <file> <keyword>` | Inserts piped text after keyword in file (+backup/diff)| `echo "newline" \| insert file.txt "keyword"` |
+| `change <f> <find> <repl>`| Replaces text in file (+backup/diff)              | `change file.txt "old" "new"`         |
+| `hash_add <f> <find> [range]`| Comments out line(s) containing find pattern   | `hash_add conf.cfg "debug" +2`      |
+| `hash_remove <f> <find> [range]`| Uncomments line(s) containing find pattern | `hash_remove conf.cfg "debug"`    |
+
+*(See the `go.sh` script itself or use `ff <function_name>` to explore more!)*
+
+---
+
+## ✏️ Customization Tips (Make It Yours!)
+
+- **Edit Menus Fast with `conf`:** Opens `go.env` in vi. (`vi2` ensures backups!)
+- **Your Private Menu with `confmy`:** Edits `go.my.env`. This file isn't touched by `update`, keeping your personal stuff safe! 👍
+- **Sensitive Info (Passwords, Keys)?** Don't put them in `go.env`! Create `~/go.private.env` and add lines like `export DB_PASSWORD='MyS3cr3t!'`. `go.sh` loads this automatically, making `$DB_PASSWORD` available in your commands. (It also sets `chmod 600` for security). 🙅‍♂️
+- **Get Notified on Completion:** Add `;; bell ;; push "Job Done!"` after long commands. Get a Telegram ping when it finishes! (Requires setting up `push` first).
+- **Create Your Own Functions:** Add custom bash functions to the bottom of `go.sh`, then call them from your `go.env` menus!
+
+---
+
+## 📌 Final Word
+
+Alright folks, you're now equipped to master `go.sh`! 🎉 Open up `go.env` (`conf` command!) and start crafting your perfect command center. Experience how organized and efficient server management can be. Remember to use `update` to get the latest features, and don't hesitate to customize! 😎
+
+> 💡 If you get stuck, check the `help` menu first. If you need more detail on a function, use `ff <function_name>`. Still lost? Ask for help! Your feedback helps make `go.sh` even better! 🙌
+
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+*(Anticipating what you might ask...)*
+
+### Q1. My menus are blank! / Things look weird! 😭
+A. Could be a syntax error in `go.env` or an encoding mismatch (UTF-8 vs EUC-KR) between your terminal and the file.
+   1. Use `conf` to check your `go.env`. Make sure menus start with `%%%`.
+   2. If Korean text is broken, try typing `kr` and Enter to toggle encoding.
+
+### Q2. How do I add my own command to the menu?
+A. Easy! Use `conf` to edit `go.env`. Find a good spot (or add to the end), leave a blank line, then add:
+   ```bash
+   # Blank line above is important!
+
+   %%% My Custom Check [check]
+   %% My most used commands!
+   df -h | grep '/dev/sd'
+   free -m
+   uptime
+   echo "Server looks good!"
+   ```
+   Save (`ESC` -> `:wq`), exit, and run `gosh` again (or hit `m`). Your new menu will be there!
+
+### Q3. Why use `go.my.env`? Can't I just put everything in `go.env`?
+A. You *can*, but `go.env` might get overwritten when you use the `update` command. `go.my.env` is *your* personal space that `update` won't touch. `go.sh` cleverly merges both files when displaying menus, so use `go.my.env` for your custom stuff!
+
+### Q4. How do I handle passwords or API keys securely? 😥
+A. **Never** put secrets directly in `go.env`! Create a file `~/go.private.env` and add them like this:
+   ```bash
+   export API_KEY="abcdef12345"
+   export SECRET_PHRASE='My secret phrase!@#' # Use quotes for special chars
+   ```
+   Then, in `go.env`, use the variables `$API_KEY`, `$SECRET_PHRASE`. `go.sh` loads `go.private.env` automatically and securely (`chmod 600`).
+
+### Q5. How do I set up Telegram notifications? 🤖
+A. The first time you use the `push` command (from a menu or the shell), it will prompt you for your Telegram Bot Token and Chat ID. Enter them once, and they'll be saved securely in `~/go.private.env` for future use. (You'll need to create a Telegram bot first - Google can show you how).
+
+### Q6. Can `go.sh` remember the values I enter for variables like `varUSER`?
+A. Yes, it does! 😉 If you enter `john` for `varUSER`, the next time it asks for `varUSER`, it will show `Prev.selected value: john`. If there's a default value too, it shows both. Smart, right? (These remembered values are stored in `~/.go.private.var`. You can edit this file using the `editVAR` command).
+
+---
+
+## 🛠️ Practical Scenario: Adding a Quick SSH Connection Menu
+
+Tired of typing `ssh user@host -p port`? Let's menu-fy it!
+
+1.  Run `gosh` and type `confmy` (to edit your personal menu).
+2.  When `vi` opens, go to the bottom (press `G`, then `o`) and add this:
+
     ```bash
-    wget -O go.sh http://byus.net/go.sh && bash go.sh
+    # Add a blank line at the top if needed
+
+    %%% Quick SSH Connections [sshgo]
+    %% My favorite servers! One-click connect!
+    ssh server1.example.com
+    ssh myuser@server2.example.com -p 2222
+    assh server3.example.com myuser 'P@$$wOrd!@#' 22
+    # 'assh' function auto-handles ID/PW login! (Built-in)
     ```
-    *   You'll need `wget` or `curl` installed, obviously. (If not: `apt install wget curl` or `yum install wget curl`)
-    *   It might ask if you want to download `go.env` if it's missing. Just hit `y`!
-    *   It'll create a handy `/bin/gosh` shortcut (symlink) so you can run it from anywhere later! 👍
+3.  Save and exit (`ESC`, then type `:wq`, then Enter).
+4.  Run `gosh` again or type `m` to go to the main menu. You'll see your new `[sshgo]` menu! Just select the number to connect.
 
-2.  **Running It (After the first time):**
-    ```bash
-    ./go.sh # If you're in the same directory
-    # Or use the shortcut from anywhere!
-    gosh
-    ```
-
-3.  **Controlling the Remote:**
-    *   **Select Menu:** Type the number or the shortcut key (`[key]`) shown next to the menu item and press Enter.
-    *   **Run Command:** In a command list, type the number of the command you want to run.
-        *   If you see a `varNAME` prompt, type the value you need and press Enter. (Or just Enter if there's a default!)
-    *   **Navigation:**
-        *   `m`: Go straight back to the Main Menu.
-        *   `b`: Go back one menu level. (`bb`, `bbb` go back two, three levels!)
-        *   `<` or `before`: Go to the previous menu at the same level (useful with sequential shortcuts).
-        *   `>` or `next`: Go to the next menu at the same level.
-        *   `q` or `0` or `.`: Exit the current menu level, or exit the script from the main menu.
-    *   **Shell Access:**
-        *   `sh` or `..`: Start an interactive sub-shell that keeps your current environment (aliases, functions work!). History is saved.
-        *   `bash` or `...` or `,`: Start a clean, new Bash shell.
-    *   **Editing Configs:**
-        *   `conf`: Edit the main `go.env` file (uses vi, creates backup).
-        *   `confmy`: Edit your personal `go.my.env` file (vi).
-        *   `conff`: Edit the `go.sh` script itself (vi).
-        *   `confc`, `conffc`: Oops! Revert `go.env` or `go.sh` to the previous backup.
-    *   **Other Handy Commands:**
-        *   `h`: View and re-run command history.
-        *   `e`: Launch file explorer (ranger or built-in). (`ee` goes to `/etc`, `eee` goes to ranger's last path).
-        *   `cdr`: Change shell directory to ranger's last path.
-        *   `kr`: Force encoding conversion if you see broken Korean characters (or other encoding issues).
-        *   `update`: Get the latest version of the script.
-        *   **Timer/Alarm:** Enter numbers starting with `0` (e.g., `05`=5s, `0010`=10m, `00001800`=18:00) + message (requires atd, Telegram optional).
-
----
-
-## 3. File Structure
-
-*   **`go.sh`**: The main executable script. Contains all the logic.
-*   **`go.env`**: The **core configuration file** where you define your menu structure and commands. (Plain text)
-*   **`go.my.env` (Optional):** For your custom menus. Merged after `go.env`.
-*   **`~/go.private.env` (Optional):** Stores sensitive info like API keys, passwords. (`VARNAME=value` format, recommend `chmod 600`) Loaded automatically.
-*   **`~/.go.private.var` (Auto-generated):** Saves the last used values for `varNAME` variables for reuse.
-*   **`/tmp/go_history.txt` or `~/tmp/go_history.txt` (Auto-generated):** Stores command execution history.
-
----
-
-## 4. Getting Started
-
-1.  **First Time Setup (Download & Run):**
-    ```bash
-    wget -O go.sh http://byus.net/go.sh && bash go.sh
-    ```
-    *   You'll need `wget` or `curl` installed, obviously. (If not: `apt install wget curl` or `yum install wget curl`)
-    *   It might ask if you want to download `go.env` if it's missing. Just hit `y`!
-    *   It'll create a handy `/bin/gosh` shortcut (symlink) so you can run it from anywhere later! 👍
-
-2.  **Running It (After the first time):**
-    ```bash
-    ./go.sh # If you're in the same directory
-    # Or use the shortcut from anywhere!
-    gosh
-    ```
-
----
-
-## 5. Usage (Controlling the Remote)
-
-*   **Select Menu:** Type the number or the shortcut key (`[key]`) shown next to the menu item and press Enter.
-*   **Run Command:** In a command list, type the number of the command you want to run.
-    *   If you see a `varNAME` prompt, type the value you need and press Enter. (Or just Enter if there's a default!)
-*   **Navigation:**
-    *   `m`: Go straight back to the Main Menu.
-    *   `b`: Go back one menu level. (`bb`, `bbb` go back two, three levels!)
-    *   `<` or `before`: Go to the previous menu at the same level (useful with sequential shortcuts).
-    *   `>` or `next`: Go to the next menu at the same level.
-    *   `q` or `0` or `.`: Exit the current menu level, or exit the script from the main menu.
-*   **Shell Access:**
-    *   `sh` or `..`: Start an interactive sub-shell that keeps your current environment (aliases, functions work!). History is saved.
-    *   `bash` or `...` or `,`: Start a clean, new Bash shell.
-*   **Editing Configs:**
-    *   `conf`: Edit the main `go.env` file (uses vi, creates backup).
-    *   `confmy`: Edit your personal `go.my.env` file (vi).
-    *   `conff`: Edit the `go.sh` script itself (vi).
-    *   `confc`, `conffc`: Oops! Revert `go.env` or `go.sh` to the previous backup.
-*   **Other Handy Commands:**
-    *   `h`: View and re-run command history.
-    *   `e`: Launch file explorer (ranger or built-in). (`ee` goes to `/etc`, `eee` goes to ranger's last path).
-    *   `cdr`: Change shell directory to ranger's last path.
-    *   `kr`: Force encoding conversion if you see broken Korean characters (or other encoding issues).
-    *   `update`: Get the latest version of the script.
-    *   **Timer/Alarm:** Enter numbers starting with `0` (e.g., `05`=5s, `0010`=10m, `00001800`=18:00) + message (requires atd, Telegram optional).
-
----
-
-## 6. `go.env` Syntax Guide (Building Your Own Remote Control!)
-
-This is where the magic happens! Open `go.env` and start customizing. The syntax is easy:
-
-*   **Main Menu Item (`%%%`):** Top-level entry.
-    ```
-    %%% System Info [p]
-    ```
-    *   Starts with `%%%`. `[shortcut]` is optional for quick access.
-
-*   **English Title (Optional / `%%%e`):** Displays for non-Korean environments.
-    ```
-    %%%e System Info [p]
-    ```
-    *   Starts with `%%%e`. The shortcut should be the same.
-
-*   **Pre-Execution Command (Optional / `%%`):** Runs *before* the menu list shows.
-    ```
-    %% echo "Showing current system info..."
-    ```
-    *   Starts with `%%`. Good for descriptions or status checks.
-
-*   **Submenu Definition (`%%% {submenu_...}>`):** Group related commands.
-    ```
-    %%% {submenu_web}> Web Server Management [web]
-    ```
-    *   `{submenu_tagname}`: An identifier for this group.
-    *   `>`: Separates the tag from the title.
-
-*   **Linking Menus (Submenu Entry):**
-    ```
-    %%% Server Management [s]
-    {submenu_web}  # Selecting 's' jumps to the {submenu_web} menu
-    {submenu_db}
-    ```
-    *   Place the `{submenu_tagname}` below a main menu item.
-
-*   **Defining Commands (The Action!):**
-    *   List commands or functions one per line below the menu title.
-    *   **Sequential Execution (` ;; `):** Chain commands.
-        ```bash
-        cd /tmp ;; pwd ;; ls -al
-        ```
-    *   **User Input Variables (`varNAME`):**
-        ```bash
-        echo "Your input: varMY_INPUT" # Prompts for [varMY_INPUT]:
-        ping varTARGET_IP__8.8.8.8 # Default value 8.8.8.8
-        apt install $(echo "nginx__apache2__httpd" | pipemenu1cancel) # Selection menu!
-        # Use @@ for / in paths (e.g., varPATH__@@etc@@passwd)
-        # Use @space@ for spaces (displays as _)
-        # Use @colon@ for :
-        # Use @dot@ for .
-        ```
-    *   **Warning Prompt (`!!!`):** Confirms before running potentially risky commands.
-        ```bash
-        !!! rm -rf /important/files
-        ```
-    *   **Comment/Description Line (`:`):** Just text, won't execute.
-        ```
-        : This is just a description.
-        ls -al # This command will run.
-        ```
-
-*   **Ending a Menu Group (Blank Line!):** **Crucial!** Put an empty line between `%%%` menu groups.
-
-*   **Comments (`#`):** Lines starting with `#` are ignored. Comments after commands (`# like this`) are automatically removed.
-
----
-
-## 7. Handy Built-in Functions (A Taste)
-
-`go.sh` includes useful functions you can call directly in your commands:
-
-*   `vi2 <file> [search_term]`: Opens file in vi/vim after creating a backup. Jumps to `search_term` if provided.
-*   `rbackup <file1> [file2...]`: Creates rotated backups (`.1.bak`, `.2.bak`...).
-*   `rollback <file>`: Restores a file from its latest `rbackup`.
-*   `cdiff <file1> <file2>`: Shows differences between two files in color.
-*   `cip`, `cip24`, `cip16`: Colorizes IP addresses (grouped by subnet).
-*   `cgrep`, `cgrep1`, `cgrepl`, `cgrepline`, `cgrepn`: Highlights search terms or lines.
-*   `pipemenu`, `pipemenu1`, `pipemenulist`: Turns piped input into a selection menu.
-*   `template_copy <name> <dest>`: Copies a predefined template (from `go.sh` itself) to a destination file.
-*   `template_view <name>`: Views a template's content.
-*   `template_edit <name>`: Edits a template's content (vi).
-*   `push [message]`: Sends a message via Telegram bot (requires setup).
-*   `alarm <timecode> [message]`: Schedules an alarm message (requires `atd`).
-*   `saveVAR`, `loadVAR`: Saves/loads `varNAME` values between sessions.
-*   `explorer <path>`: Opens a terminal file explorer (ranger if installed).
-*   `ff <func_name>`: Shows the source code of a built-in function (for learning/debugging).
-
-(Explore the `go.sh` file to discover more functions!)
-
-## ⚠️ Heads Up! (Important Notes)
-
-*   **Run Commands at Your Own Risk! 😬:** You are responsible for the commands you put in `go.env`. Be careful, especially with `!!!` commands or anything involving `rm -rf`!
-*   **Password Security! 🔒:** **Never** hardcode passwords directly in `go.env` or `go.sh`. Use the `~/go.private.env` file (`VAR=value` format) and set its permissions to `600` (`chmod 600 ~/go.private.env`).
-*   **Bugs Happen! 🤔:** While tested, this script might have unexpected behavior. Always back up important data before running critical commands.
-*   **Dependencies! 🛠️:** Some commands need external packages (`wget`, `htop`, `ranger`, etc.). The `yyay`, `ay`, `yy` functions might help install them on Debian/CentOS-based systems.
-
----
-
-*Hope this script becomes your trusty sidekick on your Linux server adventures!*
-*Feel free to reach out if you have questions or ideas for improvement.*
+> 😎 How's that? Server management just got a whole lot smoother, right? Hope `go.sh` makes your life easier! 💪 Got more questions or ideas? Let me know! Your feedback is always welcome! 🙌
