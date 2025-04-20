@@ -6372,7 +6372,7 @@ services:
 
   # 데이터베이스 (MySQL 8 버전대 사용 - 특정 버전 명시 권장)
   db:
-    image: mysql:latest # MySQL 8.0 버전 명시 (이걸 가장 추천!)
+    image: mysql:latest # MySQL 8.0 버전 명시
     # image: mysql:8 # MySQL 8 버전대를 사용해도 되지만, 8.0 처럼 명시하는게 더 안정적
     container_name: lamp_mysql_db
     environment:
