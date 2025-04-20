@@ -6438,7 +6438,7 @@ services:
   # 2. PHP 처리 엔진 (PHP-FPM - latest stable on Alpine)
   app:
     # 변경! 버전 번호 빼고 'fpm-alpine' -> 최신 안정 PHP FPM (Alpine) 이미지
-    # image: php:fpm-alpine
+    # image: php:fpm-alpine # build 로 조정
     # image: php:8.1-fpm-alpine
     build:
       context: . # Dockerfile 이 있는 경로 (현재 폴더 .)
