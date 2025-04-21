@@ -1230,7 +1230,7 @@ menufunc() {
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
                     #[[ -n $cmd_choice && ( $cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/} ) ]] || ! (( cmd_choice >= 1 && cmd_choice <= 99 )) 2>/dev/null &&
-                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) ]] &&
+                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) || "$cmd_choice" -ge 100 ]] &&
                         {
                             YEL1
                             echo
@@ -1362,6 +1362,8 @@ menufunc() {
 
                         # --- Default block for complex checks and fallback ---
                         *)
+							#readxy "cmd: [$cmd_choice]"
+
                             # Check 1: Shortcut menu jump? (Requires $cmd_choice1 empty & match in $shortcutstr)
                             if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
                                 readxx $LINENO cmd_choice:"$cmd_choice" shortcut_moving
@@ -1388,6 +1390,11 @@ menufunc() {
                                     continue
                                 }
 
+							# Check 2-1: proxmox vm enter? 100~
+							elif expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+								readxy "Proxmox vm --> $cmd_choice Enter"
+						    	enter "$cmd_choice"
+							    continue
                             # Check 3: Valid Linux command? (Not purely numeric and exists)
                             #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
                             elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "${cmd_choice%%[|;]*}" &>/dev/null; then
@@ -2872,7 +2879,14 @@ eip3() { eipf 3; }
 eip4() { eipf 4; }
 eip5() { eipf 5; }
 
+nodeip() {
+  local node="$1"
+  jq -r --arg node "$node" '.nodelist[$node].ip // empty' /etc/pve/.members
+}
+
+
 # proxmox vmslist
+
 vmslistold() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
 vmslist() {
     pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
@@ -3944,7 +3958,7 @@ qssh() {
 
     local vmid="$1"
     local user="${2:-$default_user}"
-    [[ -z $user ]] && echo "Error: SSH username cannot be empty." && return 1
+    [[ -z "$user" ]] && echo "Error: SSH username cannot be empty." && return 1
 
     echo "=============================================="
     echo "--- Processing qssh for VM $vmid (User: $user) ---"
@@ -3954,7 +3968,7 @@ qssh() {
     node=$(pvesh get /cluster/resources --output-format=json |
         jq -r ".[] | select(.type==\"qemu\" and .vmid==$vmid) | .node")
 
-    if [[ -z $node ]]; then
+    if [[ -z "$node" ]]; then
         echo "Error: VM $vmid not found in cluster."
         return 1
     fi
@@ -3969,7 +3983,7 @@ qssh() {
     local bridge
     bridge=$(echo "$config_output" | sed -n 's/.*bridge=\([^, ]\+\).*/\1/p' | head -n1)
 
-    if [[ -z $mac || -z $bridge ]]; then
+    if [[ -z "$mac" || -z "$bridge" ]]; then
         echo "Error: Failed to extract MAC or bridge from config."
         return 1
     fi
@@ -3982,7 +3996,7 @@ qssh() {
     local ip
     ip=$(arp -n | grep -i "$lower_mac" | awk '{print $1}' | head -n1)
 
-    if [[ -z $ip ]]; then
+    if [[ -z "$ip" ]]; then
         echo "  > Not found in ARP cache. Trying arp-scan on $bridge..."
         if ! command -v arp-scan &>/dev/null; then
             echo "Error: arp-scan not found. Please install it (e.g. apt install arp-scan)."
@@ -3992,7 +4006,7 @@ qssh() {
         arp_out=$(arp-scan --interface="$bridge" --localnet --numeric --quiet --timeout=$((arp_scan_timeout * 1000)) 2>/dev/null | grep -i "$lower_mac")
         ip=$(echo "$arp_out" | awk '{print $1}' | head -n1)
 
-        if [[ -z $ip ]]; then
+        if [[ -z "$ip" ]]; then
             echo "Error: MAC $lower_mac not found on $bridge via arp-scan."
             return 1
         fi
@@ -4132,6 +4146,44 @@ old_qssh() {
         return 0
     fi
 }
+
+enter() {
+    local vmid="$1"
+    local default_user="root"
+
+	if [ -z "$vmid" ] || ! expr "$vmid" : '^[0-9]\+$' >/dev/null; then
+        echo "Usage: enter <vmid>"
+        return 1
+    fi
+
+    echo "--- Checking type for VMID $vmid..."
+
+    local vmtype node
+    node=$(pvesh get /cluster/resources --output-format=json |
+        jq -r ".[] | select(.vmid == $vmid) | .node")
+    vmtype=$(pvesh get /cluster/resources --output-format=json |
+        jq -r ".[] | select(.vmid == $vmid) | .type")
+
+    if [[ -z "$node" || -z "$vmtype" ]]; then
+        echo "❌ VMID $vmid not found in cluster."
+        return 1
+    fi
+
+    echo "  > VM $vmid is a $vmtype on node $node"
+
+    if [[ "$vmtype" == "lxc" ]]; then
+        echo "������ Entering LXC container via pct..."
+        pct enter "$vmid"
+    elif [[ "$vmtype" == "qemu" ]]; then
+        echo "������️  Connecting via qssh..."
+        qssh "$vmid" "$default_user"
+    else
+        echo "⚠️ Unsupported type: $vmtype"
+        return 1
+    fi
+}
+
+
 
 # assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
@@ -5693,103 +5745,122 @@ old_vmipscan() {
     unset IFS
 }
 
+
 watch_pve() {
-    interval=${1:-5}
-    local_node=$(hostname -s 2>/dev/null)
-    [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1
-    for cmd in pvesh jq awk date grep sed hostname bc qm; do
-        command -v $cmd >/dev/null || {
-            echo "Missing $cmd" 1>&2
+    interval=${1:-5};
+    local_node=$(hostname -s 2> /dev/null);
+    [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1;
+    for cmd in pvesh jq awk date grep sed hostname bc qm;
+    do
+        command -v $cmd > /dev/null || {
+            echo "Missing $cmd" 1>&2;
             return 1
-        }
-    done
-    BOLD='\033[1m'
-    RED='\033[1;31m'
-    YEL='\033[1;33m'
-    NC='\033[0m'
-    NODE_CPU_T=50
-    NODE_CPU_M=10
-    NODE_MEM_T=80
-    NODE_MEM_M=40
-    VM_CPU_T=70
-    VM_CPU_M=10
-    VM_MEM_T=80
-    VM_MEM_M=40
-    echo -e "${BOLD}Reading ARP cache...${NC}"
-    #arp_map="/tmp/.arp_map.$$"
-    arp_map="/tmp/.arp_map"
-    >"$arp_map"
-    arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
-    echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
-    echo -e "${BOLD}Reading VMs config...${NC}"
-    trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM
+        };
+    done;
+    BOLD='\033[1m';
+    RED='\033[1;31m';
+    YEL='\033[1;33m';
+    NC='\033[0m';
+    NODE_CPU_T=50;
+    NODE_CPU_M=10;
+    NODE_MEM_T=80;
+    NODE_MEM_M=40;
+    VM_CPU_T=70;
+    VM_CPU_M=10;
+    VM_MEM_T=80;
+    VM_MEM_M=40;
+    echo -e "${BOLD}Reading ARP cache...${NC}";
+    arp_map="/tmp/.arp_map";
+    > "$arp_map";
+    arp -n | awk '/ether/ {print tolower($3), $1}' > "$arp_map";
+    echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}";
+    echo -e "${BOLD}Reading VMs config...${NC}";
+    trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM;
+
+  # 모든 노드의 IP를 /etc/pve/.members 파일에서 한 번에 가져오기
+    while IFS=" " read node ip; do
+        # 각 노드의 IP를 동적으로 변수로 저장
+        eval "node_${node}_ip=\"$ip\""
+    done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' /etc/pve/.members)
+
     while :; do
-        now=$(date +%s)
-        output=""
-        output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n"
-        output="$output\n${BOLD}Nodes:${NC}"
-        output="$output
-Node          Status     CPU(%)       Mem(GB/%)                Uptime
-"
-        output="$output--------------------------------------------------------------------------\n"
+        now=$(date +%s);
+        output="";
+        output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n";
+        output="$output\n${BOLD}Nodes:${NC}";
+output="$output
+Node           IP Address        Status     CPU(%)       Mem(GB/%)                Uptime
+";
+        output="$output--------------------------------------------------------------------------\n";
         while read node status cpu mem maxmem up; do
-            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
-            [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || { [ "$cpu_p" -ge $NODE_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"; }
-            mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
-            max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
-            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
-            [ "$mem_p" -ge $NODE_MEM_T ] && mem_c="$RED" || { [ "$mem_p" -ge $NODE_MEM_M ] && mem_c="$YEL" || mem_c="$NC"; }
-            up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
-            line=$(printf "%-13s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt")
-            output="$output$line\n"
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
+            [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || {
+                [ "$cpu_p" -ge $NODE_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"
+            };
+            mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
+            max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}');
+            [ "$mem_p" -ge $NODE_MEM_T ] && mem_c="$RED" || {
+                [ "$mem_p" -ge $NODE_MEM_M ] && mem_c="$YEL" || mem_c="$NC"
+            };
+            up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}');
+
+            node_ip_var="node_${node}_ip"
+            node_ip="${!node_ip_var}"  # 동적으로 생성된 변수의 값 참조
+
+			line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt");
+
+            output="$output$line\n";
         done < <(pvesh get /cluster/resources --output-format=json | jq -r '
-            .[] | select(.type=="node") | "\(.node) \(.status) \(.cpu) \(.mem) \(.maxmem) \(.uptime)"')
-        output="$output\n${BOLD}VMs:${NC}\n"
-        line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)")
-        output="$output$line\n"
-        output="$output--------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            .[] | select(.type=="node") | "\(.node) \(.status) \(.cpu) \(.mem) \(.maxmem) \(.uptime)"');
+        output="$output\n${BOLD}VMs:${NC}\n";
+        line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)");
+        output="$output$line\n";
+        output="$output--------------------------------------------------------------------------------------------------------------------------------------------------\n";
         pvesh get /cluster/resources --output-format=json | jq -r '
         .[] | select(.type=="qemu" and .status=="running") |
-        "\(.vmid)|\(.node)|\(.name)|\(.cpu)|\(.mem)|\(.maxmem)|\(.diskread)|\(.diskwrite)|\(.netin)|\(.netout)"' >/tmp/.vm_data.$$
+        "\(.vmid)|\(.node)|\(.name)|\(.cpu)|\(.mem)|\(.maxmem)|\(.diskread)|\(.diskwrite)|\(.netin)|\(.netout)"' > /tmp/.vm_data.$$;
         while IFS='|' read id node name cpu mem maxmem d_r d_w n_in n_out; do
-            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
-            [ "$cpu_p" -ge $VM_CPU_T ] && cpu_c="$RED" || { [ "$cpu_p" -ge $VM_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"; }
-            mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}')
-            max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}')
-            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
-            [ "$mem_p" -ge $VM_MEM_T ] && mem_c="$RED" || { [ "$mem_p" -ge $VM_MEM_M ] && mem_c="$YEL" || mem_c="$NC"; }
-            #vm_mac=$(qm config "$id" 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
-            vm_mac=$(pvesh get /nodes/$node/qemu/$id/config --noborder 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
-            vm_ip="N/A"
-            [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map")
-            [ -z "$vm_ip" ] && vm_ip="N/A"
-            eval "old_d_r=\${disk_r_$id:-$d_r}"
-            eval "old_d_w=\${disk_w_$id:-$d_w}"
-            eval "old_n_in=\${net_in_$id:-$n_in}"
-            eval "old_n_out=\${net_out_$id:-$n_out}"
-            eval "last_time=\${last_time_$id:-$now}"
-            dt=$((now - last_time))
-            [ $dt -le 0 ] && dt=1
-            dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
-            dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
-            ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
-            no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
-            eval "disk_r_$id=$d_r"
-            eval "disk_w_$id=$d_w"
-            eval "net_in_$id=$n_in"
-            eval "net_out_$id=$n_out"
-            eval "last_time_$id=$now"
-            line=$(printf "%-8s %-12s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s" "$id" "$node" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd")
-            output="$output$line\n"
-        done </tmp/.vm_data.$$
-        rm -f /tmp/.vm_data.$$
-        find /tmp/ -name ".vm_data.*" -type f -mtime +1 -exec rm -f {} \;
-        clear
-        echo -e "$output"
-        sleep "$interval"
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
+            [ "$cpu_p" -ge $VM_CPU_T ] && cpu_c="$RED" || {
+                [ "$cpu_p" -ge $VM_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"
+            };
+            mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}');
+            max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}');
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}');
+            [ "$mem_p" -ge $VM_MEM_T ] && mem_c="$RED" || {
+                [ "$mem_p" -ge $VM_MEM_M ] && mem_c="$YEL" || mem_c="$NC"
+            };
+            vm_mac=$(pvesh get /nodes/$node/qemu/$id/config --noborder 2> /dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]');
+            vm_ip="N/A";
+            [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map");
+            [ -z "$vm_ip" ] && vm_ip="N/A";
+            eval "old_d_r=\${disk_r_$id:-$d_r}";
+            eval "old_d_w=\${disk_w_$id:-$d_w}";
+            eval "old_n_in=\${net_in_$id:-$n_in}";
+            eval "old_n_out=\${net_out_$id:-$n_out}";
+            eval "last_time=\${last_time_$id:-$now}";
+            dt=$((now - last_time));
+            [ $dt -le 0 ] && dt=1;
+            dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
+            dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
+            ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
+            no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
+            eval "disk_r_$id=$d_r";
+            eval "disk_w_$id=$d_w";
+            eval "net_in_$id=$n_in";
+            eval "net_out_$id=$n_out";
+            eval "last_time_$id=$now";
+            line=$(printf "%-8s %-12s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s" "$id" "$node" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd");
+            output="$output$line\n";
+        done < /tmp/.vm_data.$$;
+        rm -f /tmp/.vm_data.$$;
+        find /tmp/ -name ".vm_data.*" -type f -mtime +1 -exec rm -f {} \;;
+        clear;
+        echo -e "$output";
+        sleep "$interval";
     done
 }
-
 # explorer.sh
 explorer() {
     [ $# -eq 0 ] && echo "Usage: explorer file1 [file2 ...]" && return 1
