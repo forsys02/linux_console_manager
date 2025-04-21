@@ -5574,6 +5574,28 @@ dfmonitor() {
 
 # proxmox vmid vnname ip print
 vmipscan() {
+    local IFS=$' \t\n'
+    local iface
+    [ "$1" ] && iface="$1" || iface="vmbr0"
+
+    declare -A mac_ip_map
+    while read -r ip mac; do
+        mac_ip_map["$(echo "$mac" | tr '[:upper:]' '[:lower:]')"]="$ip"
+    done < <(arp-scan -I $iface -l | awk '/^[0-9]/ {print $1, $2}')
+
+    for node in $(pvesh get /nodes --noborder --noheader | awk '{print $1}'); do
+        for vmid in $(pvesh get /nodes/$node/qemu --noborder --noheader | awk '/running/ {print $2}'); do
+            config=$(pvesh get /nodes/$node/qemu/"$vmid"/config --noborder --noheader)
+            vmname=$(echo "$config" | awk '$1 == "name" {print $2}')
+            mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | grep -oP '(?<==)[0-9A-Fa-f:]+(?=,bridge=)')
+            [[ -n $mac ]] && ip="${mac_ip_map[$(echo "$mac" | tr '[:upper:]' '[:lower:]')]}"
+            [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
+        done
+    done
+}
+
+# localnet
+old_vmipscan() {
     # MAC-IP 매핑
     local IFS=$' \t\n'
     local iface
