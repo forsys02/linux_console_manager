@@ -5592,6 +5592,7 @@ vmipscan() {
             [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
         done
     done
+    unset IFS
 }
 
 # localnet
@@ -5612,6 +5613,7 @@ old_vmipscan() {
         mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | grep -oP '(?<==)[0-9A-Fa-f:]+(?=,bridge=)')
         [[ -n $mac ]] && ip="${mac_ip_map[$(echo "$mac" | tr '[:upper:]' '[:lower:]')]}" && [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
     done
+    unset IFS
 }
 
 watch_pve() {
