@@ -5615,362 +5615,114 @@ old_vmipscan() {
     done
     unset IFS
 }
-
 watch_pve() {
-    local interval=${1:-5}
-    local history_size=2
-    local local_node_name
+    interval=${1:-5}
+    local_node=$(hostname -s 2>/dev/null)
+    [ -z "$local_node" ] && echo "Error: No hostname." >&2 && return 1
 
-    local_node_name=$(hostname -s 2>/dev/null)
-    if [[ -z $local_node_name ]]; then
-        echo "Error: Could not get local hostname." >&2
-        return 1
-    fi
-    echo "Info: Monitoring Cluster Nodes & KVM VMs (local node: '$local_node_name')."
-
-    if [[ ${BASH_VERSINFO[0]} -lt 4 ]]; then
-        echo "Error: Bash v4+ required." >&2
-        return 1
-    fi
-    for cmd in pvesh jq arp awk date grep sed hostname bc qm; do
-        if ! command -v $cmd &>/dev/null; then
-            echo "Error: '$cmd' not found." >&2
+    for cmd in pvesh jq awk date grep sed hostname bc qm; do
+        command -v $cmd >/dev/null || {
+            echo "Missing $cmd" >&2
             return 1
-        fi
+        }
     done
 
-    local RED='\033[1;31m' YELLOW='\033[1;33m' BOLD='\033[1m' NC='\033[0m'
-    local NODE_CPU_WARN_THRESHOLD=80
-    local NODE_MEM_WARN_THRESHOLD=85
-    local VM_CPU_WARN_THRESHOLD=90
-    local VM_MEM_WARN_THRESHOLD=80
+    BOLD='\033[1m'
+    RED='\033[1;31m'
+    YEL='\033[1;33m'
+    NC='\033[0m'
+    NODE_CPU_T=80
+    NODE_MEM_T=85
+    VM_CPU_T=90
+    VM_MEM_T=80
 
-    local -A mem_history disk_r_history disk_w_history
-    local -A net_in_history net_out_history last_update_time
-    local -A arp_map vm_maxmem_bytes_map
+    echo -e "${BOLD}Reading ARP cache...${NC}"
+    arp_map="/tmp/.arp_map.$$"
+    >"$arp_map"
+    arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
+    echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
+    trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM
 
-    # === 함수 정의 ===
-    convert_to_mb() {
-        local bytes=${1:-0}
-        if ! [[ $bytes =~ ^[0-9]+$ ]]; then bytes=0; fi
-        awk -v b="$bytes" 'BEGIN{printf "%.0f", b/1024/1024}'
-    }
-    convert_to_gib() {
-        local bytes=${1:-0}
-        if ! [[ $bytes =~ ^[0-9]+$ ]]; then bytes=0; fi
-        awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1024/1024/1024}'
-    }
-    format_speed_mbps() {
-        local bps=${1:-0} mbps is_less_than_0_1
-        if ! [[ $bps =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "-.-"
-            return
-        fi
-        mbps=$(awk -v bps="$bps" 'BEGIN{printf "%.1f", bps/1024/1024}')
-        if ! [[ $mbps =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "-.-"
-            return
-        fi
-        is_less_than_0_1=$(echo "$mbps < 0.1" | bc -l 2>/dev/null || echo "0")
-        if [[ $is_less_than_0_1 -eq 1 ]]; then echo "0.0"; else echo "$mbps"; fi
-    }
-    format_uptime() {
-        local total_seconds=${1:-0}
-        if ! [[ $total_seconds =~ ^[0-9]+$ ]] || [[ $total_seconds -le 0 ]]; then
-            echo "-"
-            return
-        fi
-        local days=$((total_seconds / 86400))
-        local hours=$(((total_seconds % 86400) / 3600))
-        local minutes=$(((total_seconds % 3600) / 60))
-        local weeks=$((days / 7))
-        local days_rem=$((days % 7))
-        local uptime_str=""
-        [[ $weeks -gt 0 ]] && uptime_str+="${weeks}w "
-        [[ $days_rem -gt 0 ]] && uptime_str+="${days_rem}d "
-        uptime_str+=$(printf "%dh %dm" "$hours" "$minutes")
-        echo "$uptime_str"
-    }
+    while :; do
+        now=$(date +%s)
+        output=""
+        output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n"
 
-    # --- 초기화 (Local ARP Cache) ---
-    local init_start_time=$(date +%s.%N)
-    echo -e "${BOLD}Initializing: Reading local ARP cache...${NC}"
-    local arp_cache_raw=$(arp -n)
-    local arp_map_count=0
-    while IFS= read -r line || [[ -n $line ]]; do
-        local ip mac mac_lower
-        ip=$(echo "$line" | awk '{print $1}')
-        mac=$(echo "$line" | awk '{print $3}')
-        mac_lower=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
-        if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && $mac_lower =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]]; then
-            arp_map["$mac_lower"]="$ip"
-            ((arp_map_count++))
-        fi
-    done < <(echo "$arp_cache_raw")
-    echo "Info: Found $arp_map_count entries in local ARP cache."
-    if [[ $arp_map_count -eq 0 ]]; then echo -e "${YELLOW}Warn: Local ARP cache empty/unparsable. Local IPs may be N/A.${NC}"; fi
-    local init_end_time=$(date +%s.%N)
-    local init_duration=$(awk -v s="$init_start_time" -v e="$init_end_time" 'BEGIN{printf "%.2f", e-s}')
-    echo -e "${BOLD}Initialization complete in ${init_duration} seconds. Press Ctrl+C to exit.${NC}"
+        output="$output\n${BOLD}Nodes:${NC}\n"
+        output="$output
+Node          Status     CPU(%)       Mem(GB/%)                Uptime
+"
+        output="$output--------------------------------------------------------------------------\n"
 
-    # --- 메인 루프 ---
-    trap 'echo -e "\n${BOLD}Exiting watch_pve...${NC}"; return 0' INT TERM
-    while true; do
-        local current_epoch=$(date +%s)
-        local output_buffer=""
-        printf -v output_buffer "%bSystem Uptime (Node: %s):%b %s\n\n" "$BOLD" "$local_node_name" "$NC" "$(uptime)"
+        while read node status cpu mem maxmem up; do
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
+            cpu_c=$([ "$cpu_p" -ge $NODE_CPU_T ] && echo "$RED" || echo "$NC")
+            mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
+            max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
+            mem_c=$([ "$mem_p" -ge $NODE_MEM_T ] && echo "$RED" || echo "$NC")
+            up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
+            line=$(printf "%-13s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" \
+                "$node" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt")
+            output="$output$line\n"
+        done < <(pvesh get /cluster/resources --output-format=json | jq -r '
+            .[] | select(.type=="node") | "\(.node) \(.status) \(.cpu) \(.mem) \(.maxmem) \(.uptime)"')
 
-        local -A node_summary_data vm_data vmid_to_node
-        local cluster_nodes_list=() all_running_vmids_list=()
-        local pvesh_json_output=$(pvesh get /cluster/resources --output-format=json 2>/dev/null)
+        output="$output\n${BOLD}VMs:${NC}\n"
+        line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" \
+            "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)")
+        output="$output$line\n"
+        output="$output--------------------------------------------------------------------------------------------------------------------------------------------------\n"
 
-        local jq_filter=$(
-            cat <<JQ_EOF
-.[]? | select(.type == "qemu" and .status == "running" or .type == "node") |
-if .type == "qemu" then
-  {
-    type: .type, vmid: .vmid, node: .node, name: (.name // "vm-\(.vmid)"),
-    cpu: (.cpu // 0), mem: (.mem // 0), maxmem: (.maxmem // 0),
-    diskread: (.diskread // 0), diskwrite: (.diskwrite // 0),
-    netin: (.netin // 0), netout: (.netout // 0)
-  }
-else # .type == "node"
-  {
-    type: .type, node: .node,
-    cpu: (.cpu // 0), mem: (.mem // 0), maxmem: (.maxmem // 0),
-    uptime: (.uptime // 0), status: (.status // "unknown")
-  }
-end |
-to_entries | map("\(.key)=\(.value)") | join(" ")
-JQ_EOF
-        )
-        while IFS= read -r line; do
-            local type="" node_val="" vmid=""
-            if [[ $line =~ type=([^ ]+) ]]; then type="${BASH_REMATCH[1]}"; fi
-            if [[ $line =~ node=([^ ]+) ]]; then node_val="${BASH_REMATCH[1]}"; fi
-            if [[ $line =~ vmid=([0-9]+) ]]; then vmid="${BASH_REMATCH[1]}"; fi
+        pvesh get /cluster/resources --output-format=json | jq -r '
+        .[] | select(.type=="qemu" and .status=="running") |
+        "\(.vmid)|\(.node)|\(.name)|\(.cpu)|\(.mem)|\(.maxmem)|\(.diskread)|\(.diskwrite)|\(.netin)|\(.netout)"' >/tmp/.vm_data.$$
 
-            if [[ $type == "node" && -n $node_val ]]; then
-                if ! [[ " ${cluster_nodes_list[@]} " =~ " ${node_val} " ]]; then
-                    cluster_nodes_list+=("$node_val")
-                fi
-                for pair in $line; do
-                    if [[ $pair =~ ^([^=]+)=(.*)$ ]]; then
-                        local value="${BASH_REMATCH[2]}"
-                        node_summary_data["$node_val,${BASH_REMATCH[1]}"]="${value//\"/}"
-                    fi
-                done
-            elif [[ $type == "qemu" && -n $vmid && -n $node_val ]]; then
-                all_running_vmids_list+=("$vmid")
-                vmid_to_node["$vmid"]="$node_val"
-                for pair in $line; do
-                    if [[ $pair =~ ^([^=]+)=(.*)$ ]]; then
-                        local value="${BASH_REMATCH[2]}"
-                        vm_data["$vmid,${BASH_REMATCH[1]}"]="${value//\"/}"
-                    fi
-                done
-            fi
-        done < <(echo "$pvesh_json_output" | jq -c "$jq_filter")
+        while IFS='|' read id node name cpu mem maxmem d_r d_w n_in n_out; do
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
+            cpu_c=$([ "$cpu_p" -ge $VM_CPU_T ] && echo "$RED" || echo "$NC")
+            mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}')
+            max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}')
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
+            mem_c=$([ "$mem_p" -ge $VM_MEM_T ] && echo "$RED" || echo "$NC")
 
-        # --- 1. 노드 요약 출력 ---
-        # !!! 수정: 메모리 너비 변경 (23->27), 구분선 길이 수정 !!!
-        local w_node_sum_name=12 w_node_sum_status=8 w_node_sum_cpu=7 w_node_sum_mem=34 w_node_sum_uptime=15
-        # Header printf: Format remains the same as v17.3.13
-        printf -v output_buffer "%s%b%-*s %-*s %-*s %-*s | %-*s%b\n" \
-            "$output_buffer" "$BOLD" \
-            "$w_node_sum_name" "Node" "$w_node_sum_status" "Status" \
-            "$w_node_sum_cpu" "CPU(%)" "$w_node_sum_mem" "Memory (GiB/%Usage)" \
-            "$w_node_sum_uptime" "Uptime" "$NC"
-        # Separator line: Adjusted length for new width (74 chars)
-        output_buffer+="--------------------------------------------------------------------------\n" # Adjusted length
+            vm_mac=$(qm config "$id" 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
+            vm_ip="N/A"
+            [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map")
+            [ -z "$vm_ip" ] && vm_ip="N/A"
 
-        if [[ ${#cluster_nodes_list[@]} -gt 0 ]]; then
-            local node_name
-            IFS=$'\n' cluster_nodes_list=($(sort <<<"${cluster_nodes_list[*]}"))
-            unset IFS
-            for node_name in "${cluster_nodes_list[@]}"; do
-                local node_cpu=${node_summary_data[node_name, cpu]:-0}
-                local node_mem=${node_summary_data[node_name, mem]:-0}
-                local node_maxmem=${node_summary_data[node_name, maxmem]:-0}
-                local node_status=${node_summary_data[node_name, status]:-unknown}
-                local node_uptime_sec=${node_summary_data[node_name, uptime]:-0}
+            eval "old_d_r=\${disk_r_$id:-$d_r}"
+            eval "old_d_w=\${disk_w_$id:-$d_w}"
+            eval "old_n_in=\${net_in_$id:-$n_in}"
+            eval "old_n_out=\${net_out_$id:-$n_out}"
+            eval "last_time=\${last_time_$id:-$now}"
 
-                local node_cpu_perc="0" node_cpu_color=$NC
-                node_cpu_perc=$(awk -v cpu="$node_cpu" 'BEGIN { printf "%.0f", cpu * 100 }')
-                local node_cpu_over=$(echo "$node_cpu_perc >= $NODE_CPU_WARN_THRESHOLD" | bc -l 2>/dev/null || echo 0)
-                [[ $node_cpu_over -eq 1 ]] && node_cpu_color=$RED
-                local cpu_display="${node_cpu_perc}%"
+            dt=$((now - last_time))
+            [ $dt -le 0 ] && dt=1
 
-                local node_mem_gib="0.0" node_maxmem_gib="0.0" node_mem_perc="N/A" node_mem_color=$NC
-                node_mem_gib=$(convert_to_gib "$node_mem")
-                node_maxmem_gib=$(convert_to_gib "$node_maxmem")
-                local node_mem_display="${node_mem_gib}/${node_maxmem_gib}GiB"
-                local node_mem_perc_num="-1"
+            dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
 
-                if [[ $node_maxmem -gt 0 ]]; then
-                    node_mem_perc_num=$(awk -v mem="$node_mem" -v maxmem="$node_maxmem" 'BEGIN { if (maxmem > 0) printf "%.0f", mem*100/maxmem; else print "-1"; exit }')
-                    if [[ $node_mem_perc_num -ge 0 ]]; then
-                        node_mem_perc="$node_mem_perc_num"
-                        local node_mem_over=$(echo "$node_mem_perc >= $NODE_MEM_WARN_THRESHOLD" | bc -l 2>/dev/null || echo 0)
-                        [[ $node_mem_over -eq 1 ]] && node_mem_color=$RED
-                    else node_mem_perc="N/A"; fi
-                else node_mem_perc="N/A"; fi
+            eval "disk_r_$id=$d_r"
+            eval "disk_w_$id=$d_w"
+            eval "net_in_$id=$n_in"
+            eval "net_out_$id=$n_out"
+            eval "last_time_$id=$now"
 
-                local mem_perc_padded
-                printf -v mem_perc_padded "%3s" "$node_mem_perc"
-                local mem_perc_colored_part=$(printf "(%s%s%%%s)" "$node_mem_color" "$mem_perc_padded" "$NC")
-                local mem_combined_str="${node_mem_display} ${mem_perc_colored_part}"
-
-                local node_uptime_fmt=$(format_uptime "$node_uptime_sec")
-                local node_line
-
-                # Data printf: Format remains the same as v17.3.13
-                printf -v node_line "%-*s %-*s %b%-*s%b %-*s | %-*s" \
-                    "$w_node_sum_name" "$node_name" \
-                    "$w_node_sum_status" "$node_status" \
-                    "$node_cpu_color" "$w_node_sum_cpu" "$cpu_display" "$NC" \
-                    "$w_node_sum_mem" "$mem_combined_str" \
-                    "$w_node_sum_uptime" "$node_uptime_fmt"
-                output_buffer+="${node_line}\n"
-            done
-        else
-            output_buffer+=" (No node information found)\n"
-        fi
-        output_buffer+="\n"
-
-        # --- 2. VM 정보 출력 (변경 없음) ---
-        local w_vmid=6 w_node=8 w_name=18 w_ip=15 w_st=3 w_cpu=5 w_mem=25 w_disk=17 w_net=17
-        printf -v output_buffer "%s%b%-*s %-*s %-*s %-*s | %-*s %*s | %-*s | %-*s | %-*s%b\n" \
-            "$output_buffer" "$BOLD" \
-            "$w_vmid" "VMID" "$w_node" "Node" "$w_name" "Name" "$w_ip" "IP Address" \
-            "$w_st" "St" "$w_cpu" "CPU(%)" "$w_mem" "Memory(MB/%Usage)" \
-            "$w_disk" "Disk IO(R/W MBs)" "$w_net" "Net IO(In/Out MBs)" "$NC"
-        output_buffer+="----------------------------------------------------------------------------------------------------------------------------------\n"
-
-        if [[ ${#all_running_vmids_list[@]} -gt 0 ]]; then
-            local vmid vm_node is_local
-            IFS=$'\n' all_running_vmids_list=($(sort -n <<<"${all_running_vmids_list[*]}"))
-            unset IFS
-            for vmid in "${all_running_vmids_list[@]}"; do
-                vm_node=${vmid_to_node[$vmid]:-unknown}
-                is_local=0
-                [[ $vm_node == "$local_node_name" ]] && is_local=1
-
-                local vm_name_from_api=${vm_data[vmid, name]:-"vm-$vmid"}
-                local current_cpu_val=${vm_data[vmid, cpu]:-0}
-                local vm_cpu_perc="0" vm_status="run" cpu_color=$NC
-                vm_cpu_perc=$(awk -v cpu="$current_cpu_val" 'BEGIN { printf "%.0f", cpu * 100 }')
-                local vm_cpu_over=$(echo "$vm_cpu_perc >= $VM_CPU_WARN_THRESHOLD" | bc -l 2>/dev/null || echo 0)
-                [[ $vm_cpu_over -eq 1 ]] && cpu_color=$RED
-
-                local vm_ip="N/A"
-                local mem_display_mb_str="" mem_display_perc_str="N/A" mem_display_color=$NC
-                local disk_spd_display="D:-.-/-.-" net_spd_display="N:-.-/-.-"
-                local vm_mem_mb="0" vm_maxmem_mb="0"
-
-                if [[ $is_local -eq 1 ]]; then
-                    local mem_bytes=${vm_data[vmid, mem]:-0}
-                    local maxmem_bytes=${vm_data[vmid, maxmem]:-0}
-                    vm_maxmem_bytes_map[$vmid]=$maxmem_bytes
-                    local disk_r_bytes=${vm_data[vmid, diskread]:-0}
-                    local disk_w_bytes=${vm_data[vmid, diskwrite]:-0}
-                    local net_in_bytes=${vm_data[vmid, netin]:-0}
-                    local net_out_bytes=${vm_data[vmid, netout]:-0}
-                    local old_mem=(${mem_history[$vmid]})
-                    mem_history[$vmid]="$mem_bytes ${old_mem[@]:0:$((history_size - 1))}"
-                    local old_disk_r=(${disk_r_history[$vmid]})
-                    disk_r_history[$vmid]="$disk_r_bytes ${old_disk_r[@]:0:$((history_size - 1))}"
-                    local old_disk_w=(${disk_w_history[$vmid]})
-                    disk_w_history[$vmid]="$disk_w_bytes ${old_disk_w[@]:0:$((history_size - 1))}"
-                    local old_net_in=(${net_in_history[$vmid]})
-                    net_in_history[$vmid]="$net_in_bytes ${old_net_in[@]:0:$((history_size - 1))}"
-                    local old_net_out=(${net_out_history[$vmid]})
-                    net_out_history[$vmid]="$net_out_bytes ${old_net_out[@]:0:$((history_size - 1))}"
-                    last_update_time[$vmid]=$current_epoch
-
-                    local vm_config=$(qm config "$vmid" 2>/dev/null || echo "")
-                    local vm_mac=$(echo "$vm_config" | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | tr '[:upper:]' '[:lower:]')
-                    [[ -n $vm_mac ]] && vm_ip=${arp_map[$vm_mac]:-"N/A"}
-
-                    local current_mem_hist=(${mem_history[$vmid]})
-                    local current_mem_bytes=${current_mem_hist[0]:-0}
-                    local current_maxmem_bytes=${vm_maxmem_bytes_map[$vmid]:-0}
-                    vm_mem_mb=$(convert_to_mb "$current_mem_bytes")
-                    vm_maxmem_mb=$(convert_to_mb "$current_maxmem_bytes")
-                    mem_display_mb_str="${vm_mem_mb}/${vm_maxmem_mb}MB"
-                    if [[ $vm_maxmem_mb =~ ^[0-9]+$ && $vm_maxmem_mb -gt 0 && $vm_mem_mb =~ ^[0-9]+$ ]]; then
-                        local mem_perc=$(echo "scale=0; if($vm_maxmem_mb>0) $vm_mem_mb*100/$vm_maxmem_mb else 0" | bc 2>/dev/null || echo "err")
-                        if [[ $mem_perc != "err" ]]; then
-                            mem_display_perc_str="$mem_perc"
-                            local mem_over=$(echo "$mem_perc >= $VM_MEM_WARN_THRESHOLD" | bc -l 2>/dev/null || echo 0)
-                            [[ $mem_over -eq 1 ]] && mem_display_color=$RED
-                        else mem_display_perc_str="N/A"; fi
-                    else mem_display_perc_str="N/A"; fi
-
-                    local current_disk_r_hist=(${disk_r_history[$vmid]})
-                    local current_disk_w_hist=(${disk_w_history[$vmid]})
-                    local current_net_in_hist=(${net_in_history[$vmid]})
-                    local current_net_out_hist=(${net_out_history[$vmid]})
-                    if [[ ${#mem_history[$vmid]} -ge $history_size ]]; then
-                        local prev_disk_r_bytes=${current_disk_r_hist[1]:-0} prev_disk_w_bytes=${current_disk_w_hist[1]:-0}
-                        local prev_net_in_bytes=${current_net_in_hist[1]:-0} prev_net_out_bytes=${current_net_out_hist[1]:-0}
-                        local current_disk_r_bytes=${current_disk_r_hist[0]:-0} current_disk_w_bytes=${current_disk_w_hist[0]:-0}
-                        local current_net_in_bytes=${current_net_in_hist[0]:-0} current_net_out_bytes=${current_net_out_hist[0]:-0}
-                        local disk_r_diff=$(echo "${current_disk_r_bytes:-0} - ${prev_disk_r_bytes:-0}" | bc)
-                        local disk_w_diff=$(echo "${current_disk_w_bytes:-0} - ${prev_disk_w_bytes:-0}" | bc)
-                        local net_in_diff=$(echo "${current_net_in_bytes:-0} - ${prev_net_in_bytes:-0}" | bc)
-                        local net_out_diff=$(echo "${current_net_out_bytes:-0} - ${prev_net_out_bytes:-0}" | bc)
-                        [[ ${disk_r_diff:-0} -lt 0 ]] && disk_r_diff=0
-                        [[ ${disk_w_diff:-0} -lt 0 ]] && disk_w_diff=0
-                        [[ ${net_in_diff:-0} -lt 0 ]] && net_in_diff=0
-                        [[ ${net_out_diff:-0} -lt 0 ]] && net_out_diff=0
-                        local prev_update_time=${last_update_time[$vmid]:-$current_epoch}
-                        local time_diff=$((current_epoch - prev_update_time))
-                        [[ $time_diff -le 0 ]] && time_diff=1
-                        local disk_r_mbps=$(format_speed_mbps $(echo "scale=10; if($time_diff>0) $disk_r_diff/$time_diff else 0" | bc))
-                        local disk_w_mbps=$(format_speed_mbps $(echo "scale=10; if($time_diff>0) $disk_w_diff/$time_diff else 0" | bc))
-                        local net_in_mbps=$(format_speed_mbps $(echo "scale=10; if($time_diff>0) $net_in_diff/$time_diff else 0" | bc))
-                        local net_out_mbps=$(format_speed_mbps $(echo "scale=10; if($time_diff>0) $net_out_diff/$time_diff else 0" | bc))
-                        disk_spd_display="D:${disk_r_mbps}/${disk_w_mbps}"
-                        net_spd_display="N:${net_in_mbps}/${net_out_mbps}"
-                    fi
-                else
-                    vm_ip="N/A"
-                    local current_mem_bytes=${vm_data[vmid, mem]:-0}
-                    local current_maxmem_bytes=${vm_data[vmid, maxmem]:-0}
-                    vm_mem_mb=$(convert_to_mb "$current_mem_bytes")
-                    vm_maxmem_mb=$(convert_to_mb "$current_maxmem_bytes")
-                    mem_display_mb_str="${vm_mem_mb}/${vm_maxmem_mb}MB"
-                    mem_display_perc_str="N/A"
-                    mem_display_color=$NC
-                    disk_spd_display="D:-.-/-.-"
-                    net_spd_display="N:-.-/-.-"
-                fi
-
-                local w_mem_part1=$((w_mem - 7))
-                local vm_line
-                printf -v vm_line "%-*s %-*s %-*.*s %-*s | %-*s %b%*s%%%b | %-*s (%b%3s%%%b) | %-*s | %-*s" \
-                    "$w_vmid" "$vmid" \
-                    "$w_node" "$vm_node" \
-                    "$w_name" "$w_name" "$vm_name_from_api" \
-                    "$w_ip" "$vm_ip" \
-                    "$w_st" "$vm_status" \
-                    "$cpu_color" "$w_cpu" "$vm_cpu_perc" "$NC" \
-                    "$w_mem_part1" "$mem_display_mb_str" "$mem_display_color" "$mem_display_perc_str" "$NC" \
-                    "$w_disk" "$disk_spd_display" \
-                    "$w_net" "$net_spd_display"
-                output_buffer+="${vm_line}\n"
-            done
-        else
-            output_buffer+=" (No running KVM VMs found in the cluster)\n"
-        fi
+            line=$(printf "%-8s %-12s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s" \
+                "$id" "$node" "${name:0:27}" "$vm_ip" \
+                "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" \
+                "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd")
+            output="$output$line\n"
+        done </tmp/.vm_data.$$
+        rm -f /tmp/.vm_data.$$
 
         clear
-        echo -e "$output_buffer"
-        sleep $interval
+        echo -e "$output"
+        sleep "$interval"
     done
-    echo -e "${NC}"
-    return 0
 }
 
 # explorer.sh
