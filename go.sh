@@ -5630,12 +5630,12 @@ watch_pve() {
     RED='\033[1;31m'
     YEL='\033[1;33m'
     NC='\033[0m'
-    NODE_CPU_T=70
-    NODE_CPU_M=30
+    NODE_CPU_T=50
+    NODE_CPU_M=10
     NODE_MEM_T=80
     NODE_MEM_M=40
-    VM_CPU_T=80
-    VM_CPU_M=40
+    VM_CPU_T=70
+    VM_CPU_M=10
     VM_MEM_T=80
     VM_MEM_M=40
     echo -e "${BOLD}Reading ARP cache...${NC}"
@@ -5643,12 +5643,13 @@ watch_pve() {
     >"$arp_map"
     arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
     echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
+    echo -e "${BOLD}Reading VMs config...${NC}"
     trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM
     while :; do
         now=$(date +%s)
         output=""
         output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n"
-        output="$output\n${BOLD}Nodes:${NC}\n"
+        output="$output\n${BOLD}Nodes:${NC}"
         output="$output
 Node          Status     CPU(%)       Mem(GB/%)                Uptime
 "
@@ -5679,7 +5680,8 @@ Node          Status     CPU(%)       Mem(GB/%)                Uptime
             max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}')
             mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
             [ "$mem_p" -ge $VM_MEM_T ] && mem_c="$RED" || { [ "$mem_p" -ge $VM_MEM_M ] && mem_c="$YEL" || mem_c="$NC"; }
-            vm_mac=$(qm config "$id" 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
+            #vm_mac=$(qm config "$id" 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
+            vm_mac=$(pvesh get /nodes/$node/qemu/$id/config --noborder 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
             vm_ip="N/A"
             [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map")
             [ -z "$vm_ip" ] && vm_ip="N/A"
