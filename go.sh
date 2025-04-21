@@ -5787,7 +5787,7 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
 			line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt");
 
             output="$output$line\n";
-        done < <(pvesh get /cluster/resources --output-format=json | jq -r '
+        done < <(pvesh get /cluster/resources --output-format=json | jq 'sort_by(.node)' | jq -r '
             .[] | select(.type=="node") | "\(.node) \(.status) \(.cpu) \(.mem) \(.maxmem) \(.uptime)"');
         output="$output\n${BOLD}VMs:${NC}\n";
         line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)");
