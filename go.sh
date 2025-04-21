@@ -1390,10 +1390,11 @@ menufunc() {
                                     continue
                                 }
 
+
 							# Check 2-1: proxmox vm enter? 100~
 							elif expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
-								readxy "Proxmox vm --> $cmd_choice Enter"
-						    	enter "$cmd_choice"
+								dline ; vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
+								readxy "Proxmox vm --> $(RED1)$cmd_choice$(RST) Enter" && enter "$cmd_choice"
 							    continue
                             # Check 3: Valid Linux command? (Not purely numeric and exists)
                             #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
@@ -1948,84 +1949,59 @@ cgrepn() {
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
-__cgrepn() {
-    local args=("$@")    # 모든 인자를 배열로 저장
-    local search_strs=() # 검색할 문자열 배열
-    local num_cols=0     # 기본값을 1로 설정
-
-    # 인자가 없으면 사용법 출력 후 종료
-    if [ "${#args[@]}" -eq 0 ]; then
-        echo "Usage: cgrepn [search_strings...] [num_cols]"
-        return 1
-    fi
-
-    # 마지막 인자가 숫자인지 확인
-    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
-        num_cols="${args[-1]}"                     # 마지막 인자를 num_cols로 설정
-        search_strs=("${args[@]:0:${#args[@]}-1}") # 나머지를 검색 문자열로 설정
-    else
-        search_strs=("${args[@]}") # 모든 인자를 검색 문자열로 설정
-    fi
-
-    # 검색할 문자열이 없으면 오류
-    if [ "${#search_strs[@]}" -eq 0 ]; then
-        echo "Error: No search strings provided."
-        return 1
-    fi
-
-    # Perl 스크립트를 사용해 색칠 처리
-    perl -s -pe '
-        BEGIN {
-            $color_red = "\e[1;31m";     # 빨간색
-            $color_reset = "\e[0m";      # 색상 초기화
-            @search_words = split / /, $search_strs;
-            $num = $num_cols;
-            if ($num < 0) { $before = -$num; $after = 0; }
-            elsif ($num > 0) { $before = 0; $after = $num; }
-            else { $before = 0; $after = 0; }  # num_cols가 0이면 검색 문자열 자체만 색칠
-        }
-        foreach my $search (@search_words) {
-            my $pattern = "(\\S+\\s+){0,$before}" . quotemeta($search) . "(\\s+\\S+){0,$after}";
-            s/($pattern)/$color_red$1$color_reset/g;
-        }
-    ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
-}
-
-old_cgrepn() {
+cgrepn1() {
     local args=("$@")
     local search_strs=()
     local num_cols=0
-
     if [ "${#args[@]}" -eq 0 ]; then
         echo "Usage: cgrepn [search_strings...] [num_cols]"
         return 1
     fi
-
     if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
         num_cols="${args[-1]}"
         search_strs=("${args[@]:0:${#args[@]}-1}")
     else
         search_strs=("${args[@]}")
+        num_cols=""
     fi
-
     if [ "${#search_strs[@]}" -eq 0 ]; then
         echo "Error: No search strings provided."
         return 1
     fi
-
     perl -s -pe '
         BEGIN {
-            $color_red = "\e[1;31m";
-            $color_reset = "\e[0m";
-            @search_words = split / /, $search_strs;
-            $num = $num_cols;
-            if ($num < 0) { $before = -$num; $after = 0; }
-            elsif ($num > 0) { $before = 0; $after = $num; }
-            else { $before = 0; $after = 0; }
+            $color = "\e[1;31m";  # Bold red color
+            $color_reset = "\e[0m";      # Reset color
+            @search_words = split / /, $search_strs;  # Split search strings
+            $num = defined($num_cols) && $num_cols ne "" ? $num_cols : 0;  # Default to 0 if undefined
+            if ($num < 0) { $before = -$num; $after = 0; }  # Negative: words before
+            elsif ($num > 0) { $before = 0; $after = $num; }  # Positive: words after
+            else { $before = 0; $after = 0; }  # Zero: no extra words
+        }
+        # Highlight the first word only if num_cols=0 and any search word is present in the line
+        if (defined($num_cols) && $num_cols eq "0") {
+            my $line = $_;
+            my $should_highlight = 0;
+            foreach my $search (@search_words) {
+                if ($line =~ /\Q$search\E/) {
+                    $should_highlight = 1;
+                    last;
+                }
+            }
+            if ($should_highlight) {
+                s/^(\S+)/$color$1$color_reset/;
+            }
         }
         foreach my $search (@search_words) {
-            my $pattern = "(?:\\S+[\\s\\t]*){0,$before}" . quotemeta($search) . "(?:[\\s\\t]*\\S+){0,$after}";
-            s/($pattern)/$color_red$1$color_reset/g;
+            my $pattern;
+            if (!defined($num_cols) || $num_cols eq "0") {
+                # No num_cols or num_cols=0: highlight only search string
+                $pattern = quotemeta($search);
+            } else {
+                # Highlight search string with before/after words
+                $pattern = "(?:\\S+[\\s\\t]*){0,$before}" . quotemeta($search) . "(?:[\\s\\t]*\\S+){0,$after}";
+            }
+            s/($pattern)/$color$1$color_reset/g;  # Apply yellow color to matches
         }
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
@@ -5789,7 +5765,7 @@ watch_pve() {
         output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n";
         output="$output\n${BOLD}Nodes:${NC}";
 output="$output
-Node           IP Address        Status     CPU(%)       Mem(GB/%)                Uptime
+Node          IP Address           Status     CPU(%)       Mem(GB/%)                Uptime
 ";
         output="$output--------------------------------------------------------------------------\n";
         while read node status cpu mem maxmem up; do
