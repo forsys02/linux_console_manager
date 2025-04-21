@@ -3931,8 +3931,85 @@ $SHADOW_INFO
     unset IFS
 }
 idinfo() { userinfo $@; }
-
 qssh() {
+    local default_user="root"
+    local arp_scan_timeout=3
+
+    if [[ $# -eq 0 || $# -gt 2 ]]; then
+        echo "Usage: qssh <vmid> [ssh_user]"
+        echo "  Example 1 (default user '$default_user'): qssh 101"
+        echo "  Example 2 (specify user): qssh 101 myuser"
+        return 1
+    fi
+
+    local vmid="$1"
+    local user="${2:-$default_user}"
+    [[ -z $user ]] && echo "Error: SSH username cannot be empty." && return 1
+
+    echo "=============================================="
+    echo "--- Processing qssh for VM $vmid (User: $user) ---"
+    echo "[1] Locating VM in cluster..."
+
+    local node
+    node=$(pvesh get /cluster/resources --output-format=json |
+        jq -r ".[] | select(.type==\"qemu\" and .vmid==$vmid) | .node")
+
+    if [[ -z $node ]]; then
+        echo "Error: VM $vmid not found in cluster."
+        return 1
+    fi
+
+    echo "  > Found VM $vmid on node: $node"
+    echo "[2] Fetching MAC address from config..."
+
+    local config_output
+    config_output=$(ssh "$node" pvesh get /nodes/$node/qemu/$vmid/config --noborder 2>/dev/null)
+    local mac
+    mac=$(echo "$config_output" | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1)
+    local bridge
+    bridge=$(echo "$config_output" | sed -n 's/.*bridge=\([^, ]\+\).*/\1/p' | head -n1)
+
+    if [[ -z $mac || -z $bridge ]]; then
+        echo "Error: Failed to extract MAC or bridge from config."
+        return 1
+    fi
+
+    local lower_mac
+    lower_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
+    echo "  > MAC: $mac (as $lower_mac), Bridge: $bridge"
+
+    echo "[3a] Checking ARP cache for $lower_mac..."
+    local ip
+    ip=$(arp -n | grep -i "$lower_mac" | awk '{print $1}' | head -n1)
+
+    if [[ -z $ip ]]; then
+        echo "  > Not found in ARP cache. Trying arp-scan on $bridge..."
+        if ! command -v arp-scan &>/dev/null; then
+            echo "Error: arp-scan not found. Please install it (e.g. apt install arp-scan)."
+            return 1
+        fi
+        local arp_out
+        arp_out=$(arp-scan --interface="$bridge" --localnet --numeric --quiet --timeout=$((arp_scan_timeout * 1000)) 2>/dev/null | grep -i "$lower_mac")
+        ip=$(echo "$arp_out" | awk '{print $1}' | head -n1)
+
+        if [[ -z $ip ]]; then
+            echo "Error: MAC $lower_mac not found on $bridge via arp-scan."
+            return 1
+        fi
+        echo "  > Found IP via arp-scan: $ip"
+    else
+        echo "  > Found IP in ARP cache: $ip"
+    fi
+
+    echo "[4] SSH connecting to $user@$ip ..."
+    ssh "$user@$ip"
+    local code=$?
+    echo "--- SSH session ended with code $code. ---"
+    echo "=============================================="
+    return $code
+}
+
+old_qssh() {
     # --- 설정 ---
     local default_user="root" # 사용자 미지정 시 기본값
     local arp_scan_timeout=3  # arp-scan 대기 시간 (초)
@@ -5639,7 +5716,8 @@ watch_pve() {
     VM_MEM_T=80
     VM_MEM_M=40
     echo -e "${BOLD}Reading ARP cache...${NC}"
-    arp_map="/tmp/.arp_map.$$"
+    #arp_map="/tmp/.arp_map.$$"
+    arp_map="/tmp/.arp_map"
     >"$arp_map"
     arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
     echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
@@ -5705,6 +5783,7 @@ Node          Status     CPU(%)       Mem(GB/%)                Uptime
             output="$output$line\n"
         done </tmp/.vm_data.$$
         rm -f /tmp/.vm_data.$$
+        find /tmp/ -name ".vm_data.*" -type f -mtime +1 -exec rm -f {} \;
         clear
         echo -e "$output"
         sleep "$interval"
