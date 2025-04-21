@@ -5615,110 +5615,94 @@ old_vmipscan() {
     done
     unset IFS
 }
+
 watch_pve() {
     interval=${1:-5}
     local_node=$(hostname -s 2>/dev/null)
-    [ -z "$local_node" ] && echo "Error: No hostname." >&2 && return 1
-
+    [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1
     for cmd in pvesh jq awk date grep sed hostname bc qm; do
         command -v $cmd >/dev/null || {
-            echo "Missing $cmd" >&2
+            echo "Missing $cmd" 1>&2
             return 1
         }
     done
-
     BOLD='\033[1m'
     RED='\033[1;31m'
     YEL='\033[1;33m'
     NC='\033[0m'
-    NODE_CPU_T=80
-    NODE_MEM_T=85
-    VM_CPU_T=90
+    NODE_CPU_T=70
+    NODE_CPU_M=30
+    NODE_MEM_T=80
+    NODE_MEM_M=40
+    VM_CPU_T=80
+    VM_CPU_M=40
     VM_MEM_T=80
-
+    VM_MEM_M=40
     echo -e "${BOLD}Reading ARP cache...${NC}"
     arp_map="/tmp/.arp_map.$$"
     >"$arp_map"
     arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
     echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
     trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM
-
     while :; do
         now=$(date +%s)
         output=""
         output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n"
-
         output="$output\n${BOLD}Nodes:${NC}\n"
         output="$output
 Node          Status     CPU(%)       Mem(GB/%)                Uptime
 "
         output="$output--------------------------------------------------------------------------\n"
-
         while read node status cpu mem maxmem up; do
             cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
-            cpu_c=$([ "$cpu_p" -ge $NODE_CPU_T ] && echo "$RED" || echo "$NC")
+            [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || { [ "$cpu_p" -ge $NODE_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"; }
             mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
             max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
             mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
-            mem_c=$([ "$mem_p" -ge $NODE_MEM_T ] && echo "$RED" || echo "$NC")
+            [ "$mem_p" -ge $NODE_MEM_T ] && mem_c="$RED" || { [ "$mem_p" -ge $NODE_MEM_M ] && mem_c="$YEL" || mem_c="$NC"; }
             up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
-            line=$(printf "%-13s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" \
-                "$node" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt")
+            line=$(printf "%-13s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt")
             output="$output$line\n"
         done < <(pvesh get /cluster/resources --output-format=json | jq -r '
             .[] | select(.type=="node") | "\(.node) \(.status) \(.cpu) \(.mem) \(.maxmem) \(.uptime)"')
-
         output="$output\n${BOLD}VMs:${NC}\n"
-        line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" \
-            "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)")
+        line=$(printf "%-8s %-12s %-27s %-20s %-12s %-20s %-25s %-20s" "VMID" "Node" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)")
         output="$output$line\n"
         output="$output--------------------------------------------------------------------------------------------------------------------------------------------------\n"
-
         pvesh get /cluster/resources --output-format=json | jq -r '
         .[] | select(.type=="qemu" and .status=="running") |
         "\(.vmid)|\(.node)|\(.name)|\(.cpu)|\(.mem)|\(.maxmem)|\(.diskread)|\(.diskwrite)|\(.netin)|\(.netout)"' >/tmp/.vm_data.$$
-
         while IFS='|' read id node name cpu mem maxmem d_r d_w n_in n_out; do
             cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
-            cpu_c=$([ "$cpu_p" -ge $VM_CPU_T ] && echo "$RED" || echo "$NC")
+            [ "$cpu_p" -ge $VM_CPU_T ] && cpu_c="$RED" || { [ "$cpu_p" -ge $VM_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"; }
             mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}')
             max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}')
             mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
-            mem_c=$([ "$mem_p" -ge $VM_MEM_T ] && echo "$RED" || echo "$NC")
-
+            [ "$mem_p" -ge $VM_MEM_T ] && mem_c="$RED" || { [ "$mem_p" -ge $VM_MEM_M ] && mem_c="$YEL" || mem_c="$NC"; }
             vm_mac=$(qm config "$id" 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
             vm_ip="N/A"
             [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map")
             [ -z "$vm_ip" ] && vm_ip="N/A"
-
             eval "old_d_r=\${disk_r_$id:-$d_r}"
             eval "old_d_w=\${disk_w_$id:-$d_w}"
             eval "old_n_in=\${net_in_$id:-$n_in}"
             eval "old_n_out=\${net_out_$id:-$n_out}"
             eval "last_time=\${last_time_$id:-$now}"
-
             dt=$((now - last_time))
             [ $dt -le 0 ] && dt=1
-
             dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
             dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
             ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
             no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
-
             eval "disk_r_$id=$d_r"
             eval "disk_w_$id=$d_w"
             eval "net_in_$id=$n_in"
             eval "net_out_$id=$n_out"
             eval "last_time_$id=$now"
-
-            line=$(printf "%-8s %-12s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s" \
-                "$id" "$node" "${name:0:27}" "$vm_ip" \
-                "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" \
-                "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd")
+            line=$(printf "%-8s %-12s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s" "$id" "$node" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd")
             output="$output$line\n"
         done </tmp/.vm_data.$$
         rm -f /tmp/.vm_data.$$
-
         clear
         echo -e "$output"
         sleep "$interval"
