@@ -1392,7 +1392,7 @@ menufunc() {
 
 
 							# Check 2-1: proxmox vm enter? 100~
-							elif expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+							elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
 								dline ; vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
 								readxy "Proxmox vm --> $(RED1)$cmd_choice$(RST) Enter" && enter "$cmd_choice"
 							    continue
@@ -1645,6 +1645,11 @@ menufunc() {
                     echo "이곳이그곳!!! " && sleep 2
                     choice=""
                     #readxx $LINENO shortcut move choice $choice
+
+				# Check : proxmox vm enter? 100~
+				elif [[ -z $choice1 ]] && expr "$choice" : '^[0-9]\+$' >/dev/null && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+					dline ; vmslistview | cgrepn running -3 | cgrepn1 $choice 3
+					readxy "Proxmox vm --> $(RED1)$choice$(RST) Enter" && enter "$choice"
 
                 # 실제 리눅스 명령이 들어온 경우 실행
                 # Check: is not purely numeric AND is a valid command
