@@ -5869,7 +5869,7 @@ watch_pve() {
         output="$output
 Node          IP Address           Status     CPU(%)       Mem(GB/%)                Uptime
 ";
-        output="$output--------------------------------------------------------------------------\n";
+        output="$output----------------------------------------------------------------------------------------------\n";
         while read node status cpu mem maxmem up; do
             cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
             [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || {
@@ -5894,7 +5894,7 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
         line=$(printf "%-8s %-12s %-7s %-27s %-20s %-12s %-20s %-25s %-20s" \
                       "VMID" "Node" "Type" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)");
         output="$output$line\n";
-        output="$output--------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        output="$output-----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
         # qemu + lxc 모두 선택, type 필드 추가, 없는 필드엔 디폴트 0
         pvesh get /cluster/resources --output-format=json | jq -r '
             .[]
