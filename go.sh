@@ -452,6 +452,7 @@ menufunc() {
                 # %% cmds -> pre_commands 검출및 실행 (submenu 일때만)
                 # listof_comm_submain
                 # pre excute
+
                 for items in "${pre_commands[@]}"; do
                     readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
                     eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
@@ -464,11 +465,15 @@ menufunc() {
                         CYN
                         echo "$output"
                         RST
-                        echo "=============================================="
+						#if [ -f /dev/shm/dlines ] ; then
+						#	dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
+							#dline
+						#else
+    	                    echo "=============================================="
+						#fi
                     }; }
                 )
             fi
-
             local items
             menu_idx=0
             shortcut_idx=0
@@ -681,16 +686,23 @@ menufunc() {
                                 [ -n "$output" ] && {
                                     [ "$(echo "$output" | grep -E '0m')" ] && {
                                         echo "$output"
+										# cmdline menu_list print -pre_comm
                                         echo "=============================================="
                                     } || {
                                         CYN
                                         echo "$output"
                                         RST
-                                        echo "=============================================="
+						#if [ -f /dev/shm/dlines ] ; then
+							#dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
+						#	dline
+							#echo
+						#else
+    	                    echo "=============================================="
+						#fi
                                     }
-                                    sleep 0.1
+                                    #sleep 0.1
                                 }
-                            )
+                            ) # end of "done > > ("
 
                             display_idx=1
                             unset original_indices
@@ -702,8 +714,6 @@ menufunc() {
                                 c_cmd="${chosen_commands[$((item - 1))]}"
 
                                 # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
-                                #file_paths="$(echo "$c_cmd" | awk '{for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath, "\n"}}}}')"
-                                #file_paths="$(echo "$c_cmd" | awk '/^[[:space:]]*#/{next} {for (i = 1; i <= NF; i++) {if(!match($i, /^.*https?:\/\//) && match($i, /\/[^\/]+\/[^ $|]*[a-zA-Z0-9]+[-_.]*[a-zA-Z0-9]/)) {filepath = substr($i, RSTART, RLENGTH); if ((filepath !~ /^\/dev\//) && (filepath !~ /var[A-Z][a-zA-Z0-9_.-]*/) && (filepath !~ /^\/proc\//)) {print filepath}}}}')"
                                 # 파일경로에 $포함 변수경로는 제외
                                 file_paths="$(echo "$c_cmd" | awk '
 /^[[:space:]]*#/ { next }
@@ -5726,6 +5736,10 @@ old_vmipscan() {
     unset IFS
 }
 
+vminfo() {
+    vmid=$1
+    conf=$(find /etc/pve/ -name $vmid.conf|head -n1); pvesh get /nodes/$(awk -F/ '{print $5}' <<< "$conf")/$(grep -q qemu <<< "$conf" && echo qemu || echo lxc)/$vmid/status/current --noborder
+}
 
 watch_pve() {
     interval=${1:-5};
