@@ -1721,6 +1721,7 @@ menufunc() {
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
 fff() { declare -f "$@"; }
+ffe() { conff "$1()" ; }
 
 ff() {
     if [ -z "$1" ]; then
@@ -5312,22 +5313,6 @@ vi22() {
     fi
 }
 
-old__vi22() {
-    [ ! -f "$1" ] && return 1
-    rbackup "$1"
-    if [ -n "$2" ]; then
-        vim -c "autocmd VimEnter * ++once execute '/$2'" \
-            -c "autocmd VimEnter * ++once normal! zt" "$1"
-    else
-        vim "$1" || vi "$1"
-    fi
-}
-
-old_vi22() {
-    [ ! -f "$1" ] && return 1
-    rbackup "$1"
-    if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/$2'" "$1"; else vim "$1" || vi "$1"; fi
-}
 # 인수중 하나 선택
 cat3() {
     [ $# -eq 0 ] && echo "Usage: cat3 file1 [file2 ...]" && return 1
@@ -5751,8 +5736,7 @@ vminfo() {
 
 
 
-watch_pve ()
-{
+watch_pve() {
     interval=${1:-5};
     local_node=$(hostname -s 2> /dev/null);
     [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1;
@@ -5778,6 +5762,15 @@ watch_pve ()
     arp_map="/tmp/.arp_map";
     > "$arp_map";
     arp -n | awk '/ether/ {print tolower($3), $1}' > "$arp_map";
+
+    if command -v arp-scan > /dev/null 2>&1; then
+      (
+        arp -n | awk '/ether/ {print tolower($3), $1}'
+        sudo arp-scan -I "$(ip route | awk '/default/ {print $5; exit}')" --localnet 2>/dev/null | \
+        awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ {print tolower($2), $1}'
+      ) | awk '!a[$0]++' > "$arp_map" 2>/dev/null &
+    fi
+
     echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}";
     echo -e "${BOLD}Reading VMs config...${NC}";
     trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM;
