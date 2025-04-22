@@ -2022,6 +2022,57 @@ cgrepn1() {
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
+
+# 필드의 공백을 유지하면서 검색어 색칠(python)
+cgrepfN() {
+    [ $# -lt 2 ] && { echo "Usage: cgrepfN <field> <word>..." >&2; return 1; }
+    expr "$1" : '^[0-9]\+$' >/dev/null && [ "$1" -gt 0 ] || { echo "Error: Field must be a positive number" >&2; return 1; }
+    field=$1
+    shift
+    [ $# -eq 0 ] && { echo "Error: No valid words" >&2; return 1; }
+    python3 -c '
+import sys, re
+field = int(sys.argv[1]) - 1
+words = sys.argv[2:]
+for line in sys.stdin:
+    prefix = re.match(r"[ \t]*", line).group()
+    parts = re.split(r"([ \t]+)", line.rstrip("\n"))
+    fields = [p for i, p in enumerate(parts) if i % 2 == 0]
+    seps = [p for i, p in enumerate(parts) if i % 2 == 1]
+    if len(fields) >= field + 1:
+        for word in words:
+            fields[field] = re.sub(r"\b" + re.escape(word) + r"\b", "\033[1;31m" + word + "\033[0m", fields[field])
+        line = prefix
+        for i in range(len(fields)):
+            line += fields[i]
+            if i < len(seps):
+                line += seps[i]
+        print(line)
+    else:
+        print(line, end="")
+' "$field" "$@"
+}
+
+# 특정 필드에 검색어가 있을때 색칠
+_cgrepfN() {
+    local field="$1"
+    shift
+    local script=''
+
+    for word in "$@"; do
+        escaped=$(printf '%s\n' "$word" | sed 's/[]\/.^$*+?{}[]/\\&/g')
+        script="${script} if (\$$field ~ /${escaped}/) gsub(/${escaped}/, \"\033[1;31m&\033[0m\", \$$field);"
+    done
+
+    awk "{${script} print}"
+}
+
+cgrepf1() { cgrepfN 1 "$@"; }
+cgrepf2() { cgrepfN 2 "$@"; }
+cgrepf3() { cgrepfN 3 "$@"; }
+cgrepf4() { cgrepfN 4 "$@"; }
+cgrepf5() { cgrepfN 5 "$@"; }
+
 safe_eval() {
     local cmd="$1" re='(^|[[:space:]])(rm[[:space:]]+-rf[[:space:]]+/[[:space:]]*($|[[:space:]]+|#)|reboot|shutdown|mkfs)([[:space:]]|$)|\>\s*/etc/(passwd|shadow|group)\b|\>\s*/dev/sd[a-z]+\b'
     echo "$cmd" | grep -qE "$re" && {
@@ -5721,14 +5772,47 @@ old_vmipscan() {
     unset IFS
 }
 
-vminfo() {
+vm() {
     vmid=$1
-    conf=$(find /etc/pve/ -name $vmid.conf|head -n1); pvesh get /nodes/$(awk -F/ '{print $5}' <<< "$conf")/$(grep -q qemu <<< "$conf" && echo qemu || echo lxc)/$vmid/status/current --noborder
+    action=$2
+    conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1
+    [ -z "$conf" ] && echo "VM $vmid not found" && return 1
+    node=$(echo "$conf" | awk -F/ '{print $5}')
+    type=$(grep -q qemu <<< "$conf" && echo qemu || echo lxc)
+    path="/nodes/$node/$type/$vmid"
+
+    case "$action" in
+        start|stop|shutdown|reboot|reset|suspend|resume)
+            pvesh create "$path/status/$action"
+            ;;
+        status|"")
+            pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
+            ;;
+        enter)
+            echo "Entering $vmid ($type on $node)..."
+            status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
+            [ "$status" != "running" ] && {
+                echo "Starting VM..."
+                pvesh create "$path/status/start"
+                for i in 1 2 3 4 5; do
+                    sleep 1
+                    status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
+                    [ "$status" = "running" ] && echo "Booting Now... wait..." && { [ "$type" = "lxc" ] && sleepdot 3 || sleepdot 10 ; } && break
+                done
+                [ "$status" != "running" ] && echo "Failed to start VM" && return 1
+            }
+            if [ "$type" = "lxc" ]; then
+                pct enter "$vmid"
+            else
+                qssh "$vmid" root
+            fi
+            ;;
+        *)
+            echo "Unsupported action: $action"
+            return 2
+            ;;
+    esac
 }
-
-
-
-
 
 
 
