@@ -5657,29 +5657,6 @@ runlockadd() {
 bm() { bmon -p "$(basename -a /sys/class/net/e* | paste -sd ',')" || yyay bmon; }
 # 카피나 압축등 df -m  에 변동이 있을경우 모니터링용
 
-#dfmonitor() {
-#    DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs")
-#    DF_BEFORE=$DF_INITIAL
-#    while true; do
-#        clear
-#        echo -e "System Uptime:\n--------------"
-#        uptime
-#        echo -e "\nRunning processes (e.g., pv, cp, tar, zst, rsync, dd, mv):\n----------------------------------------------------------\n\033[36m"
-#        ps -ef | grep -E "\<(pv|cp|tar|zst|rsync|dd|mv)\>" | grep -v grep
-#        echo -e "\033[0m\nInitial df -m output:\n---------------------\n$DF_INITIAL"
-#        echo -e "\033[0m\nPrevious df -m output:\n-----------------------\n$DF_BEFORE\n"
-#        DF_AFTER=$(df -m | grep -vE "udev|none|efi|fuse|Available|tmpfs")
-#        DIFF=$(diff --unchanged-group-format='' --changed-group-format='%>' <(echo "$DF_BEFORE") <(echo "$DF_AFTER"))
-#        echo -e "New df -m output with changes highlighted:\n------------------------------------------"
-#        echo "${DF_AFTER}" | while IFS= read -r line; do if [[ ${DIFF} == *"$line"* ]] && [ ! -z "$DIFF" ]; then echo -e "\033[1;33;41m$line\033[0m"; else echo "$line"; fi; done
-#        echo -e "\033[0m"
-#        DF_BEFORE=$DF_AFTER
-#        echo -n ">>> Quit -> [Anykey] "
-#        for i in $(seq 1 4); do read -p"." -t1 -n1 x && break; done
-#        [ "$x" ] && break
-#        echo
-#    done
-#}
 dfmonitor() {
     DF_INITIAL=$(df -m | grep -vE "udev|none|efi|fuse|tmpfs|Available|overlay|/snap/")
     DF_BEFORE=$DF_INITIAL
@@ -5832,6 +5809,7 @@ watch_pve() {
     done;
     BOLD='\033[1m';
     RED='\033[1;31m';
+    GRN='\033[1;32m';
     YEL='\033[1;33m';
     NC='\033[0m';
     NODE_CPU_T=50;
@@ -5884,6 +5862,7 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
             up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}');
             node_ip_var="node_${node}_ip";
             node_ip="${!node_ip_var}";
+			[ "$status" = "offline" ] && status="${RED}offline${NC}" || status="${GRN}online${NC}"
             line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" \
                          "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" \
                          "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt");
@@ -5967,6 +5946,7 @@ old_watch_pve() {
     done;
     BOLD='\033[1m';
     RED='\033[1;31m';
+    GRN='\033[1;32m';
     YEL='\033[1;33m';
     NC='\033[0m';
     NODE_CPU_T=50;
@@ -6015,6 +5995,10 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
 
             node_ip_var="node_${node}_ip"
             node_ip="${!node_ip_var}"  # 동적으로 생성된 변수의 값 참조
+
+			[ "$status" = "offline" ] && status="${RED}offline${NC}"
+			[ "$status" = "online" ] && status="${GRN}online${NC}"
+
 
 			line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt");
 
