@@ -5426,7 +5426,45 @@ vi2a() {
 }
 
 # server-status
-weblog() { lynx --dump --width=260 http://localhost/server-status; }
+weblog() { lynx --dump --width=260 http://localhost/server-status | cpipe | less -RX ; }
+
+logview() {
+  local logfile="$1" mode="$2"
+  [[ -f "$logfile" ]] || { echo "[logview] File not found: $logfile" >&2; return 1; }
+
+  if [[ "$mode" == "f" ]]; then
+    trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+    tail -f "$logfile" | cpipe
+    trap - SIGINT
+  else
+    tac "$logfile" | cpipe | less -RX
+  fi
+}
+
+webloga()  { logview /var/log/apache2/access.log ; }
+weblogaf() { logview /var/log/apache2/access.log f ; }
+webloge()  { logview /var/log/apache2/error.log ; }
+weblogef() { logview /var/log/apache2/error.log f ; }
+ftplog()   { logview /var/log/xferlog ; }
+ftplogf()  { logview /var/log/xferlog f ; }
+maillog()  { logview /var/log/mail.log ; }
+maillogf() { logview /var/log/mail.log f ; }
+syslog()   { logview /var/log/syslog ; }
+syslogf()  { logview /var/log/syslog f ; }
+authlog()  { logview /var/log/auth.log ; }
+authlogf() { logview /var/log/auth.log f ; }
+dpkglog()  { logview /var/log/dpkg.log ; }
+dpkglogf() { logview /var/log/dpkg.log f ; }
+kernlog()  { logview /var/log/kern.log ; }
+kernlogf() { logview /var/log/kern.log f ; }
+
+log() { journalctl -e ; }
+logf() { trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT ; journalctl -f ; trap - SIGINT ; }
+weblogs() { log=$( ls -1 /var/log/apache2/ | pipemenu ) && [ -f $log ] && tac $log | cpipe | less -RX ; }
+logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && [ -f $log ] && tac $log | cpipe | less -RX ; }
+
+logsf() { declare -F | awk '{print $3}' | grep log | grep -v dialog | sort ; }
+logsff() { for i in $( logsf ) ; do fff $i ; done | cpipe | less -RX ; }
 
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
@@ -5493,6 +5531,8 @@ hostinfo() {
 
 # ipban & ipallow
 ipcheck() { echo "$1" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
+ii() { curl ipinfo.io/$1 ; }
+iii() { whois $1 ; }
 ipbanlog() {
     echo -e "\033[1;36m 최근 차단된 IP 관련 로그 (Fail2ban + iptables)\033[0m"
     journalctl -u fail2ban -n 100 --no-pager | grep -iE 'ban|drop|fail|denied' | cpipe | less -RX
@@ -5503,7 +5543,7 @@ ipban() {
         valid_ips=false
         break
     }; done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipban24() {
     valid_ips=true
@@ -5517,7 +5557,8 @@ ipban24() {
             break
         fi
     done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    #$valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipban16() {
     valid_ips=true
@@ -5531,7 +5572,7 @@ ipban16() {
             break
         fi
     done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 old_ipallow() {
     valid_ips=true
@@ -5539,7 +5580,7 @@ old_ipallow() {
         valid_ips=false
         break
     }; done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipbanlist() {
     echo -e "\033[1;36m현재 iptables DROP 룰 최근 목록 (마지막 50줄)\033[0m"
@@ -5558,7 +5599,7 @@ ipallow() {
             break
         fi
     done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipallow24() {
     valid_ips=true
@@ -5566,7 +5607,7 @@ ipallow24() {
         valid_ips=false
         break
     }; done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipallow16() {
     valid_ips=true
@@ -5574,7 +5615,7 @@ ipallow16() {
         valid_ips=false
         break
     }; done
-    $valid_ips && iptables -L -v -n | tail -n20 | gip | cip
+    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 
 # 파일 암호화/복호화 env 참조
