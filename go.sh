@@ -2645,7 +2645,8 @@ pipemenu() {
     #{ [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
 	# Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
 	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
-
+	#[ $pipeitem == "Cancel" ] && echo "너는 0번을 눌러도 Cancel 을 누른것과 같다. Cancel 번호를 찾아 헤메지마라" > /dev/tty
+	[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
     unset IFS
     unset PS3
 }
