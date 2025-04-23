@@ -1190,6 +1190,7 @@ menufunc() {
                             fi # end of cfm=y
 
                             # 해당 메뉴의 선택명령이 딱 하나일때 바로 실행
+                        	# 한줄짜리 한줄만 하나만
                             if ((${#cmd_array[@]} == 1)); then
                                 [ ! "$cancel" == "yes" ] && process_commands "$cmd" "$cfm"
                             else
@@ -1210,7 +1211,7 @@ menufunc() {
                             unset ${flag}
                         done
 
-                        # 한줄짜리
+                        # 한줄짜리 한줄만 하나만
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                         #[ $num_commands -eq 1 ] && break
                         if [ "$num_commands" -eq 1 ]; then
@@ -3213,10 +3214,15 @@ oldst() {
 }
 # shortcut array view
 str() {
-    st
-    echo
-    printarr shortcutarr | cgrep1 @@@ | less -r
+	if [ "$1" ] ; then
+		printarr shortcutarr | grep "%%%" | awk -F'%%%' '{print $2}' | grep $1 | cgrep $1
+	else
+	    st
+	    echo
+    	printarr shortcutarr | cgrep1 @@@ | less -r
+	fi
 }
+search() { [ "$1" ] && str $1 ; }
 
 # flow save and exec go.sh
 savescut() {
