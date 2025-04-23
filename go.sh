@@ -3,6 +3,7 @@
 #
 #debug=y
 #set -x
+
 echo
 [ -z "$1" ] && who am i && sleep 0.2
 #[ -t 0 ] && stty sane && stty erase ^?
@@ -796,8 +797,8 @@ menufunc() {
                                     -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
                                     -e '/^#/! s/\(hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
                                     -e '/^#/! s/\(^: [^;]*\|^\!\!\! : [^;]\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|down\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
-                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|up\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
+                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
+                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
@@ -6326,8 +6327,8 @@ template_view() {
     done
 }
 
-old_template_view() { template_copy "$1" /dev/stdout; }
-template_insert() { template_view "$1" | tee -a "$2" >/dev/null; }
+template_view_source() { template_copy "$1" /dev/stdout; }
+template_insert() { template_view_source "$1" | tee -a "$2" >/dev/null; }
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -9075,6 +9076,20 @@ EOF
 
         ;;
 
+smtp.relay.cf)
+        cat >"$file_path" <<'EOF'
+# 맨 아래쪽에 추가하는 걸 추천
+relayhost = [smtp.gmail.com]:587
+smtp_use_tls = yes
+smtp_sasl_auth_enable = yes
+smtp_sasl_security_options = noanonymous
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+EOF
+;;
+
+
+# newtemp
     6yyP.7dw.sample.yml)
         cat >"$file_path" <<'EOF'
 EOF
