@@ -2640,12 +2640,12 @@ pipemenu() {
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     IFS=$' \n|'
-    items=$(
-        while read -r line; do awk '{print $0}' < <(echo "$line"); done
-        echo "Cancel"
-    )
+    #items=$( while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo "Cancel" ; )
+	items="$(cat; echo Cancel)"
+    #{ [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
+	# Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
+	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
 
-    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset IFS
     unset PS3
 }
@@ -5445,6 +5445,7 @@ webloga()  { logview /var/log/apache2/access.log ; }
 weblogaf() { logview /var/log/apache2/access.log f ; }
 webloge()  { logview /var/log/apache2/error.log ; }
 weblogef() { logview /var/log/apache2/error.log f ; }
+weblogff() { `declare -F | awk '{print $3}' | grep weblog | sort | pipemenu` ; }
 ftplog()   { logview /var/log/xferlog ; }
 ftplogf()  { logview /var/log/xferlog f ; }
 maillog()  { logview /var/log/mail.log ; }
@@ -5458,13 +5459,20 @@ dpkglogf() { logview /var/log/dpkg.log f ; }
 kernlog()  { logview /var/log/kern.log ; }
 kernlogf() { logview /var/log/kern.log f ; }
 
+# journalctl
 log() { journalctl -e ; }
 logf() { trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT ; journalctl -f ; trap - SIGINT ; }
-weblogs() { log=$( ls -1 /var/log/apache2/ | pipemenu ) && [ -f $log ] && tac $log | cpipe | less -RX ; }
-logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && [ -f $log ] && tac $log | cpipe | less -RX ; }
 
-logsf() { declare -F | awk '{print $3}' | grep log | grep -v dialog | sort ; }
-logsff() { for i in $( logsf ) ; do fff $i ; done | cpipe | less -RX ; }
+# select function
+logsff() { `declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | pipemenu` ; }
+logsfff() { for i in $( declare -F | awk '{print $3}' | grep log | grep -v dialog | sort ) ; do fff $i ; done | cpipe | less -RX ; }
+
+# select & logview
+weblogs() { log=$( ls -1 /var/log/apache2/|grep -v "\.gz" | pipemenu ) && [ -f $log ] && logview $log ; }
+weblogsf() { log=$( ls -1 /var/log/apache2/|grep -v "\.gz" | pipemenu ) && [ -f $log ] && logview $log f ; }
+logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log ; }
+logsf() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log f ; }
+
 
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
