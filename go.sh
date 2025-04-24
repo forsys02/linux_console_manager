@@ -2467,7 +2467,8 @@ cpipe() {
         # --- 경로 패턴 정의 (cpipe에서 성공) ---
         pat_path_in_paren = "\\(/[^():[:space:]]+:[0-9]+\\)" # 괄호 안 경로+라인번호
         pat_path_in_quotes = "\"(/[^[:space:]]+)\"" # 따옴표 안 경로
-        pat_path_standalone = "/[[:alnum:]][[:alnum:]._/-]*[[:alnum:]._/-]" # 독립 경로
+        # pat_path_standalone = "/[[:alnum:]][[:alnum:]._/-]*[[:alnum:]._/-]" # 독립 경로
+		pat_path_standalone = "/[^0-9][[:alnum:]._/-]*[[:alnum:]._/-]"  # 숫자로 시작하지 않는 독립 경로
         pat_url = "https?://[^[:space:]]+"  # URL
     }
     {
@@ -2525,7 +2526,11 @@ cpipe() {
         # --- 기타 강조 (old_cpipe 원본 유지) ---
         gsub(/denied|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
         gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst, $0)
-        gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst, $0)
+		# 시간
+        #gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst, $0)
+		gsub(/([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]/, clr_yel "&" clr_rst, $0)
+
+
 
         # 최종 결과 출력 (개행 보장)
         printf "%s\n", $0
@@ -2645,8 +2650,7 @@ pipemenu() {
     #{ [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
 	# Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
 	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
-	#[ $pipeitem == "Cancel" ] && echo "너는 0번을 눌러도 Cancel 을 누른것과 같다. Cancel 번호를 찾아 헤메지마라" > /dev/tty
-	[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
+	#[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
     unset IFS
     unset PS3
 }
@@ -5469,8 +5473,8 @@ logsff() { `declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | p
 logsfff() { for i in $( declare -F | awk '{print $3}' | grep log | grep -v dialog | sort ) ; do fff $i ; done | cpipe | less -RX ; }
 
 # select & logview
-weblogs() { log=$( ls -1 /var/log/apache2/|grep -v "\.gz" | pipemenu ) && [ -f $log ] && logview $log ; }
-weblogsf() { log=$( ls -1 /var/log/apache2/|grep -v "\.gz" | pipemenu ) && [ -f $log ] && logview $log f ; }
+weblogs() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu ) && [ -f $log ] && logview $log ; }
+weblogsf() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu ) && [ -f $log ] && logview $log f ; }
 logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log ; }
 logsf() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log f ; }
 
@@ -9141,6 +9145,126 @@ smtp_sasl_auth_enable = yes
 smtp_sasl_security_options = noanonymous
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+EOF
+;;
+
+
+proxmox2telegram.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+set -e
+
+# === Configuration ===
+telegram_token="$telegram_token"     # e.g., 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+telegram_chatid="$telegram_chatid"   # e.g., 123456789
+# ======================
+
+# === Helper functions ===
+is_severity() {
+  case "\$1" in
+    info|warning|error|critical|notice) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_phase() {
+  case "\$1" in
+    pre-*|post-*|vzdump) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_vmid() {
+  case "\$1" in
+    [0-9]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# === Determine event type ===
+EVENT_TYPE=""
+for arg in "\$@"; do
+  if is_severity "\$arg"; then
+    EVENT_TYPE="generic"
+    break
+  elif is_phase "\$arg"; then
+    EVENT_TYPE="hookscript"
+    break
+  elif is_vmid "\$arg"; then
+    EVENT_TYPE="hookscript"
+    break
+  fi
+done
+
+# === Notification content generation ===
+case "\$EVENT_TYPE" in
+  generic)
+    SEVERITY="\${1:-N/A}"
+    [ "\$SEVERITY" != "critical" ] && exit 0
+
+    NODE_NAME="\${2:-unknown}"
+    OBJECT="\${3:-unknown}"
+    SUBJECT="\${4:-(No Subject)}"
+    MESSAGE_BODY="\$(cat)"
+
+    TEXT_CONTENT="*Proxmox Alert (\${NODE_NAME})*
+
+*Subject:* \\\`\${SUBJECT}\\\`
+*Severity:* \\\`\${SEVERITY}\\\`
+*Target:* \\\`\${OBJECT}\\\`
+
+*Details:*
+\\\`\\\`\\\`
+\${MESSAGE_BODY}
+\\\`\\\`\\\`"
+    ;;
+
+  hookscript)
+    PHASE="\${2:-}"
+    [ "\${PHASE#post-}" = "\$PHASE" ] && exit 0   # only allow post-* events
+
+    VMID="\${1:-unknown}"
+    VMTYPE="\${3:-unknown}"
+    SUBJECT="\${VMTYPE^^} \${VMID} - \${PHASE} event triggered"
+    OBJECT="\${VMTYPE}/\${VMID}"
+    SEVERITY="info"
+    NODE_NAME="\$(hostname)"
+    MESSAGE_BODY="\$(cat)"
+
+    TEXT_CONTENT="*Proxmox Hook Alert (\${NODE_NAME})*
+
+*Subject:* \\\`\${SUBJECT}\\\`
+*Severity:* \\\`\${SEVERITY}\\\`
+*Target:* \\\`\${OBJECT}\\\`
+
+*Details:*
+\\\`\\\`\\\`
+\${MESSAGE_BODY}
+\\\`\\\`\\\`"
+    ;;
+
+  *)
+    echo "❌ Unknown event type: \$*"
+    exit 1
+    ;;
+esac
+
+# === Limit message length ===
+MAX_LEN=4000
+if [ \${#TEXT_CONTENT} -gt \$MAX_LEN ]; then
+  TEXT_CONTENT="\${TEXT_CONTENT:0:\$MAX_LEN}...
+
+(*Message truncated due to length*)"
+fi
+
+# === Send message to Telegram ===
+curl -s -X POST -m 10 "https://api.telegram.org/bot\${telegram_token}/sendMessage" \\
+  --data-urlencode "chat_id=\${telegram_chatid}" \\
+  --data-urlencode "text=\${TEXT_CONTENT}" \\
+  -d "parse_mode=Markdown" > /dev/null
+
+exit 0
+
 EOF
 ;;
 
