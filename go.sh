@@ -9151,6 +9151,32 @@ EOF
 
 proxmox2telegram.sh)
         cat >"$file_path" <<EOF
+
+webhook: $WEBHOOK_NAME
+    body $ENCODED_BODY
+    comment Send notifications to Telegram via Webhook
+    header name=Content-Type,value=$ENCODED_HEADER
+    method post
+    url https://api.telegram.org/bot{{ secrets.BOT_TOKEN }}/sendMessage?chat_id={{ secrets.CHAT_ID }}
+EOF
+;;
+
+proxmox2telegram_priv.sh)
+        cat >"$file_path" <<EOF
+
+webhook: $WEBHOOK_NAME
+    secret name=BOT_TOKEN,value=$ENCODED_TOKEN
+    secret name=CHAT_ID,value=$ENCODED_CHAT_ID
+EOF
+;;
+
+
+
+
+
+
+proxmox2telegram_vm_hook.sh)
+        cat >"$file_path" <<EOF
 #!/bin/bash
 set -e
 
