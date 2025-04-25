@@ -159,14 +159,6 @@ echo "env | grep scut"
 env | grep scut | sort
 echo "--------------------------------"
 }
-
-#scutp
-# exported flow get
-#scut=${scut-}
-#oldscut=${oldscut-}
-#ooldscut=${ooldscut-}
-#oooldscut=${oooldscut-}
-#ooooldscut=${ooooldscut-}
 #scutp
 
 ############################################################
@@ -371,7 +363,7 @@ menufunc() {
             scut="m"
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
-        #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+		updatescut() {
         					[ "$scut" ] && {
                             #[ "$scut" ] && [ "$scut" != "m" ] && {
             [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
@@ -382,9 +374,11 @@ menufunc() {
             #[ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
             #[ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
             #[ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
-        }
-       #flow="$oooldscut>$ooldscut>$oldscut>$scut"
-       flow="$oooldscut>$ooldscut>$oldscut"
+	        }
+       		#flow="$oooldscut>$ooldscut>$oldscut>$scut"
+       		flow="$oooldscut>$ooldscut>$oldscut"
+		}
+		updatescut
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         # 쇼트컷 배열생성
@@ -677,6 +671,8 @@ menufunc() {
                     # readxx $LINENO chosen_command_sub $chosen_command_sub
                     # 한줄짜리
                     if [ $num_commands -eq 1 ]; then
+                            scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
+							updatescut
                         # relay
                         chosen_command=${chosen_commands[0]}
                     elif [ $num_commands -gt 1 ]; then
@@ -690,20 +686,7 @@ menufunc() {
 
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
-                            #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
-        					[ "$scut" ] && {
-                            #[ "$scut" ] && [ "$scut" != "m" ] && {
-            [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
-            [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
-            [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
-            #[ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            #[ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
-            #[ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
-            #[ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
-                            }
-       #flow="$oooldscut>$ooldscut>$oldscut>$scut"
-       flow="$oooldscut>$ooldscut>$oldscut"
+							updatescut
 
                             echo -n "=============================================="
                             echo -n " :: $cmdloop"
