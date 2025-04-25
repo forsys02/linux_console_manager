@@ -5484,19 +5484,21 @@ logsf() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | so
 
 # 활성화된 서비스 목록에서 선택
 ss()  { systemctl status $(systemctl list-unit-files --type=service | grep enabled | awk -F'.service' '{print $1}' | pipemenu1); }
+ssg() { [ -z "$1" ] && echo "Usage: ssg <keyword>" && return 1 ; systemctl status $(systemctl list-unit-files --type=service | grep "$1" | awk -F'.service' '{print $1}') ; }
 # 개별 주요 서비스들
-ssa() { systemctl status apache2; }           # Apache
-ssn() { systemctl status nginx; }             # Nginx
-sss() { systemctl status sshd; }              # SSH
+ssa() { systemctl status $(systemctl | grep -Eo 'apache2|nginx' | head -n1) ; }           # Apache/nginx
+sss() { systemctl status $(systemctl | grep -Eo 'sshd?' | head -n1) ; }              # SSH
+ssn() { systemctl status $(systemctl | grep -Eo 'networking|netplan' | head -n1) ; }              # network
 ssd() { systemctl status docker; }            # Docker
-ssf() { systemctl status fail2ban; }          # Fail2Ban
+ssb() { systemctl status fail2ban; }          # Fail2Ban
 ssu() { systemctl status ufw; }               # UFW Firewall
 ssc() { systemctl status cron; }              # Cron
 # 자동 감지형
 ssm() { systemctl status $(systemctl | grep -Eo 'mariadb|mysql' | head -n1); }                    # MySQL or MariaDB
 ssp() { systemctl status $(systemctl | grep -o 'php[0-9.]*-fpm' | sort -Vr | head -n1); }         # 최신 PHP-FPM
+ssf() { systemctl status $(systemctl list-unit-files --type=service | grep ftp | awk -F'.service' '{print $1}') ; }          # ftp
 # Proxmox 관련 (사용 중이라면)
-ssv()    { systemctl status $( echo pvedaemon pveproxy qemu-server lxc | pipemenu) ; }
+ssv()    { systemctl status $( echo pvedaemon pveproxy qmeventd lxc | pipemenu) ; }
 
 
 # euc-kr -> utf-8 file encoding
