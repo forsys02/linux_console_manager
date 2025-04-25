@@ -149,11 +149,11 @@ export "gateway"
 scutp() {
 echo "--------------------------------"
 echo "init scut print"
-            echo "oldscut=$scut"
-            echo "ooldscut=$oldscut"
-            echo "oooldscut=$ooldscut"
-            echo "ooooldscut=$oooldscut"
-			echo "scut=$scut"
+            echo "oldscut:$scut"
+            echo "ooldscut:$oldscut"
+            echo "oooldscut:$ooldscut"
+            echo "ooooldscut:$oooldscut"
+			echo "scut:$scut"
 echo "--------------------------------"
 echo "env | grep scut"
 env | grep scut | sort
@@ -372,13 +372,15 @@ menufunc() {
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
         #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
-        					[ "$scut" ] && {
+        					#[ "$scut" ] && {
+                            [ "$scut" ] && [ "$scut" != "m" ] && {
             [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            [ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$oldscut" && \
-            [ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$ooldscut" && \
-            [ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$oooldscut"
+            [ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
+            [ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
+            [ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
         }
-        [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
+       #flow="$oooldscut>$ooldscut>$oldscut>$scut"
+       flow="$oooldscut>$ooldscut>$oldscut"
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         # 쇼트컷 배열생성
@@ -685,13 +687,15 @@ menufunc() {
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
                             #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
-        					[ "$scut" ] && {
+        					#[ "$scut" ] && {
+                            [ "$scut" ] && [ "$scut" != "m" ] && {
             [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            [ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$oldscut" && \
-            [ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$ooldscut" && \
-            [ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$oooldscut"
+            [ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
+            [ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
+            [ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
                             }
-                            [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
+       #flow="$oooldscut>$ooldscut>$oldscut>$scut"
+       flow="$oooldscut>$ooldscut>$oldscut"
 
                             echo -n "=============================================="
                             echo -n " :: $cmdloop"
@@ -850,7 +854,8 @@ menufunc() {
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                     #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     # flow 메뉴 하부 메뉴 종료
-                                    [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to the flow menu.. [$ooldscut]"
+                                    [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to flow menu... [$ooldscut]" &&
+                                	menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
@@ -861,7 +866,7 @@ menufunc() {
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                 # flow 메뉴 하부 메뉴 종료
-                                [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "back to the flow menu.."
+                                [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to flow menu..."
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
