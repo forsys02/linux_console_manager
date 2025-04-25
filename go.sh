@@ -2629,17 +2629,6 @@ noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null; } # Escape 문자(A
 selectmenu() { select item in $@; do echo $item; done; }
 
 # pipe 로 넘어온 줄의 모든 필드를 select 구분자-> 빈칸 빈줄 파이프(|}
-old_pipemenu() {
-    local prompt_message="$@"
-    PS3="==============================================
->>> ${prompt_message:+"$prompt_message - "}Select No. : "
-    IFS=$' \n|'
-    export pipeitem=""
-    items=$(while read -r line; do awk '{print $0}' < <(echo "$line"); done)
-    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-    unset IFS
-    unset PS3
-}
 pipemenu() {
     local prompt_message="$@"
     PS3="==============================================
@@ -2654,19 +2643,18 @@ pipemenu() {
     unset IFS
     unset PS3
 }
-pipemenucancel() { pipemenu; }
 
 # pipe 로 넘어온 줄의 첫번째 필드를 select
-#pipemenu1() {
-#    local prompt_message="$@"
-#    PS3="==============================================
-#>>> ${prompt_message:+"$prompt_message - "}Select No. : "
-#    export pipeitem=""
-#    items=$(while read -r line; do awk '{print $1}' < <(echo "$line"); done)
-#    { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-#    unset PS3
-#}
 pipemenu1() {
+    local prompt_message="$@"
+    PS3="==============================================
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
+    export pipeitem=""
+    items=$(while read -r line; do echo "$line" | awk '{print $1}'; done; echo Cancel)
+    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    unset PS3
+}
+_pipemenu1() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
@@ -2678,10 +2666,20 @@ pipemenu1() {
     { [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
     unset PS3
 }
-pipemenu1cancel() { pipemenu1; }
 
 # pipe 로 넘어온 라인별로 select
 pipemenulist() {
+    local prompt_message="$@"
+    PS3="==============================================
+>>> ${prompt_message:+"$prompt_message - "}Select No. : "
+    IFS=$'\n'
+    export pipeitem=""
+    items=$(cat; echo Cancel)
+    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    unset IFS
+    unset PS3
+}
+_pipemenulist() {
     local prompt_message="$@"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
