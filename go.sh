@@ -146,12 +146,28 @@ export "guestip"
 gateway="$(ip route | grep 'default' | awk '{print $3}')"
 export "gateway"
 
+scutp() {
+echo "--------------------------------"
+echo "init scut print"
+            echo "oldscut=$scut"
+            echo "ooldscut=$oldscut"
+            echo "oooldscut=$ooldscut"
+            echo "ooooldscut=$oooldscut"
+			echo "scut=$scut"
+echo "--------------------------------"
+echo "env | grep scut"
+env | grep scut | sort
+echo "--------------------------------"
+}
+
+#scutp
 # exported flow get
-scut=${scut-}
-oldscut=${oldscut-}
-ooldscut=${ooldscut-}
-oooldscut=${oooldscut-}
-ooooldscut=${ooooldscut-}
+#scut=${scut-}
+#oldscut=${oldscut-}
+#ooldscut=${ooldscut-}
+#oooldscut=${oooldscut-}
+#ooooldscut=${ooooldscut-}
+#scutp
 
 ############################################################
 # 최종 명령문을 실행하는 함수 process_commands // exec Process
@@ -295,6 +311,7 @@ declare -a shortcutarr shortcutstr
 # exec go.sh shortcut // or menufunc {submenu_sys} 제목 or menufunc {} 제목 choice
 
 menufunc() {
+	#scutp
     #set -x
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
@@ -354,11 +371,12 @@ menufunc() {
             scut="m"
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
-        [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
-            ooooldscut="$oooldscut"
-            oooldscut="$ooldscut"
-            ooldscut="$oldscut"
-            oldscut="$scut"
+        #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+        [ "$scut" ] && [ "$scut" != "$oldscut" ] && [ "$oldscut" != "$ooldscut" ] && {
+            [ "$oooldscut" != "m" ] && [ "$oooldscut" != "$ooooldscut" ] && export ooooldscut="$oooldscut"
+            [ "$ooldscut" != "m" ] && [ "$ooldscut" != "$oooldscut" ] && export oooldscut="$ooldscut"
+            [ "$oldscut" != "m" ] && [ "$oldscut" != "$ooldscut" ] && export ooldscut="$oldscut"
+            [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && export oldscut="$scut"
         }
         [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
 
@@ -499,7 +517,8 @@ menufunc() {
                 # debug printarr keysarr
 
                 # titleansi
-                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
+                # items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
+                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m\1\o033[0m/")")
 
                 printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
             done < <(print_menulist) # %%% 모음 가져와서 파싱
@@ -665,11 +684,12 @@ menufunc() {
 
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
-                            [ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
-                                ooooldscut="$oooldscut"
-                                oooldscut="$ooldscut"
-                                ooldscut="$oldscut"
-                                oldscut="$scut"
+                            #[ "$scut" ] && [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && {
+        					[ "$scut" ] && [ "$scut" != "$oldscut" ] && [ "$oldscut" != "$ooldscut" ] && {
+            [ "$oooldscut" != "m" ] && [ "$oooldscut" != "$ooooldscut" ] && export ooooldscut="$oooldscut"
+            [ "$ooldscut" != "m" ] && [ "$ooldscut" != "$oooldscut" ] && export oooldscut="$ooldscut"
+            [ "$oldscut" != "m" ] && [ "$oldscut" != "$ooldscut" ] && export ooldscut="$oldscut"
+            [ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && export oldscut="$scut"
                             }
                             [ "$ooldscut" ] && flow="$oooldscut>$ooldscut>$scut" || { [ "$scut" ] && flow="m>$scut" || flow=""; }
 
@@ -1286,16 +1306,7 @@ menufunc() {
                             ;;
                         "restart" | "rest")
                             echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
-                            ;; # exec terminates the script here
-                            #                        "bm")
-                            #                            echo "Back to previous menu.. [$ooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooldscut"
-                            #                            ;; # exec terminates
-                            #                        "bbm")
-                            #                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$oooldscut"
-                            #                            ;; # exec terminates
-                            #                        "bbbm")
-                            #                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut && exec "$gofile" "$ooooldscut"
-                            #                            ;; # exec terminates
+                            ;;
                         "b" | "00")
                             echo "Back to previous menu.. [$ooldscut]" && savescut &&
                                 menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
@@ -1505,33 +1516,6 @@ menufunc() {
                     exit 0
                 fi
                 ;;
-                #conf)
-                #    conf # vi.go.env
-                #    ;;
-                #confmy)
-                #    confmy # vi.go.my.env
-                #    ;;
-                #confc)
-                #    confc # rollback go.env
-                #    ;;
-                #conff)
-                #    [ "$choice1" ] && conff "$choice1" || conff # vi go.sh
-                #    ;;
-                #conffc)
-                #    conffc # rollback go.sh
-                #    ;;
-                #            bm)
-                #                echo "Back to previous menu.. [$ooldscut]" && sleep 0.5
-                #                savescut && exec $gofile $ooldscut # back to previous menu
-                #                ;;
-                #            bbm)
-                #                echo "Back two menus.. [$oooldscut]" && sleep 0.5
-                #                savescut && exec $gofile $oooldscut # back to previous menu
-                #                ;;
-                #            bbbm)
-                #                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
-                #                savescut && exec $gofile $ooooldscut # back to previous menu
-                #                ;;
             b | 00)
                 echo "Back to previous menu.. [$ooldscut]" &&
                     savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
@@ -1780,7 +1764,6 @@ ff() {
     echo "}"
     unset _ff_seen_funcs
 }
-
 
 debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
@@ -3241,7 +3224,10 @@ search() { [ "$1" ] && str $1 ; }
 
 # flow save and exec go.sh
 savescut() {
-    export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut ooooldscut=$ooooldscut
+:;
+	#scutp
+    #export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut ooooldscut=$ooooldscut
+	#dline ; env | grep scut
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
@@ -4714,6 +4700,10 @@ change() {
     fi
 }
 
+change1() {
+  sed -i "0,/${2}/s/${2}/${3}/" "$1"
+}
+
 hash_add() {
     local fpath="$1" search="$2" num_arg="$3"
     local up=0 down=0 num=0
@@ -5382,7 +5372,7 @@ vi22() {
         vim -c "autocmd VimEnter * ++once let @/ = '$2'" \
             -c "autocmd VimEnter * ++once normal! n zt" "$1"
     else
-        vim "$1" || vi "$1"
+        vim "$1" || vi "$1" || nano "$1"
     fi
 }
 
@@ -5412,14 +5402,14 @@ vi2() {
         #readxy "$3"
         if [ "$3" == "tailedit" ]; then
             # 문자열 찾고 그 위치의 문단끝에서 편집
-            if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zb'" "$1"; else vim "$1" || vi "$1"; fi
+            if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zb'" "$1" || nano "$1"; else vim "$1" || vi "$1"; fi
         else
             # $2 대신 $3 를 찾음
-            if [ -n "$3" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$3\]' | silent! normal! } zb'" "$1"; else vim "$1" || vi "$1"; fi
+            if [ -n "$3" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$3\]' | silent! normal! } zb'" "$1" || nano "$1" ; else vim "$1" || vi "$1"; fi
         fi
     else
         # 문자열 찾고 그 위치의 처음에서 편집
-        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zt'" "$1"; else vim "$1" || vi "$1"; fi
+        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zt'" "$1" || nano "$1" ; else vim "$1" || vi "$1" || nano "$1" ; fi
     fi
 }
 vi2e() {
@@ -5865,6 +5855,8 @@ vm() {
         # Basic VM control actions
         start | stop | shutdown | reboot | reset | suspend | resume)
             pvesh create "$path/status/$action"
+			echo "Done..."
+			echo "$action" | grep -qE "start|stop" && sleepdot 7 && dline && vms
         ;;
 
         # Get current VM status
@@ -5899,6 +5891,11 @@ vm() {
         backup)
             echo "Backing up $vmid using vzdump...";
             storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage' );
+    # 스토리지 없으면 기본값 사용
+    if [ -z "$storage" ]; then
+        echo "No backup storage found, using default storage (local)."
+        storage="local"  # 기본값 설정 (필요에 따라 다른 기본값으로 바꿀 수 있음)
+    fi
             vzdump $vmid --mode snapshot --storage "$storage" --compress zstd --notes-template "{{guestname}}" --remove 0;
             bell
         ;;
@@ -6200,10 +6197,11 @@ pingtesta() {
 }
 pingtestg() {
     echo
-    ping -c3 $gateway
+    ping $gateway
 }
 pp() { pingtest "$@"; }
 ppa() { pingtesta "$@"; }
+ppp() { pingtesta "$@"; }
 ppg() { pingtestg "$@"; }
 
 reconnect_down_veth_interfaces() {
