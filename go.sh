@@ -529,7 +529,8 @@ menufunc() {
 
                 # titleansi
                 # items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
-                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m\1\o033[0m/")")
+				# > 빨간색 ooldscut 진한흰색
+                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m>\1\o033[0m/")")
 
                 printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
             done < <(print_menulist) # %%% 모음 가져와서 파싱
