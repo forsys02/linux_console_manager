@@ -4,6 +4,17 @@
 #debug=y
 #set -x
 
+CURRENT_PID=$$
+PARENT_PID=$PPID
+#echo "CURRENT_PID:$CURRENT_PID PARENT_PID:$PARENT_PID"
+# 부모 프로세스가 go.sh인지 확인
+PARENT_CMD=$(ps -o cmd= -p $PARENT_PID)
+# 부모 프로세스가 go.sh일 경우 재귀 실행 방지
+if [[ "$PARENT_CMD" == *"go.sh"* ]]; then
+    echo "go.sh가 이미 실행 중입니다. (재귀 실행 방지)"
+    exit 1
+fi
+
 echo
 [ -z "$1" ] && who am i && sleep 0.2
 #[ -t 0 ] && stty sane && stty erase ^?
