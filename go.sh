@@ -2524,7 +2524,7 @@ cpipe() {
         gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst, $0)
 
         # --- 기타 강조 (old_cpipe 원본 유지) ---
-        gsub(/denied|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
+        gsub(/denied|error|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
         gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst, $0)
 		# 시간
         #gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst, $0)
@@ -2638,7 +2638,9 @@ pipemenu() {
 	items="$(cat; echo Cancel)"
     #{ [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
 	# Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
-	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+	#{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+
 	#[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
     unset IFS
     unset PS3
@@ -2651,7 +2653,8 @@ pipemenu1() {
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(while read -r line; do echo "$line" | awk '{print $1}'; done; echo Cancel)
-    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset PS3
 }
 _pipemenu1() {
@@ -2675,7 +2678,8 @@ pipemenulist() {
     IFS=$'\n'
     export pipeitem=""
     items=$(cat; echo Cancel)
-    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset IFS
     unset PS3
 }
@@ -5464,6 +5468,8 @@ kernlogf() { logview /var/log/kern.log f ; }
 
 # journalctl
 log() { journalctl -e ; }
+loge() { journalctl -rp warning ; }
+logu() { journalctl -r -u $( systemctl list-unit-files --type=service|grep enable|awk -F'.service' '{print $1}'|pipemenu ) ; }
 logf() { trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT ; journalctl -f ; trap - SIGINT ; }
 
 # select function
@@ -5475,6 +5481,22 @@ weblogs() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipe
 weblogsf() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu ) && [ -f $log ] && logview $log f ; }
 logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log ; }
 logsf() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log f ; }
+
+# 활성화된 서비스 목록에서 선택
+ss()  { systemctl status $(systemctl list-unit-files --type=service | grep enabled | awk -F'.service' '{print $1}' | pipemenu1); }
+# 개별 주요 서비스들
+ssa() { systemctl status apache2; }           # Apache
+ssn() { systemctl status nginx; }             # Nginx
+sss() { systemctl status sshd; }              # SSH
+ssd() { systemctl status docker; }            # Docker
+ssf() { systemctl status fail2ban; }          # Fail2Ban
+ssu() { systemctl status ufw; }               # UFW Firewall
+ssc() { systemctl status cron; }              # Cron
+# 자동 감지형
+ssm() { systemctl status $(systemctl | grep -Eo 'mariadb|mysql' | head -n1); }                    # MySQL or MariaDB
+ssp() { systemctl status $(systemctl | grep -o 'php[0-9.]*-fpm' | sort -Vr | head -n1); }         # 최신 PHP-FPM
+# Proxmox 관련 (사용 중이라면)
+ssv()    { systemctl status $( echo pvedaemon pveproxy qemu-server lxc | pipemenu) ; }
 
 
 # euc-kr -> utf-8 file encoding
