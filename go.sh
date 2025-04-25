@@ -725,6 +725,8 @@ menufunc() {
 
         # 따옴표 제거
         gsub(/^["'"'"']|["'"'"']$/, "", token)
+		gsub(/[^a-zA-Z0-9\/_.-]+$/, "", token)
+
 
         # $가 포함된 변수 경로는 제외
         if (token ~ /\$/) continue
@@ -738,6 +740,8 @@ menufunc() {
             token !~ /^\/dev\// &&
             token !~ /^\/proc\// &&
             token !~ /var[A-Z][a-zA-Z0-9_.-]*/) {
+
+# 		 print "DEBUG: Checking token [" token "]" > "/dev/stderr" # 에러 출력으로 보내서 확인 용이하게
 
             # 실제로 존재하는 파일인 경우만 출력
             cmd = "[ -f \"" token "\" ]"
@@ -1723,7 +1727,7 @@ menufunc() {
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
 fff() { declare -f "$@"; }
-ffe() { conff "$1()" ; }
+ffe() { conff "^$1()" ; }
 
 ff() {
     if [ -z "$1" ]; then
@@ -1776,6 +1780,10 @@ ff() {
     echo "}"
     unset _ff_seen_funcs
 }
+
+
+debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
+debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 
 ffc() {
     ff "$@" | { batcat -l bash 2>/dev/null || cat; }
@@ -5832,9 +5840,143 @@ old_vmipscan() {
     unset IFS
 }
 
+vms() { vmslistview | cgrepn running -3 ; }
 vm() {
+	unset -v vmid
+    vmid=$1;
+    action=$2;
+
+    # If no VMID is provided, show available commands
+    if [ -z "$1" ]; then
+        process_commands pxx;
+        return;
+    fi;
+
+    # Locate the configuration file for the VM
+    conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1;
+    [ -z "$conf" ] && echo "VM $vmid not found" && return 1;
+
+    # Extract node name and VM type (qemu or lxc)
+    node=$(echo "$conf" | awk -F/ '{print $5}');
+    type=$(grep -q qemu <<< "$conf" && echo qemu || echo lxc);
+    path="/nodes/$node/$type/$vmid";
+
+    case "$action" in
+        # Basic VM control actions
+        start | stop | shutdown | reboot | reset | suspend | resume)
+            pvesh create "$path/status/$action"
+        ;;
+
+        # Get current VM status
+        status | "")
+            pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
+        ;;
+
+        # Enter the VM (LXC: pct enter, QEMU: SSH)
+        enter)
+            echo "Entering $vmid ($type on $node)...";
+            status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"');
+            [ "$status" != "running" ] && {
+                echo "Starting VM...";
+                pvesh create "$path/status/start";
+                for i in 1 2 3 4 5; do
+                    sleep 1;
+                    status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"');
+                    [ "$status" = "running" ] && echo "Booting Now... wait..." && {
+                        [ "$type" = "lxc" ] && sleepdot 3 || sleepdot 10
+                    } && break;
+                done;
+                [ "$status" != "running" ] && echo "Failed to start VM" && return 1
+            };
+            if [ "$type" = "lxc" ]; then
+                pct enter "$vmid";
+            else
+                qssh "$vmid" root;
+            fi
+        ;;
+
+        # Backup the VM using vzdump with snapshot mode
+        backup)
+            echo "Backing up $vmid using vzdump...";
+            storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage' );
+            vzdump $vmid --mode snapshot --storage "$storage" --compress zstd --notes-template "{{guestname}}" --remove 0;
+            bell
+        ;;
+        # Create a snapshot with auto-generated name (QEMU + LXC)
+        snapshot)
+            snapname=$3
+            if [ -z "$snapname" ]; then
+                snapname="at_$(datetag2)"
+                echo "No name provided, using generated snapshot name: $snapname"
+            fi
+            echo "Creating snapshot '$snapname' for $type $vmid..."
+            if [ "$type" = "qemu" ]; then
+                qm snapshot "$vmid" "$snapname" --description "Auto snapshot created by vm_func"
+					dline
+					qm listsnapshot $vmid | awk2c
+            else
+                pct snapshot "$vmid" "$snapname"
+					dline
+					pct listsnapshot $vmid | awk2c
+            fi
+        ;;
+
+        # Roll back to a snapshot (prompt if no name is given)
+        rollback)
+            snapname=$3
+            if [ -z "$snapname" ]; then
+                echo "Available snapshots for $type $vmid:"
+                if [ "$type" = "qemu" ]; then
+					dline
+					qm listsnapshot $vmid | awk2c
+					dline
+				    echo "Choose a snapshot to rollback:"
+				    select snapname in $(qm listsnapshot $vmid|awk2); do
+				        [ -n "$snapname" ] && break
+			    	    echo "Invalid choice."
+				    done
+                else
+   					dline
+					pct listsnapshot $vmid | awk2c
+					dline
+				    echo "Choose a snapshot to rollback:"
+				    select snapname in $(pct listsnapshot $vmid|awk2); do
+				        [ -n "$snapname" ] && break
+			    	    echo "Invalid choice."
+				    done
+                fi
+                [ -z "$snapname" ] && echo "No snapshot name given." && return 1
+            fi
+
+            echo "Rolling back $type $vmid to snapshot '$snapname'..."
+            if [ "$type" = "qemu" ]; then
+                qm rollback "$vmid" "$snapname"
+                echo "Starting container $vmid..."
+				qm start $vmid
+            else
+                echo "Stopping container $vmid..."
+                pct stop "$vmid"
+                pct rollback "$vmid" "$snapname"
+                echo "Starting container $vmid..."
+                pct start "$vmid"
+            fi
+        ;;
+
+        # Handle unsupported actions
+        *)
+            echo "Unsupported action: $action";
+            return 2
+        ;;
+    esac
+#	[ "$ooldscut" != "pxx" ] && menufunc $ooldscut
+}
+
+_vm() {
     vmid=$1
     action=$2
+	if [ ! "$1" ] ; then
+		process_commands pxx
+	fi
     conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1
     [ -z "$conf" ] && echo "VM $vmid not found" && return 1
     node=$(echo "$conf" | awk -F/ '{print $5}')
@@ -5881,7 +6023,7 @@ vm() {
 
 
 
-
+vmm () { watch_pve ; }
 watch_pve () {
     interval=${1:-5};
     local_node=$(hostname -s 2> /dev/null);
