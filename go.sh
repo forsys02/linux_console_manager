@@ -1776,6 +1776,20 @@ ff() {
 debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 
+ensure_cmd() {
+	# ensure_cmd arp net-tools      # arp 명령이 없으면 net-tools 설치
+	# ensure_cmd curl               # curl 명령이 없으면 curl 설치
+	# ensure_cmd ifconfig net-tools # ifconfig도 net-tools 소속
+
+    local cmd="$1"
+    local pkg="${2:-$1}"  # 설치할 패키지 이름, 없으면 cmd 이름과 동일
+
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        nohup bash -c "apt install -y $pkg"
+        #nohup bash -c "apt install -y $pkg" >/dev/null 2>&1 &
+    fi
+}
+
 ffc() {
     ff "$@" | { batcat -l bash 2>/dev/null || cat; }
 }
@@ -6028,7 +6042,7 @@ _vm() {
 
 
 
-vmm () { watch_pve ; }
+vmm() { watch_pve ; }
 watch_pve () {
     interval=${1:-5};
     local_node=$(hostname -s 2> /dev/null);
@@ -6056,6 +6070,9 @@ watch_pve () {
     echo -e "${BOLD}Reading ARP cache...${NC}";
     arp_map="/tmp/.arp_map";
     > "$arp_map";
+
+	ensure_cmd arp net-tools
+
     arp -n | awk '/ether/ {print tolower($3), $1}' > "$arp_map";
     if command -v arp-scan > /dev/null 2>&1; then
         ( arp -n | awk '/ether/ {print tolower($3), $1}';
@@ -6065,10 +6082,26 @@ watch_pve () {
     echo -e "${BOLD}Reading VMs config...${NC}";
     trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM;
 
+
     # 노드와 IP 정보를 한 번에 가져오기
-    while IFS=" " read node ip; do
-        eval "node_${node}_ip=\"$ip\"";
-    done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' /etc/pve/.members);
+members_file="/etc/pve/.members"
+nodelist_count=$(jq '.nodelist | length' "$members_file" 2>/dev/null)
+
+if [[ "$nodelist_count" -gt 0 ]]; then
+    # 클러스터 노드가 있는 경우
+    while IFS=" " read -r node ip; do
+        eval "node_${node}_ip=\"$ip\""
+    done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' "$members_file")
+else
+    # 단독 노드일 경우
+    node=$(jq -r '.nodename' "$members_file")
+    ip=$(hostname -I | awk '{print $1}')  # 첫 번째 IP만 사용
+    eval "node_${node}_ip=\"$ip\""
+fi
+
+    #while IFS=" " read node ip; do
+    #    eval "node_${node}_ip=\"$ip\"";
+    #done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' /etc/pve/.members);
 
     while :; do
         now=$(date +%s);
@@ -9464,6 +9497,57 @@ exit 0
 EOF
 ;;
 
+grub40.conf)
+        cat >"$file_path" <<EOF
+# --- 내 커스텀 메뉴 삼신기 시작 ---
+
+# 메뉴 1: 로컬 모니터 사용 (Normal)
+menuentry 'Proxmox VE - 로컬 모니터 사용 (Normal)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-normal-$rootuuid' {
+        load_video
+        insmod gzio
+        insmod part_gpt
+        insmod ext2
+        set root='hd0,gpt2' # 이 부분은 보통 안 건드려도 됨
+        search --no-floppy --fs-uuid --set=root $rootuuid
+
+        # 커널/initrd 버전, UUID 수정! intel_iommu 옵션은 유지.
+        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt
+        initrd /boot/initrd.img-$kernelv
+}
+
+# 메뉴 2: GPU 골고루 (GVT-g 도전!)
+menuentry 'Proxmox VE - GPU 골고루 (GVT-g 도전!)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-gvtg-$rootuuid' {
+        load_video
+        insmod gzio
+        insmod part_gpt
+        insmod ext2
+        set root='hd0,gpt2'
+        search --no-floppy --fs-uuid --set=root $rootuuid
+
+        # 커널/initrd 버전, UUID 수정! GVT-g 옵션 추가: i915.enable_gvt=1
+        # linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_gvt=1
+        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_guc=3 i915.max_vfs=7 vfio_iommu_type1.allow_unsafe_interrupts=1 kvm.ignore_msrs=1
+        initrd /boot/initrd.img-$kernelv
+}
+
+# 메뉴 3: GPU 몰빵 (Passthrough)
+menuentry 'Proxmox VE - GPU 몰빵 (Passthrough)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-passthrough-$rootuuid' {
+        load_video
+        insmod gzio
+        insmod part_gpt
+        insmod ext2
+        set root='hd0,gpt2'
+        search --no-floppy --fs-uuid --set=root $rootuuid
+
+        # 커널/initrd 버전, UUID 수정! Passthrough 옵션 추가: vfio-pci.ids=xxxx:xxxx modprobe.blacklist=i915
+        # xxxx:xxxx 는 형 N100 iGPU ID 로 변경! (예: 8086:46d1)
+        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt vfio-pci.ids=$vgaid modprobe.blacklist=i915 nomodeset video=efifb:off
+        initrd /boot/initrd.img-$kernelv-passthrough
+}
+
+# --- 내 커스텀 메뉴 삼신기 끝 ---
+EOF
+;;
 
 # newtemp
     6yyP.7dw.sample.yml)
