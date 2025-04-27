@@ -9526,7 +9526,7 @@ menuentry 'Proxmox VE - GPU 골고루 (GVT-g 도전!)' --class proxmox --class g
 
         # 커널/initrd 버전, UUID 수정! GVT-g 옵션 추가: i915.enable_gvt=1
         # linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_gvt=1
-        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_guc=3 i915.max_vfs=7 vfio_iommu_type1.allow_unsafe_interrupts=1 kvm.ignore_msrs=1
+        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_guc=3 i915.max_vfs=7 vfio_iommu_type1.allow_unsafe_interrupts=1 kvm.ignore_msrs=1 module_blacklist=xe
         initrd /boot/initrd.img-$kernelv
 }
 
