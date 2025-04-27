@@ -2537,7 +2537,7 @@ cpipe() {
         gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst, $0)
 
         # --- 기타 강조 (old_cpipe 원본 유지) ---
-        gsub(/denied|error|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
+        gsub(/denied|failed|error|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
         gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst, $0)
 		# 시간
         #gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst, $0)
@@ -5485,6 +5485,8 @@ dpkglog()  { logview /var/log/dpkg.log ; }
 dpkglogf() { logview /var/log/dpkg.log f ; }
 kernlog()  { logview /var/log/kern.log ; }
 kernlogf() { logview /var/log/kern.log f ; }
+bootlog() { dmesg | cpipe | less -RX ; }
+
 
 # journalctl
 log() { journalctl -e ; }
