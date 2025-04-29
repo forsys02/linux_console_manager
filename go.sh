@@ -1785,7 +1785,7 @@ ensure_cmd() {
     local pkg="${2:-$1}"  # 설치할 패키지 이름, 없으면 cmd 이름과 동일
 
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        nohup bash -c "apt install -y $pkg"
+        nohup bash -c "apt install -y $pkg" >/dev/null 2>&1
         #nohup bash -c "apt install -y $pkg" >/dev/null 2>&1 &
     fi
 }
@@ -3615,6 +3615,8 @@ rmv() {
 alarm() {
     # 인수로 넘어올때 "$1" "$2" // $2에 read 나머지 모두
     # 인수로 넘어올때 "$1" "$2" "$3" ... // 두가지 형태 존재
+
+	ensure_cmd atq at
 
     local input="$1"
     shift
@@ -5833,26 +5835,174 @@ vmipscan() {
     unset IFS
 }
 
-# localnet
-old_vmipscan() {
-    # MAC-IP 매핑
-    local IFS=$' \t\n'
-    local iface
-    [ "$1" ] && iface="$1" || iface="vmbr0"
-    declare -A mac_ip_map
-    while read -r ip mac; do
-        mac_ip_map["$(echo "$mac" | tr '[:upper:]' '[:lower:]')"]="$ip"
-    done < <(arp-scan -I $iface -l | awk '/^[0-9]/ {print $1, $2}')
+vmip() {
+    local vmid="$1"
+    local debug="$2"  # 디버그 여부 확인
+    [ -z "$vmid" ] && echo "Usage: vmip <vmid> [debug]" && return 1
 
-    # VM 정보 출력
-    for vmid in $(pvesh get /nodes/localhost/qemu --noborder --noheader | awk '/running/ {print $2}'); do
-        config=$(pvesh get /nodes/localhost/qemu/"$vmid"/config --noborder --noheader)
-        vmname=$(echo "$config" | awk '$1 == "name" {print $2}')
-        mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | grep -oP '(?<==)[0-9A-Fa-f:]+(?=,bridge=)')
-        [[ -n $mac ]] && ip="${mac_ip_map[$(echo "$mac" | tr '[:upper:]' '[:lower:]')]}" && [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
+    if [ "$debug" == "debug" ]; then
+        echo "[DEBUG] Looking up VMID: $vmid"
+    fi
+
+    # VM의 노드와 타입 가져오기
+    local info node type
+    info=$(pvesh get /cluster/resources --output-format=json | jq -r ".[] | select(.vmid == $vmid) | \"\(.node) \(.type)\"")
+    node=$(echo "$info" | awk '{print $1}')
+    type=$(echo "$info" | awk '{print $2}')
+
+    if [ -z "$node" ] || [ -z "$type" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] Node or Type not found for VMID $vmid"
+        echo "N/A"
+        return 1
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Node=$node, Type=$type"
+
+    # VM의 설정에서 MAC 주소를 추출
+    local config mac
+    config=$(pvesh get /nodes/$node/$type/$vmid/config --noborder 2>/dev/null)
+    mac=$(echo "$config" | grep -Eio '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -n1 | tr '[:upper:]' '[:lower:]')
+
+    if [ -z "$mac" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] MAC address not found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] MAC=$mac"
+
+    # 기본 게이트웨이 주소 확인
+    local gateway
+    gateway=$(ip route | awk '/default/ {print $3}')
+
+    if [ -z "$gateway" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] No gateway found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Gateway: $gateway"
+
+    # 게이트웨이에 연결된 네트워크 인터페이스 찾기
+    local iface
+    iface=$(ip route | grep "default" | awk '{print $5}')
+
+    if [ -z "$iface" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] No valid network interface found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Using interface: $iface"
+
+    # arp-scan을 사용하여 네트워크 스캔을 수행하고, 결과를 디버깅
+    [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan..."
+    local arp_scan_output ip attempt
+    attempt=0
+    ip=""
+
+    while [ "$attempt" -lt 5 ] && [ -z "$ip" ]; do
+        arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
+        [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
+
+        ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
+
+        if [ -z "$ip" ]; then
+            [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac, retrying..."
+            sleepdot 3
+        fi
+
+        attempt=$((attempt + 1))
     done
-    unset IFS
+
+    if [ -z "$ip" ]; then
+        echo "N/A"
+    else
+        [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
+        echo "$ip"
+    fi
 }
+
+
+_vmip() {
+    local vmid="$1"
+    local debug="$2"  # 디버그 여부 확인
+    [ -z "$vmid" ] && echo "Usage: vmip <vmid> [debug]" && return 1
+
+    if [ "$debug" == "debug" ]; then
+        echo "[DEBUG] Looking up VMID: $vmid"
+    fi
+
+    # VM의 노드와 타입 가져오기
+    local info node type
+    info=$(pvesh get /cluster/resources --output-format=json | jq -r ".[] | select(.vmid == $vmid) | \"\(.node) \(.type)\"")
+    node=$(echo "$info" | awk '{print $1}')
+    type=$(echo "$info" | awk '{print $2}')
+
+    if [ -z "$node" ] || [ -z "$type" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] Node or Type not found for VMID $vmid"
+        echo "N/A"
+        return 1
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Node=$node, Type=$type"
+
+    # VM의 설정에서 MAC 주소를 추출
+    local config mac
+    config=$(pvesh get /nodes/$node/$type/$vmid/config --noborder 2>/dev/null)
+    mac=$(echo "$config" | grep -Eio '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -n1 | tr '[:upper:]' '[:lower:]')
+
+    if [ -z "$mac" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] MAC address not found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] MAC=$mac"
+
+    # 기본 게이트웨이 주소 확인
+    local gateway
+    gateway=$(ip route | awk '/default/ {print $3}')
+
+    if [ -z "$gateway" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] No gateway found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Gateway: $gateway"
+
+    # 게이트웨이에 연결된 네트워크 인터페이스 찾기
+    local iface
+    iface=$(ip route | grep "default" | awk '{print $5}')
+
+    if [ -z "$iface" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] No valid network interface found."
+        echo "N/A"
+        return
+    fi
+
+    [ "$debug" == "debug" ] && echo "[DEBUG] Using interface: $iface"
+
+    # arp-scan을 사용하여 네트워크 스캔을 수행하고, 결과를 디버깅
+    [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan..."
+    local arp_scan_output
+    arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
+    [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
+
+    # arp-scan 결과에서 MAC 주소와 일치하는 IP 찾기
+    local ip
+    ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
+
+    if [ -z "$ip" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac"
+        echo "N/A"
+    else
+        [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
+        echo "$ip"
+    fi
+}
+
 
 vms() { vmslistview | cgrepn running -3 ; }
 vm() {
@@ -5880,16 +6030,28 @@ vm() {
         start | stop | shutdown | reboot | reset | suspend | resume)
             pvesh create "$path/status/$action"
 			echo "Done..."
-			echo "$action" | grep -qE "start|stop" && sleepdot 7 && dline && vms
+			echo "$action" | grep -qE "start" && sleepdot 5 && dlines ip checking && vmip $vmid && dline && vms
+			echo "$action" | grep -qE "stop" && sleepdot 5 && dline && vms
         ;;
 
+       # Get current VM config
+        config | conf )
+            pvesh get "$path/config" --noborder | cgrepline  name ostype
+        ;;
+
+		econfig | econf )
+			vi2 $conf
+		;;
         # Get current VM status
-        status | "")
+        status | st | "")
             pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
         ;;
 
+        ip | ipcheck | "")
+            vmip $vmid
+        ;;
         # Enter the VM (LXC: pct enter, QEMU: SSH)
-        enter)
+        enter | e )
             echo "Entering $vmid ($type on $node)...";
             status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"');
             [ "$status" != "running" ] && {
@@ -5992,52 +6154,6 @@ vm() {
 #	[ "$ooldscut" != "pxx" ] && menufunc $ooldscut
 }
 
-_vm() {
-    vmid=$1
-    action=$2
-	if [ ! "$1" ] ; then
-		process_commands pxx
-	fi
-    conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1
-    [ -z "$conf" ] && echo "VM $vmid not found" && return 1
-    node=$(echo "$conf" | awk -F/ '{print $5}')
-    type=$(grep -q qemu <<< "$conf" && echo qemu || echo lxc)
-    path="/nodes/$node/$type/$vmid"
-
-    case "$action" in
-        start|stop|shutdown|reboot|reset|suspend|resume)
-            pvesh create "$path/status/$action"
-            ;;
-        status|"")
-            pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
-            ;;
-        enter)
-            echo "Entering $vmid ($type on $node)..."
-            status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
-            [ "$status" != "running" ] && {
-                echo "Starting VM..."
-                pvesh create "$path/status/start"
-                for i in 1 2 3 4 5; do
-                    sleep 1
-                    status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
-                    [ "$status" = "running" ] && echo "Booting Now... wait..." && { [ "$type" = "lxc" ] && sleepdot 3 || sleepdot 10 ; } && break
-                done
-                [ "$status" != "running" ] && echo "Failed to start VM" && return 1
-            }
-            if [ "$type" = "lxc" ]; then
-                pct enter "$vmid"
-            else
-                qssh "$vmid" root
-            fi
-            ;;
-        *)
-            echo "Unsupported action: $action"
-            return 2
-            ;;
-    esac
-}
-
-
 
 
 
@@ -6117,6 +6233,10 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
 
         # pvesh 명령으로 노드 정보 한 번에 처리
         while IFS='|' read -r node status cpu mem maxmem up; do
+			cpu=${cpu:-0}
+			mem=${mem:-0}
+			maxmem=${maxmem:-1}
+			up=${up:-0}
             cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
             [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || {
                 [ "$cpu_p" -ge $NODE_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"
@@ -6124,8 +6244,8 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
             mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
             max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
             mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}');
-            [ "$mem_p" -ge $NODE_MEM_T ] && mem_c="$RED" || {
-                [ "$mem_p" -ge $NODE_MEM_M ] && mem_c="$YEL" || mem_c="$NC"
+            [ -n "$mem_p" ] && [ "$mem_p" -ge "$NODE_MEM_T" 2>/dev/null ] && mem_c="$RED" || {
+                [ "$mem_p" -ge "$NODE_MEM_M" 2>/dev/null ] && mem_c="$YEL" || mem_c="$NC"
             };
             up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}');
             node_ip_var="node_${node}_ip";
@@ -9503,8 +9623,8 @@ grub40.conf)
         cat >"$file_path" <<EOF
 # --- 내 커스텀 메뉴 삼신기 시작 ---
 
-# 메뉴 1: 로컬 모니터 사용 (Normal)
-menuentry 'Proxmox VE - 로컬 모니터 사용 (Normal)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-normal-$rootuuid' {
+# 메뉴 1: 로컬 모니터 사용 (Normal) $kernelv
+menuentry 'Proxmox VE - 로컬 모니터 사용 (Normal) $kernelv' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-normal-$rootuuid' {
         load_video
         insmod gzio
         insmod part_gpt
@@ -9517,8 +9637,8 @@ menuentry 'Proxmox VE - 로컬 모니터 사용 (Normal)' --class proxmox --clas
         initrd /boot/initrd.img-$kernelv
 }
 
-# 메뉴 2: GPU 골고루 (GVT-g 도전!)
-menuentry 'Proxmox VE - GPU 골고루 (GVT-g 도전!)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-gvtg-$rootuuid' {
+# 메뉴 2: GPU 골고루 (GVT-g 도전!) $kernelv
+menuentry 'Proxmox VE - GPU 골고루 (GVT-g 도전!) $kernelv' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-gvtg-$rootuuid' {
         load_video
         insmod gzio
         insmod part_gpt
@@ -9528,12 +9648,13 @@ menuentry 'Proxmox VE - GPU 골고루 (GVT-g 도전!)' --class proxmox --class g
 
         # 커널/initrd 버전, UUID 수정! GVT-g 옵션 추가: i915.enable_gvt=1
         # linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_gvt=1
+		# gvt-g 불가 -> gvt-d (sriov) 대체
         linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt i915.enable_guc=3 i915.max_vfs=7 vfio_iommu_type1.allow_unsafe_interrupts=1 kvm.ignore_msrs=1 module_blacklist=xe
         initrd /boot/initrd.img-$kernelv
 }
 
-# 메뉴 3: GPU 몰빵 (Passthrough)
-menuentry 'Proxmox VE - GPU 몰빵 (Passthrough)' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-passthrough-$rootuuid' {
+# 메뉴 3: GPU 몰빵 (Passthrough) $kernelv
+menuentry 'Proxmox VE - GPU 몰빵 (Passthrough) $kernelv' --class proxmox --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-passthrough-$rootuuid' {
         load_video
         insmod gzio
         insmod part_gpt
@@ -9543,7 +9664,8 @@ menuentry 'Proxmox VE - GPU 몰빵 (Passthrough)' --class proxmox --class gnu-li
 
         # 커널/initrd 버전, UUID 수정! Passthrough 옵션 추가: vfio-pci.ids=xxxx:xxxx modprobe.blacklist=i915
         # xxxx:xxxx 는 형 N100 iGPU ID 로 변경! (예: 8086:46d1)
-        linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt vfio-pci.ids=$vgaid modprobe.blacklist=i915 nomodeset video=efifb:off
+	linux   /boot/vmlinuz-$kernelv root=UUID=$rootuuid ro quiet intel_iommu=on iommu=pt initcall_blacklist=sysfb_init pcie_acs_override=downstream,multifunction nomodeset video=efifb:off i915.modeset=0 i915.enable_gvt=0
+
         initrd /boot/initrd.img-$kernelv-passthrough
 }
 
