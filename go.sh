@@ -1777,6 +1777,12 @@ ff() {
 debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
 
+
+trapf() {
+    trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+	eval $@
+   	trap - SIGINT
+}
 ensure_cmd() {
 	# ensure_cmd arp net-tools      # arp 명령이 없으면 net-tools 설치
 	# ensure_cmd curl               # curl 명령이 없으면 curl 설치
