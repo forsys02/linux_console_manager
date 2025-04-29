@@ -226,6 +226,7 @@ process_commands() {
                 #echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+            	#trap - SIGINT
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
                 # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
@@ -5902,6 +5903,7 @@ vmip() {
     ip=""
 
     while [ "$attempt" -lt 5 ] && [ -z "$ip" ]; do
+        trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
         arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
         [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
 
@@ -5913,10 +5915,12 @@ vmip() {
         fi
 
         attempt=$((attempt + 1))
+        trap - SIGINT
     done
 
     if [ -z "$ip" ]; then
         echo "N/A"
+		[ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop
     else
         [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
         echo "$ip"
@@ -6028,10 +6032,17 @@ vm() {
     case "$action" in
         # Basic VM control actions
         start | stop | shutdown | reboot | reset | suspend | resume)
-            pvesh create "$path/status/$action"
+            OUTPUT="$( pvesh create "$path/status/$action" 2>&1)"
+			echo "$OUTPUT"
+			if echo "$OUTPUT" | grep -qE "device is already attached|Duplicate ID|vfio.*error|QEMU exited with code 1" && [ "$action" = "start" ] ; then
+			    echo "VM $VMID failed to start. Stopping VM..."
+			    vm $VMID stop
+			else
+				echo "$action" | grep -qE "start" && echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid stop && dline && vms
+				echo "$action" | grep -qE "stop" && echo "Halting..." && sleepdot 5 && dline && vms
+			fi
 			echo "Done..."
-			echo "$action" | grep -qE "start" && sleepdot 5 && dlines ip checking && vmip $vmid && dline && vms
-			echo "$action" | grep -qE "stop" && sleepdot 5 && dline && vms
+
         ;;
 
        # Get current VM config
@@ -6039,7 +6050,7 @@ vm() {
             pvesh get "$path/config" --noborder | cgrepline  name ostype
         ;;
 
-		econfig | econf )
+		econfig | econf | confige | confe | starte | stope)
 			vi2 $conf
 		;;
         # Get current VM status
