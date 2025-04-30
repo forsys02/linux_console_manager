@@ -5914,14 +5914,13 @@ vmipscan() {
 
 vmip() {
     local vmid="$1"
-    local debug="$2" # 디버그 여부 확인
+    local debug="$2"
     [ -z "$vmid" ] && echo "Usage: vmip <vmid> [debug]" && return 1
 
     if [ "$debug" == "debug" ]; then
         echo "[DEBUG] Looking up VMID: $vmid"
     fi
 
-    # VM의 노드와 타입 가져오기
     local info node type
     info=$(pvesh get /cluster/resources --output-format=json | jq -r ".[] | select(.vmid == $vmid) | \"\(.node) \(.type)\"")
     node=$(echo "$info" | awk '{print $1}')
@@ -5935,7 +5934,6 @@ vmip() {
 
     [ "$debug" == "debug" ] && echo "[DEBUG] Node=$node, Type=$type"
 
-    # VM의 설정에서 MAC 주소를 추출
     local config mac
     config=$(pvesh get /nodes/$node/$type/$vmid/config --noborder 2>/dev/null)
     mac=$(echo "$config" | grep -Eio '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -n1 | tr '[:upper:]' '[:lower:]')
@@ -5943,51 +5941,42 @@ vmip() {
     if [ -z "$mac" ]; then
         [ "$debug" == "debug" ] && echo "[DEBUG] MAC address not found."
         echo "N/A"
-        return
+        return 1
     fi
 
     [ "$debug" == "debug" ] && echo "[DEBUG] MAC=$mac"
 
-    # 기본 게이트웨이 주소 확인
-    local gateway
+    local gateway iface
     gateway=$(ip route | awk '/default/ {print $3}')
+    iface=$(ip route | awk '/default/ {print $5}')
 
-    if [ -z "$gateway" ]; then
-        [ "$debug" == "debug" ] && echo "[DEBUG] No gateway found."
+    if [ -z "$gateway" ] || [ -z "$iface" ]; then
+        [ "$debug" == "debug" ] && echo "[DEBUG] Gateway or Interface not found."
         echo "N/A"
-        return
+        return 1
     fi
 
     [ "$debug" == "debug" ] && echo "[DEBUG] Gateway: $gateway"
+    [ "$debug" == "debug" ] && echo "[DEBUG] Interface: $iface"
 
-    # 게이트웨이에 연결된 네트워크 인터페이스 찾기
-    local iface
-    iface=$(ip route | grep "default" | awk '{print $5}')
-
-    if [ -z "$iface" ]; then
-        [ "$debug" == "debug" ] && echo "[DEBUG] No valid network interface found."
-        echo "N/A"
-        return
-    fi
-
-    [ "$debug" == "debug" ] && echo "[DEBUG] Using interface: $iface"
-
-    # arp-scan을 사용하여 네트워크 스캔을 수행하고, 결과를 디버깅
-    [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan..."
-    local arp_scan_output ip attempt
-    attempt=0
-    ip=""
-
+    local ip="" attempt=0
     while [ "$attempt" -lt 5 ] && [ -z "$ip" ]; do
         trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-        arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
-        [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
 
-        ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
+        [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan (attempt $((attempt + 1)))..."
+
+        sudo arp-scan -I "$iface" --localnet 2>/dev/null |
+            awk -v dev="$iface" '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[ \t]+([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/ {
+            print "ip neigh replace "$1" lladdr "$2" dev "dev
+        }' | sudo bash
+
+        ip=$(ip neigh | grep -i "$mac" | awk '{print $1}' | head -n1)
 
         if [ -z "$ip" ]; then
             [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac, retrying..."
             sleepdot 3
+        else
+            [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
         fi
 
         attempt=$((attempt + 1))
@@ -5996,9 +5985,8 @@ vmip() {
 
     if [ -z "$ip" ]; then
         echo "N/A"
-        [ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop
+        [ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop && return 1
     else
-        [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
         echo "$ip"
     fi
 }
@@ -6034,7 +6022,7 @@ _vmip() {
     if [ -z "$mac" ]; then
         [ "$debug" == "debug" ] && echo "[DEBUG] MAC address not found."
         echo "N/A"
-        return
+        return 1
     fi
 
     [ "$debug" == "debug" ] && echo "[DEBUG] MAC=$mac"
@@ -6046,7 +6034,7 @@ _vmip() {
     if [ -z "$gateway" ]; then
         [ "$debug" == "debug" ] && echo "[DEBUG] No gateway found."
         echo "N/A"
-        return
+        return 1
     fi
 
     [ "$debug" == "debug" ] && echo "[DEBUG] Gateway: $gateway"
@@ -6058,24 +6046,36 @@ _vmip() {
     if [ -z "$iface" ]; then
         [ "$debug" == "debug" ] && echo "[DEBUG] No valid network interface found."
         echo "N/A"
-        return
+        return 1
     fi
 
     [ "$debug" == "debug" ] && echo "[DEBUG] Using interface: $iface"
 
     # arp-scan을 사용하여 네트워크 스캔을 수행하고, 결과를 디버깅
     [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan..."
-    local arp_scan_output
-    arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
-    [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
+    local arp_scan_output ip attempt
+    attempt=0
+    ip=""
 
-    # arp-scan 결과에서 MAC 주소와 일치하는 IP 찾기
-    local ip
-    ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
+    while [ "$attempt" -lt 5 ] && [ -z "$ip" ]; do
+        trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+        arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
+        [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
+
+        ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
+
+        if [ -z "$ip" ]; then
+            [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac, retrying..."
+            sleepdot 3
+        fi
+
+        attempt=$((attempt + 1))
+        trap - SIGINT
+    done
 
     if [ -z "$ip" ]; then
-        [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac"
         echo "N/A"
+        [ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop && return 1
     else
         [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
         echo "$ip"
@@ -6113,15 +6113,24 @@ vm() {
         if echo "$OUTPUT" | grep -qE "device is already attached|Duplicate ID|vfio.*error|QEMU exited with code 1" && [ "$action" = "start" ]; then
             echo "VM $VMID failed to start. Stopping VM..."
             vm $VMID stop
+            return 1
         else
-            echo "$action" | grep -qE "start" && echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid stop && dline && vms
-            echo "$action" | grep -qE "stop" && echo "Halting..." && sleepdot 5 && dline && vms
+            if echo "$action" | grep -qE "start"; then
+                echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid stop && dline && vms && echo "$action Done..."
+            elif echo "$action" | grep -qE "stop"; then
+                echo "Halting..." && sleepdot 5 && dline && vms
+                echo "$action Done..."
+            fi
         fi
-        echo "Done..."
-
         ;;
 
-        # Get current VM config
+    startforce)
+        OUTPUT="$(pvesh create "$path/status/start" 2>&1)"
+        echo "$OUTPUT"
+        echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid && dline && vms
+        echo "Done..."
+        ;;
+
     config | conf)
         pvesh get "$path/config" --noborder | cgrepline name ostype | cgrepline1 args hostpci cpu
         ;;
