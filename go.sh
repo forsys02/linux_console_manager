@@ -10,7 +10,7 @@ PARENT_PID=$PPID
 # 부모 프로세스가 go.sh인지 확인
 PARENT_CMD=$(ps -o cmd= -p $PARENT_PID)
 # 부모 프로세스가 go.sh일 경우 재귀 실행 방지
-if [[ "$PARENT_CMD" == *"go.sh"* ]]; then
+if [[ $PARENT_CMD == *"go.sh"* ]]; then
     echo "go.sh가 이미 실행 중입니다. (재귀 실행 방지)"
     exit 1
 fi
@@ -158,17 +158,17 @@ gateway="$(ip route | grep 'default' | awk '{print $3}')"
 export "gateway"
 
 scutp() {
-echo "--------------------------------"
-echo "init scut print"
-            echo "oldscut:$scut"
-            echo "ooldscut:$oldscut"
-            echo "oooldscut:$ooldscut"
-            echo "ooooldscut:$oooldscut"
-			echo "scut:$scut"
-echo "--------------------------------"
-echo "env | grep scut"
-env | grep scut | sort
-echo "--------------------------------"
+    echo "--------------------------------"
+    echo "init scut print"
+    echo "oldscut:$scut"
+    echo "ooldscut:$oldscut"
+    echo "oooldscut:$ooldscut"
+    echo "ooooldscut:$oooldscut"
+    echo "scut:$scut"
+    echo "--------------------------------"
+    echo "env | grep scut"
+    env | grep scut | sort
+    echo "--------------------------------"
 }
 #scutp
 
@@ -226,7 +226,7 @@ process_commands() {
                 #echo "ctrl c trap process..."
                 #trap 'stty sane' SIGINT
                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-            	#trap - SIGINT
+                #trap - SIGINT
                 # pipemenu 로 들어오는 값은 eval 이 실행되면서 선택이 되어 취소가 불가능하다.
                 # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
@@ -283,7 +283,8 @@ process_commands() {
         fi
 
         #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [60s.Enter] " && read -re -t 60 x ; }
-        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -re x; }
+        #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -re x; }
+        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -n1 -r; }
     else
         echo "$command"
         echo "process_commands -> Canceled..."
@@ -315,7 +316,7 @@ declare -a shortcutarr shortcutstr
 # exec go.sh shortcut // or menufunc {submenu_sys} 제목 or menufunc {} 제목 choice
 
 menufunc() {
-	#scutp
+    #scutp
     #set -x
     # 초기 메뉴는 인수없음, 인수 있을경우 서브 메뉴진입
     # $1 $2 가 동시에 인수로 들어와야 작동
@@ -375,22 +376,22 @@ menufunc() {
             scut="m"
             title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
-		updatescut() {
-        					[ "$scut" ] && {
-                            #[ "$scut" ] && [ "$scut" != "m" ] && {
-            [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
-            [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
-            [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
-            #[ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
-            #[ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
-            #[ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
-            #[ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
-	        }
-       		#flow="$oooldscut>$ooldscut>$oldscut>$scut"
-       		flow="$oooldscut>$ooldscut>$oldscut"
-		}
-		updatescut
+        updatescut() {
+            [ "$scut" ] && {
+                #[ "$scut" ] && [ "$scut" != "m" ] && {
+                [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" &&
+                    [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" &&
+                    [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" &&
+                    [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
+                #[ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
+                #[ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
+                #[ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
+                #[ "$oooldscut" != "m" ] && [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
+            }
+            #flow="$oooldscut>$ooldscut>$oldscut>$scut"
+            flow="$oooldscut>$ooldscut>$oldscut"
+        }
+        updatescut
 
         # 메인메뉴에서 서브 메뉴의 shortcut 도 사용할수 있도록 기능개선
         # 쇼트컷 배열생성
@@ -496,12 +497,12 @@ menufunc() {
                         CYN
                         echo "$output"
                         RST
-						#if [ -f /dev/shm/dlines ] ; then
-						#	dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
-							#dline
-						#else
-    	                    echo "=============================================="
-						#fi
+                        #if [ -f /dev/shm/dlines ] ; then
+                        #	dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
+                        #dline
+                        #else
+                        echo "=============================================="
+                        #fi
                     }; }
                 )
             fi
@@ -530,7 +531,7 @@ menufunc() {
 
                 # titleansi
                 # items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
-				# > 빨간색 ooldscut 진한흰색
+                # > 빨간색 ooldscut 진한흰색
                 items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m>\1\o033[0m/")")
 
                 printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
@@ -684,8 +685,8 @@ menufunc() {
                     # readxx $LINENO chosen_command_sub $chosen_command_sub
                     # 한줄짜리
                     if [ $num_commands -eq 1 ]; then
-                            scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
-							updatescut
+                        scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
+                        updatescut
                         # relay
                         chosen_command=${chosen_commands[0]}
                     elif [ $num_commands -gt 1 ]; then
@@ -699,7 +700,7 @@ menufunc() {
 
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
-							updatescut
+                            updatescut
 
                             echo -n "=============================================="
                             echo -n " :: $cmdloop"
@@ -715,19 +716,19 @@ menufunc() {
                                 [ -n "$output" ] && {
                                     [ "$(echo "$output" | grep -E '0m')" ] && {
                                         echo "$output"
-										# cmdline menu_list print -pre_comm
+                                        # cmdline menu_list print -pre_comm
                                         echo "=============================================="
                                     } || {
                                         CYN
                                         echo "$output"
                                         RST
-						#if [ -f /dev/shm/dlines ] ; then
-							#dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
-						#	dline
-							#echo
-						#else
-    	                    echo "=============================================="
-						#fi
+                                        #if [ -f /dev/shm/dlines ] ; then
+                                        #dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
+                                        #	dline
+                                        #echo
+                                        #else
+                                        echo "=============================================="
+                                        #fi
                                     }
                                     #sleep 0.1
                                 }
@@ -830,7 +831,7 @@ menufunc() {
                                     -e '/^#/! s/\(hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
                                     -e '/^#/! s/\(^: [^;]*\|^\!\!\! : [^;]\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
                                     -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
-                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[32m\1\x1b[0m/g' `# start enable green` \
+                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
@@ -859,7 +860,7 @@ menufunc() {
                                     #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     # flow 메뉴 하부 메뉴 종료
                                     [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to flow menu... [$ooldscut]" &&
-                                	menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
+                                        menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
@@ -1223,7 +1224,7 @@ menufunc() {
                             fi # end of cfm=y
 
                             # 해당 메뉴의 선택명령이 딱 하나일때 바로 실행
-                        	# 한줄짜리 한줄만 하나만
+                            # 한줄짜리 한줄만 하나만
                             if ((${#cmd_array[@]} == 1)); then
                                 [ ! "$cancel" == "yes" ] && process_commands "$cmd" "$cfm"
                             else
@@ -1275,7 +1276,7 @@ menufunc() {
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
                     #[[ -n $cmd_choice && ( $cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/} ) ]] || ! (( cmd_choice >= 1 && cmd_choice <= 99 )) 2>/dev/null &&
-                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) || "$cmd_choice" -ge 100 ]] &&
+                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) || $cmd_choice -ge 100 ]] &&
                         {
                             YEL1
                             echo
@@ -1398,7 +1399,7 @@ menufunc() {
 
                         # --- Default block for complex checks and fallback ---
                         *)
-							#readxy "cmd: [$cmd_choice]"
+                            #readxy "cmd: [$cmd_choice]"
 
                             # Check 1: Shortcut menu jump? (Requires $cmd_choice1 empty & match in $shortcutstr)
                             if [[ -z $cmd_choice1 ]] && echo "$shortcutstr" | grep -q "@@@$cmd_choice|"; then
@@ -1426,12 +1427,12 @@ menufunc() {
                                     continue
                                 }
 
-
-							# Check 2-1: proxmox vm enter? 100~
-							elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
-								dline ; vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
-								readxy "Proxmox vm --> $(RED1)$cmd_choice$(RST) Enter" && enter "$cmd_choice"
-							    continue
+                            # Check 2-1: proxmox vm enter? 100~
+                            elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+                                dline
+                                vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
+                                readxy "Proxmox vm --> $(RED1)$cmd_choice$(RST) Enter" && enter "$cmd_choice"
+                                continue
                             # Check 3: Valid Linux command? (Not purely numeric and exists)
                             #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
                             elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "${cmd_choice%%[|;]*}" &>/dev/null; then
@@ -1655,10 +1656,11 @@ menufunc() {
                     choice=""
                     #readxx $LINENO shortcut move choice $choice
 
-				# Check : proxmox vm enter? 100~
-				elif [[ -z $choice1 ]] && expr "$choice" : '^[0-9]\+$' >/dev/null && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
-					dline ; vmslistview | cgrepn running -3 | cgrepn1 $choice 3
-					readxy "Proxmox vm --> $(RED1)$choice$(RST) Enter" && enter "$choice"
+                # Check : proxmox vm enter? 100~
+                elif [[ -z $choice1 ]] && expr "$choice" : '^[0-9]\+$' >/dev/null && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+                    dline
+                    vmslistview | cgrepn running -3 | cgrepn1 $choice 3
+                    readxy "Proxmox vm --> $(RED1)$choice$(RST) Enter" && enter "$choice"
 
                 # 실제 리눅스 명령이 들어온 경우 실행
                 # Check: is not purely numeric AND is a valid command
@@ -1720,7 +1722,7 @@ menufunc() {
 
 # 함수의 내용을 출력하는 함수 ex) ff atqq
 fff() { declare -f "$@"; }
-ffe() { conff "^$1()" ; }
+ffe() { conff "^$1()"; }
 
 ff() {
     if [ -z "$1" ]; then
@@ -1774,22 +1776,21 @@ ff() {
     unset _ff_seen_funcs
 }
 
-debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
-debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut ; }
-
+debugon() { sed -i '0,/#debug=y/s/#debug=y/debug=y/' $base/go.sh && exec $base/go.sh $scut; }
+debugoff() { sed -i '0,/debug=y/s/debug=y/#debug=y/' $base/go.sh && exec $base/go.sh $scut; }
 
 trapf() {
     trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-	eval $@
-   	trap - SIGINT
+    eval $@
+    trap - SIGINT
 }
 ensure_cmd() {
-	# ensure_cmd arp net-tools      # arp 명령이 없으면 net-tools 설치
-	# ensure_cmd curl               # curl 명령이 없으면 curl 설치
-	# ensure_cmd ifconfig net-tools # ifconfig도 net-tools 소속
+    # ensure_cmd arp net-tools      # arp 명령이 없으면 net-tools 설치
+    # ensure_cmd curl               # curl 명령이 없으면 curl 설치
+    # ensure_cmd ifconfig net-tools # ifconfig도 net-tools 소속
 
     local cmd="$1"
-    local pkg="${2:-$1}"  # 설치할 패키지 이름, 없으면 cmd 이름과 동일
+    local pkg="${2:-$1}" # 설치할 패키지 이름, 없으면 cmd 이름과 동일
 
     if ! command -v "$cmd" >/dev/null 2>&1; then
         nohup bash -c "apt install -y $pkg" >/dev/null 2>&1
@@ -2044,14 +2045,22 @@ cgrepn1() {
     ' -- -search_strs="${search_strs[*]}" -num_cols="$num_cols"
 }
 
-
 # 필드의 공백을 유지하면서 검색어 색칠(python)
 cgrepfN() {
-    [ $# -lt 2 ] && { echo "Usage: cgrepfN <field> <word>..." >&2; return 1; }
-    expr "$1" : '^[0-9]\+$' >/dev/null && [ "$1" -gt 0 ] || { echo "Error: Field must be a positive number" >&2; return 1; }
+    [ $# -lt 2 ] && {
+        echo "Usage: cgrepfN <field> <word>..." >&2
+        return 1
+    }
+    expr "$1" : '^[0-9]\+$' >/dev/null && [ "$1" -gt 0 ] || {
+        echo "Error: Field must be a positive number" >&2
+        return 1
+    }
     field=$1
     shift
-    [ $# -eq 0 ] && { echo "Error: No valid words" >&2; return 1; }
+    [ $# -eq 0 ] && {
+        echo "Error: No valid words" >&2
+        return 1
+    }
     python3 -c '
 import sys, re
 field = int(sys.argv[1]) - 1
@@ -2481,7 +2490,10 @@ cpipe() {
         clr_yel = "\033[1;33m"
         clr_grn = "\033[1;32m"
         clr_grn0 = "\033[0;32m"
-        clr_blu = "\033[1;36m"
+        clr_blu = "\033[1;34m"
+        clr_blu0 = "\033[0;34m"
+        clr_cyn = "\033[1;36m"
+        clr_cyn0 = "\033[0;36m"
         clr_mag = "\033[1;35m"
 
         # --- 경로 패턴 정의 (cpipe에서 성공) ---
@@ -2497,16 +2509,16 @@ cpipe() {
 
         # --- 경로 강조 (cpipe 로직, $0에 직접 적용) ---
         if ($0 ~ pat_url) {
-            gsub(pat_url, clr_grn "&" clr_rst, $0)
+            gsub(pat_url, clr_cyn0 "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_paren) {
-            gsub(pat_path_in_paren, clr_grn "&" clr_rst, $0)
+            gsub(pat_path_in_paren, clr_cyn0 "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_in_quotes) {
-             gsub(pat_path_in_quotes, clr_grn "&" clr_rst, $0)
+             gsub(pat_path_in_quotes, clr_cyn0 "&" clr_rst, $0)
         }
         if ($0 ~ pat_path_standalone) {
-            gsub(pat_path_standalone, clr_grn "&" clr_rst, $0)
+            gsub(pat_path_standalone, clr_cyn0 "&" clr_rst, $0)
         }
 
         # --- IP 주소 강조 (old_cpipe 원본 복원) ---
@@ -2538,10 +2550,10 @@ cpipe() {
         }
 
         # --- journalctl 특화 강조 (old_cpipe 원본 유지) ---
-        gsub(/\[  OK  \]/, clr_grn "[  OK  ]" clr_rst, $0)
+        gsub(/\[  OK  \]/, clr_cyn "[  OK  ]" clr_rst, $0)
         gsub(/\[FAILED\]/, clr_red "[FAILED]" clr_rst, $0)
         gsub(/\[WARN\]/, clr_yel "[WARN]" clr_rst, $0)
-        gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst, $0)
+        gsub(/\[INFO\]/, clr_cyn "[INFO]" clr_rst, $0)
 
         # --- 기타 강조 (old_cpipe 원본 유지) ---
         gsub(/denied|failed|error|authentication failure|timed out|unreachable/, clr_red "&" clr_rst, $0)
@@ -2555,63 +2567,6 @@ cpipe() {
         # 최종 결과 출력 (개행 보장)
         printf "%s\n", $0
     }'
-}
-
-old_cpipe() {
-    awk '
-BEGIN {
-    clr_rst = "\033[0m"
-    clr_red = "\033[1;31m"
-    clr_yel = "\033[1;33m"
-    clr_grn = "\033[1;32m"
-    clr_blu = "\033[1;36m"
-    clr_mag = "\033[1;35m"
-}
-{
-    line = $0
-
-    # --- 기본 강조 ---
-    gsub(/https?:\/\/[^ ]+/, clr_blu "&" clr_rst, line)
-    gsub(/ \/[^ )|]+/, clr_blu "&" clr_rst, line)
-
-    # --- IP 주소 강조 ---
-    while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
-        IP = substr(line, RSTART, RLENGTH)
-        line = substr(line, RSTART+RLENGTH)
-        Prefix = IP; sub(/\.[0-9]+$/, "", Prefix)
-        if (!(Prefix in FC)) {
-            BN[Prefix] = 1
-            if (TC < 6) {
-                FC[Prefix] = 36 - TC
-            } else {
-                do {
-                    FC[Prefix] = 30 + (TC - 6) % 8
-                    BC[Prefix] = (40 + (TC - 6)) % 48
-                    TC++
-                } while (FC[Prefix] == BC[Prefix] - 10)
-                if (FC[Prefix] == 37) FC[Prefix]--
-            }
-            TC++
-        }
-        if (BC[Prefix] > 0)
-            CP = sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP)
-        else
-            CP = sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP)
-        gsub(IP, CP, $0)
-    }
-
-    # --- journalctl 특화 강조 ---
-    gsub(/\[  OK  \]/, clr_grn "[  OK  ]" clr_rst)
-    gsub(/\[FAILED\]/, clr_red "[FAILED]" clr_rst)
-    gsub(/\[WARN\]/, clr_yel "[WARN]" clr_rst)
-    gsub(/\[INFO\]/, clr_blu "[INFO]" clr_rst)
-
-    gsub(/denied|authentication failure|timed out|unreachable/, clr_red "&" clr_rst)
-    gsub(/UID=[0-9]+|PID=[0-9]+|exe=[^ ]+/, clr_mag "&" clr_rst)
-    gsub(/[0-9]{2}:[0-9]{2}:[0-9]{2}/, clr_yel "&" clr_rst)
-
-    print $0
-}'
 }
 
 # cpipef() { sed -E "s/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;33m&\x1B[0m/g;  s/(https?:\/\/[^ ]+)/\x1B[1;36;04m&\x1B[0m/g" ; }
@@ -2655,13 +2610,16 @@ pipemenu() {
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     IFS=$' \n|'
     #items=$( while read -r line; do awk '{print $0}' < <(echo "$line"); done ; echo "Cancel" ; )
-	items="$(cat; echo Cancel)"
+    items="$(
+        cat
+        echo Cancel
+    )"
     #{ [ "$items" ] && select item in $items; do [ -n "$item" ] && echo "$item" && export pipeitem="$item" && break; done </dev/tty; }
-	# Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
-	#{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
-	{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    # Cancel 번호가 자꾸 바껴서 0번 누르면 Cancel 처리 되게 조정
+    #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    { [ "$items" ] && select item in $items; do [[ $REPLY == 0 || $REPLY == [Qq] || -z $item ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
 
-	#[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
+    #[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
     unset IFS
     unset PS3
 }
@@ -2672,9 +2630,12 @@ pipemenu1() {
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
-    items=$(while read -r line; do echo "$line" | awk '{print $1}'; done; echo Cancel)
+    items=$(
+        while read -r line; do echo "$line" | awk '{print $1}'; done
+        echo Cancel
+    )
     #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
-    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    { [ "$items" ] && select item in $items; do [[ $REPLY == 0 || $REPLY == [Qq] || -z $item ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset PS3
 }
 _pipemenu1() {
@@ -2697,9 +2658,12 @@ pipemenulist() {
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     IFS=$'\n'
     export pipeitem=""
-    items=$(cat; echo Cancel)
+    items=$(
+        cat
+        echo Cancel
+    )
     #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
-    { [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 || "$REPLY" == [Qq] || -z "$item" ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
+    { [ "$items" ] && select item in $items; do [[ $REPLY == 0 || $REPLY == [Qq] || -z $item ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset IFS
     unset PS3
 }
@@ -2952,10 +2916,9 @@ eip4() { eipf 4; }
 eip5() { eipf 5; }
 
 nodeip() {
-  local node="$1"
-  jq -r --arg node "$node" '.nodelist[$node].ip // empty' /etc/pve/.members
+    local node="$1"
+    jq -r --arg node "$node" '.nodelist[$node].ip // empty' /etc/pve/.members
 }
-
 
 # proxmox vmslist
 
@@ -3241,22 +3204,22 @@ oldst() {
 }
 # shortcut array view
 str() {
-	if [ "$1" ] ; then
-		printarr shortcutarr | grep "%%%" | awk -F'%%%' '{print $2}' | grep $1 | cgrep $1
-	else
-	    st
-	    echo
-    	printarr shortcutarr | cgrep1 @@@ | less -r
-	fi
+    if [ "$1" ]; then
+        printarr shortcutarr | grep "%%%" | awk -F'%%%' '{print $2}' | grep $1 | cgrep $1
+    else
+        st
+        echo
+        printarr shortcutarr | cgrep1 @@@ | less -r
+    fi
 }
-search() { [ "$1" ] && str $1 ; }
+search() { [ "$1" ] && str $1; }
 
 # flow save and exec go.sh
 savescut() {
-:;
-	#scutp
+    :
+    #scutp
     #export scut=$scut oldscut=$oldscut ooldscut=$ooldscut oooldscut=$oooldscut ooooldscut=$ooooldscut
-	#dline ; env | grep scut
+    #dline ; env | grep scut
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
@@ -3623,7 +3586,7 @@ alarm() {
     # 인수로 넘어올때 "$1" "$2" // $2에 read 나머지 모두
     # 인수로 넘어올때 "$1" "$2" "$3" ... // 두가지 형태 존재
 
-	ensure_cmd atq at
+    ensure_cmd atq at
 
     local input="$1"
     shift
@@ -4040,7 +4003,7 @@ qssh() {
 
     local vmid="$1"
     local user="${2:-$default_user}"
-    [[ -z "$user" ]] && echo "Error: SSH username cannot be empty." && return 1
+    [[ -z $user ]] && echo "Error: SSH username cannot be empty." && return 1
 
     echo "=============================================="
     echo "--- Processing qssh for VM $vmid (User: $user) ---"
@@ -4050,7 +4013,7 @@ qssh() {
     node=$(pvesh get /cluster/resources --output-format=json |
         jq -r ".[] | select(.type==\"qemu\" and .vmid==$vmid) | .node")
 
-    if [[ -z "$node" ]]; then
+    if [[ -z $node ]]; then
         echo "Error: VM $vmid not found in cluster."
         return 1
     fi
@@ -4065,7 +4028,7 @@ qssh() {
     local bridge
     bridge=$(echo "$config_output" | sed -n 's/.*bridge=\([^, ]\+\).*/\1/p' | head -n1)
 
-    if [[ -z "$mac" || -z "$bridge" ]]; then
+    if [[ -z $mac || -z $bridge ]]; then
         echo "Error: Failed to extract MAC or bridge from config."
         return 1
     fi
@@ -4078,7 +4041,7 @@ qssh() {
     local ip
     ip=$(arp -n | grep -i "$lower_mac" | awk '{print $1}' | head -n1)
 
-    if [[ -z "$ip" ]]; then
+    if [[ -z $ip ]]; then
         echo "  > Not found in ARP cache. Trying arp-scan on $bridge..."
         if ! command -v arp-scan &>/dev/null; then
             echo "Error: arp-scan not found. Please install it (e.g. apt install arp-scan)."
@@ -4088,7 +4051,7 @@ qssh() {
         arp_out=$(arp-scan --interface="$bridge" --localnet --numeric --quiet --timeout=$((arp_scan_timeout * 1000)) 2>/dev/null | grep -i "$lower_mac")
         ip=$(echo "$arp_out" | awk '{print $1}' | head -n1)
 
-        if [[ -z "$ip" ]]; then
+        if [[ -z $ip ]]; then
             echo "Error: MAC $lower_mac not found on $bridge via arp-scan."
             return 1
         fi
@@ -4233,7 +4196,7 @@ enter() {
     local vmid="$1"
     local default_user="root"
 
-	if [ -z "$vmid" ] || ! expr "$vmid" : '^[0-9]\+$' >/dev/null; then
+    if [ -z "$vmid" ] || ! expr "$vmid" : '^[0-9]\+$' >/dev/null; then
         echo "Usage: enter <vmid>"
         return 1
     fi
@@ -4246,26 +4209,24 @@ enter() {
     vmtype=$(pvesh get /cluster/resources --output-format=json |
         jq -r ".[] | select(.vmid == $vmid) | .type")
 
-    if [[ -z "$node" || -z "$vmtype" ]]; then
+    if [[ -z $node || -z $vmtype ]]; then
         echo "❌ VMID $vmid not found in cluster."
         return 1
     fi
 
     echo "  > VM $vmid is a $vmtype on node $node"
 
-    if [[ "$vmtype" == "lxc" ]]; then
-        echo "������ Entering LXC container via pct..."
+    if [[ $vmtype == "lxc" ]]; then
+        echo ">>> Entering LXC container via pct..."
         pct enter "$vmid"
-    elif [[ "$vmtype" == "qemu" ]]; then
-        echo "������️  Connecting via qssh..."
+    elif [[ $vmtype == "qemu" ]]; then
+        echo ">>> Connecting via qssh..."
         qssh "$vmid" "$default_user"
     else
         echo "⚠️ Unsupported type: $vmtype"
         return 1
     fi
 }
-
-
 
 # assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
@@ -4732,7 +4693,7 @@ change() {
 }
 
 change1() {
-  sed -i "0,/${2}/s/${2}/${3}/" "$1"
+    sed -i "0,/${2}/s/${2}/${3}/" "$1"
 }
 
 hash_add() {
@@ -5436,11 +5397,11 @@ vi2() {
             if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! } zb'" "$1" || nano "$1"; else vim "$1" || vi "$1"; fi
         else
             # $2 대신 $3 를 찾음
-            if [ -n "$3" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$3\]' | silent! normal! } zb'" "$1" || nano "$1" ; else vim "$1" || vi "$1"; fi
+            if [ -n "$3" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$3\]' | silent! normal! } zb'" "$1" || nano "$1"; else vim "$1" || vi "$1"; fi
         fi
     else
         # 문자열 찾고 그 위치의 처음에서 편집
-        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zt'" "$1" || nano "$1" ; else vim "$1" || vi "$1" || nano "$1" ; fi
+        if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]' | silent! normal! zt'" "$1" || nano "$1"; else vim "$1" || vi "$1" || nano "$1"; fi
     fi
 }
 vi2e() {
@@ -5462,75 +5423,83 @@ vi2a() {
 }
 
 # server-status
-weblog() { lynx --dump --width=260 http://localhost/server-status | cpipe | less -RX ; }
+weblog() { lynx --dump --width=260 http://localhost/server-status | cpipe | less -RX; }
 
 logview() {
-  local logfile="$1" mode="$2"
-  [[ -f "$logfile" ]] || { echo "[logview] File not found: $logfile" >&2; return 1; }
+    local logfile="$1" mode="$2"
+    [[ -f $logfile ]] || {
+        echo "[logview] File not found: $logfile" >&2
+        return 1
+    }
 
-  if [[ "$mode" == "f" ]]; then
-    trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-    tail -f "$logfile" | cpipe
-    trap - SIGINT
-  else
-    tac "$logfile" | cpipe | less -RX
-  fi
+    if [[ $mode == "f" ]]; then
+        trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+        tail -f "$logfile" | cpipe
+        trap - SIGINT
+    else
+        tac "$logfile" | cpipe | less -RX
+    fi
 }
 
-webloga()  { logview /var/log/apache2/access.log ; }
-weblogaf() { logview /var/log/apache2/access.log f ; }
-webloge()  { logview /var/log/apache2/error.log ; }
-weblogef() { logview /var/log/apache2/error.log f ; }
-weblogff() { `declare -F | awk '{print $3}' | grep weblog | sort | pipemenu` ; }
-ftplog()   { logview /var/log/xferlog ; }
-ftplogf()  { logview /var/log/xferlog f ; }
-maillog()  { logview /var/log/mail.log ; }
-maillogf() { logview /var/log/mail.log f ; }
-syslog()   { logview /var/log/syslog ; }
-syslogf()  { logview /var/log/syslog f ; }
-authlog()  { logview /var/log/auth.log ; }
-authlogf() { logview /var/log/auth.log f ; }
-dpkglog()  { logview /var/log/dpkg.log ; }
-dpkglogf() { logview /var/log/dpkg.log f ; }
-kernlog()  { logview /var/log/kern.log ; }
-kernlogf() { logview /var/log/kern.log f ; }
-bootlog() { dmesg | cpipe | less -RX ; }
-
+webloga() { logview /var/log/apache2/access.log; }
+weblogaf() { logview /var/log/apache2/access.log f; }
+webloge() { logview /var/log/apache2/error.log; }
+weblogef() { logview /var/log/apache2/error.log f; }
+weblogff() { $(declare -F | awk '{print $3}' | grep weblog | sort | pipemenu); }
+ftplog() { logview /var/log/xferlog; }
+ftplogf() { logview /var/log/xferlog f; }
+maillog() { logview /var/log/mail.log; }
+maillogf() { logview /var/log/mail.log f; }
+syslog() { logview /var/log/syslog; }
+syslogf() { logview /var/log/syslog f; }
+authlog() { logview /var/log/auth.log; }
+authlogf() { logview /var/log/auth.log f; }
+dpkglog() { logview /var/log/dpkg.log; }
+dpkglogf() { logview /var/log/dpkg.log f; }
+kernlog() { logview /var/log/kern.log; }
+kernlogf() { logview /var/log/kern.log f; }
+bootlog() { dmesg | cpipe | less -RX; }
 
 # journalctl
-log() { journalctl -e ; }
-loge() { journalctl -rp warning ; }
-logu() { journalctl -r -u $( systemctl list-unit-files --type=service|grep enable|awk -F'.service' '{print $1}'|pipemenu ) ; }
-logf() { trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT ; journalctl -f ; trap - SIGINT ; }
+log() { journalctl -e; }
+loge() { journalctl -rp warning; }
+logu() { journalctl -r -u $(systemctl list-unit-files --type=service | grep enable | awk -F'.service' '{print $1}' | pipemenu); }
+logf() {
+    trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+    journalctl -f
+    trap - SIGINT
+}
 
 # select function
-logsff() { `declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | pipemenu` ; }
-logsfff() { for i in $( declare -F | awk '{print $3}' | grep log | grep -v dialog | sort ) ; do fff $i ; done | cpipe | less -RX ; }
+logsff() { $(declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | pipemenu); }
+logsfff() { for i in $(declare -F | awk '{print $3}' | grep log | grep -v dialog | sort); do fff $i; done | cpipe | less -RX; }
 
 # select & logview
-weblogs() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu ) && [ -f $log ] && logview $log ; }
-weblogsf() { log=$( find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu ) && [ -f $log ] && logview $log f ; }
-logs() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log ; }
-logsf() { log=$( find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu ) && logview $log f ; }
+weblogs() { log=$(find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu) && [ -f $log ] && logview $log; }
+weblogsf() { log=$(find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu) && [ -f $log ] && logview $log f; }
+logs() { log=$(find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu) && logview $log; }
+logsf() { log=$(find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu) && logview $log f; }
 
 # 활성화된 서비스 목록에서 선택
-ss()  { systemctl status $(systemctl list-unit-files --type=service | grep enabled | awk -F'.service' '{print $1}' | pipemenu1); }
-ssg() { [ -z "$1" ] && echo "Usage: ssg <keyword>" && return 1 ; systemctl status $(systemctl list-unit-files --type=service | grep "$1" | awk -F'.service' '{print $1}') ; }
+ss() { systemctl status $(systemctl list-unit-files --type=service | grep enabled | awk -F'.service' '{print $1}' | pipemenu1); }
+ssg() {
+    [ -z "$1" ] && echo "Usage: ssg <keyword>" && return 1
+    systemctl status $(systemctl list-unit-files --type=service | grep "$1" | awk -F'.service' '{print $1}')
+}
 # 개별 주요 서비스들
-ssa() { systemctl status $(systemctl | grep -Eo 'apache2|nginx' | head -n1) ; }           # Apache/nginx
-sss() { systemctl status $(systemctl | grep -Eo 'sshd?' | head -n1) ; }              # SSH
-ssn() { systemctl status $(systemctl | grep -Eo 'networking|netplan' | head -n1) ; }              # network
-ssd() { systemctl status docker; }            # Docker
-ssb() { systemctl status fail2ban; }          # Fail2Ban
-ssu() { systemctl status ufw; }               # UFW Firewall
-ssc() { systemctl status cron; }              # Cron
+ssa() { systemctl status $(systemctl | grep -Eo 'apache2|nginx' | head -n1); }      # Apache/nginx
+sss() { systemctl status $(systemctl | grep -Eo 'sshd?' | head -n1); }              # SSH
+ssn() { systemctl status $(systemctl | grep -Eo 'networking|netplan' | head -n1); } # network
+ssd() { systemctl status docker; }                                                  # Docker
+ssb() { systemctl status fail2ban; }                                                # Fail2Ban
+ssu() { systemctl status ufw; }                                                     # UFW Firewall
+ssc() { systemctl status cron; }                                                    # Cron
 # 자동 감지형
-ssm() { systemctl status $(systemctl | grep -Eo 'mariadb|mysql' | head -n1); }                    # MySQL or MariaDB
-ssp() { systemctl status $(systemctl | grep -o 'php[0-9.]*-fpm' | sort -Vr | head -n1); }         # 최신 PHP-FPM
-ssf() { systemctl status $(systemctl list-unit-files --type=service | grep ftp | awk -F'.service' '{print $1}') ; }          # ftp
+ssm() { systemctl status $(systemctl | grep -Eo 'mariadb|mysql' | head -n1); }                                     # MySQL or MariaDB
+ssp() { systemctl status $(systemctl | grep -o 'php[0-9.]*-fpm' | sort -Vr | head -n1); }                          # 최신 PHP-FPM
+ssf() { systemctl status $(systemctl list-unit-files --type=service | grep ftp | awk -F'.service' '{print $1}'); } # ftp
 # Proxmox 관련 (사용 중이라면)
-ssv()    { systemctl status $( echo pvedaemon pveproxy qmeventd lxc | pipemenu) ; }
-
+ssv() { systemctl status $(echo pvedaemon pveproxy qmeventd lxc | pipemenu); }
 
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
@@ -5597,8 +5566,8 @@ hostinfo() {
 
 # ipban & ipallow
 ipcheck() { echo "$1" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
-ii() { curl ipinfo.io/$1 ; }
-iii() { whois $1 ; }
+ii() { curl ipinfo.io/$1; }
+iii() { whois $1; }
 ipbanlog() {
     echo -e "\033[1;36m 최근 차단된 IP 관련 로그 (Fail2ban + iptables)\033[0m"
     journalctl -u fail2ban -n 100 --no-pager | grep -iE 'ban|drop|fail|denied' | cpipe | less -RX
@@ -5844,7 +5813,7 @@ vmipscan() {
 
 vmip() {
     local vmid="$1"
-    local debug="$2"  # 디버그 여부 확인
+    local debug="$2" # 디버그 여부 확인
     [ -z "$vmid" ] && echo "Usage: vmip <vmid> [debug]" && return 1
 
     if [ "$debug" == "debug" ]; then
@@ -5926,17 +5895,16 @@ vmip() {
 
     if [ -z "$ip" ]; then
         echo "N/A"
-		[ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop
+        [ "$debug" == "stop" ] && echo "Unable to find IP, shutting down" && dlines vm $vmid stop && vm $vmid stop
     else
         [ "$debug" == "debug" ] && echo "[DEBUG] Found IP: $ip"
         echo "$ip"
     fi
 }
 
-
 _vmip() {
     local vmid="$1"
-    local debug="$2"  # 디버그 여부 확인
+    local debug="$2" # 디버그 여부 확인
     [ -z "$vmid" ] && echo "Usage: vmip <vmid> [debug]" && return 1
 
     if [ "$debug" == "debug" ]; then
@@ -6013,325 +5981,320 @@ _vmip() {
     fi
 }
 
-
-vms() { vmslistview | cgrepn running -3 ; }
+vms() { vmslistview | cgrepn running -3; }
 vm() {
-	unset -v vmid
-    vmid=$1;
-    action=$2;
+    unset -v vmid
+    vmid=$1
+    action=$2
 
     # If no VMID is provided, show available commands
     if [ -z "$1" ]; then
-        process_commands pxx;
-        return;
-    fi;
+        process_commands pxx
+        return
+    fi
 
     # Locate the configuration file for the VM
-    conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1;
-    [ -z "$conf" ] && echo "VM $vmid not found" && return 1;
+    conf=$(find /etc/pve/ -name "$vmid.conf" | head -n1) || return 1
+    [ -z "$conf" ] && echo "VM $vmid not found" && return 1
 
     # Extract node name and VM type (qemu or lxc)
-    node=$(echo "$conf" | awk -F/ '{print $5}');
-    type=$(grep -q qemu <<< "$conf" && echo qemu || echo lxc);
-    path="/nodes/$node/$type/$vmid";
+    node=$(echo "$conf" | awk -F/ '{print $5}')
+    type=$(grep -q qemu <<<"$conf" && echo qemu || echo lxc)
+    path="/nodes/$node/$type/$vmid"
 
     case "$action" in
-        # Basic VM control actions
-        start | stop | shutdown | reboot | reset | suspend | resume)
-            OUTPUT="$( pvesh create "$path/status/$action" 2>&1)"
-			echo "$OUTPUT"
-			if echo "$OUTPUT" | grep -qE "device is already attached|Duplicate ID|vfio.*error|QEMU exited with code 1" && [ "$action" = "start" ] ; then
-			    echo "VM $VMID failed to start. Stopping VM..."
-			    vm $VMID stop
-			else
-				echo "$action" | grep -qE "start" && echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid stop && dline && vms
-				echo "$action" | grep -qE "stop" && echo "Halting..." && sleepdot 5 && dline && vms
-			fi
-			echo "Done..."
+    # Basic VM control actions
+    start | stop | shutdown | reboot | reset | suspend | resume)
+        OUTPUT="$(pvesh create "$path/status/$action" 2>&1)"
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -qE "device is already attached|Duplicate ID|vfio.*error|QEMU exited with code 1" && [ "$action" = "start" ]; then
+            echo "VM $VMID failed to start. Stopping VM..."
+            vm $VMID stop
+        else
+            echo "$action" | grep -qE "start" && echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid stop && dline && vms
+            echo "$action" | grep -qE "stop" && echo "Halting..." && sleepdot 5 && dline && vms
+        fi
+        echo "Done..."
 
         ;;
 
-       # Get current VM config
-        config | conf )
-            pvesh get "$path/config" --noborder | cgrepline  name ostype
+        # Get current VM config
+    config | conf)
+        pvesh get "$path/config" --noborder | cgrepline name ostype
         ;;
 
-		econfig | econf | confige | confe | starte | stope)
-			vi2 $conf
-		;;
-        # Get current VM status
-        status | st | "")
-            pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
+    econfig | econf | confige | confe | starte | stope)
+        vi2 $conf
+        ;;
+    # Get current VM status
+    status | st | "")
+        pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
+        dline
+        lvs --noheadings --units g -o lv_name,lv_size,data_percent | awk -v id="vm-"$VMID '$2 != "0.00g" && $1 ~ "^"id && NF==3 {u=$2*$3/100; printf "%s: %s / %.2fG / %s%%\n", $1, $2, u, $3}'
         ;;
 
-        ip | ipcheck | "")
-            vmip $vmid
+    ip | ipcheck | "")
+        vmip $vmid
         ;;
-        # Enter the VM (LXC: pct enter, QEMU: SSH)
-        enter | e )
-            echo "Entering $vmid ($type on $node)...";
-            status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"');
-            [ "$status" != "running" ] && {
-                echo "Starting VM...";
-                pvesh create "$path/status/start";
-                for i in 1 2 3 4 5; do
-                    sleep 1;
-                    status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"');
-                    [ "$status" = "running" ] && echo "Booting Now... wait..." && {
-                        [ "$type" = "lxc" ] && sleepdot 3 || sleepdot 10
-                    } && break;
-                done;
-                [ "$status" != "running" ] && echo "Failed to start VM" && return 1
-            };
-            if [ "$type" = "lxc" ]; then
-                pct enter "$vmid";
-            else
-                qssh "$vmid" root;
-            fi
+    # Enter the VM (LXC: pct enter, QEMU: SSH)
+    enter | e)
+        echo "Entering $vmid ($type on $node)..."
+        status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
+        [ "$status" != "running" ] && {
+            echo "Starting VM..."
+            pvesh create "$path/status/start"
+            for i in 1 2 3 4 5; do
+                sleep 1
+                status=$(pvesh get "$path/status/current" --output-format=json | grep -o '"status":"[^"]*"' | cut -d: -f2 | tr -d '"')
+                [ "$status" = "running" ] && echo "Booting Now... wait..." && {
+                    [ "$type" = "lxc" ] && sleepdot 3 || sleepdot 10
+                } && break
+            done
+            [ "$status" != "running" ] && echo "Failed to start VM" && return 1
+        }
+        if [ "$type" = "lxc" ]; then
+            pct enter "$vmid"
+        else
+            qssh "$vmid" root
+        fi
         ;;
 
-        # Backup the VM using vzdump with snapshot mode
-        backup)
-            echo "Backing up $vmid using vzdump...";
-            storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage' );
-    # 스토리지 없으면 기본값 사용
-    if [ -z "$storage" ]; then
-        echo "No backup storage found, using default storage (local)."
-        storage="local"  # 기본값 설정 (필요에 따라 다른 기본값으로 바꿀 수 있음)
-    fi
-            vzdump $vmid --mode snapshot --storage "$storage" --compress zstd --notes-template "{{guestname}}" --remove 0;
-            bell
+    # Backup the VM using vzdump with snapshot mode
+    backup)
+        echo "Backing up $vmid using vzdump..."
+        storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage')
+        # 스토리지 없으면 기본값 사용
+        if [ -z "$storage" ]; then
+            echo "No backup storage found, using default storage (local)."
+            storage="local" # 기본값 설정 (필요에 따라 다른 기본값으로 바꿀 수 있음)
+        fi
+        vzdump $vmid --mode snapshot --storage "$storage" --compress zstd --notes-template "{{guestname}}" --remove 0
+        bell
         ;;
-        # Create a snapshot with auto-generated name (QEMU + LXC)
-        snapshot)
-            snapname=$3
-            if [ -z "$snapname" ]; then
-                snapname="at_$(datetag2)"
-                echo "No name provided, using generated snapshot name: $snapname"
-            fi
-            echo "Creating snapshot '$snapname' for $type $vmid..."
+    # Create a snapshot with auto-generated name (QEMU + LXC)
+    snapshot)
+        snapname=$3
+        if [ -z "$snapname" ]; then
+            snapname="at_$(datetag2)"
+            echo "No name provided, using generated snapshot name: $snapname"
+        fi
+        echo "Creating snapshot '$snapname' for $type $vmid..."
+        if [ "$type" = "qemu" ]; then
+            qm snapshot "$vmid" "$snapname" --description "Auto snapshot created by vm_func"
+            dline
+            qm listsnapshot $vmid | awk2c
+        else
+            pct snapshot "$vmid" "$snapname"
+            dline
+            pct listsnapshot $vmid | awk2c
+        fi
+        ;;
+
+    # Roll back to a snapshot (prompt if no name is given)
+    rollback)
+        snapname=$3
+        if [ -z "$snapname" ]; then
+            echo "Available snapshots for $type $vmid:"
             if [ "$type" = "qemu" ]; then
-                qm snapshot "$vmid" "$snapname" --description "Auto snapshot created by vm_func"
-					dline
-					qm listsnapshot $vmid | awk2c
+                dline
+                qm listsnapshot $vmid | awk2c
+                dline
+                echo "Choose a snapshot to rollback:"
+                select snapname in $(qm listsnapshot $vmid | awk2); do
+                    [ -n "$snapname" ] && break
+                    echo "Invalid choice."
+                done
             else
-                pct snapshot "$vmid" "$snapname"
-					dline
-					pct listsnapshot $vmid | awk2c
+                dline
+                pct listsnapshot $vmid | awk2c
+                dline
+                echo "Choose a snapshot to rollback:"
+                select snapname in $(pct listsnapshot $vmid | awk2); do
+                    [ -n "$snapname" ] && break
+                    echo "Invalid choice."
+                done
             fi
+            [ -z "$snapname" ] && echo "No snapshot name given." && return 1
+        fi
+
+        echo "Rolling back $type $vmid to snapshot '$snapname'..."
+        if [ "$type" = "qemu" ]; then
+            qm rollback "$vmid" "$snapname"
+            echo "Starting container $vmid..."
+            qm start $vmid
+        else
+            echo "Stopping container $vmid..."
+            pct stop "$vmid"
+            pct rollback "$vmid" "$snapname"
+            echo "Starting container $vmid..."
+            pct start "$vmid"
+        fi
         ;;
 
-        # Roll back to a snapshot (prompt if no name is given)
-        rollback)
-            snapname=$3
-            if [ -z "$snapname" ]; then
-                echo "Available snapshots for $type $vmid:"
-                if [ "$type" = "qemu" ]; then
-					dline
-					qm listsnapshot $vmid | awk2c
-					dline
-				    echo "Choose a snapshot to rollback:"
-				    select snapname in $(qm listsnapshot $vmid|awk2); do
-				        [ -n "$snapname" ] && break
-			    	    echo "Invalid choice."
-				    done
-                else
-   					dline
-					pct listsnapshot $vmid | awk2c
-					dline
-				    echo "Choose a snapshot to rollback:"
-				    select snapname in $(pct listsnapshot $vmid|awk2); do
-				        [ -n "$snapname" ] && break
-			    	    echo "Invalid choice."
-				    done
-                fi
-                [ -z "$snapname" ] && echo "No snapshot name given." && return 1
-            fi
-
-            echo "Rolling back $type $vmid to snapshot '$snapname'..."
-            if [ "$type" = "qemu" ]; then
-                qm rollback "$vmid" "$snapname"
-                echo "Starting container $vmid..."
-				qm start $vmid
-            else
-                echo "Stopping container $vmid..."
-                pct stop "$vmid"
-                pct rollback "$vmid" "$snapname"
-                echo "Starting container $vmid..."
-                pct start "$vmid"
-            fi
-        ;;
-
-        # Handle unsupported actions
-        *)
-            echo "Unsupported action: $action";
-            return 2
+    # Handle unsupported actions
+    *)
+        echo "Unsupported action: $action"
+        return 2
         ;;
     esac
-#	[ "$ooldscut" != "pxx" ] && menufunc $ooldscut
+    #	[ "$ooldscut" != "pxx" ] && menufunc $ooldscut
 }
 
-
-
-
-
-
-
-vmm() { watch_pve ; }
-watch_pve () {
-    interval=${1:-5};
-    local_node=$(hostname -s 2> /dev/null);
-    [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1;
+vmm() { watch_pve; }
+watch_pve() {
+    interval=${1:-5}
+    local_node=$(hostname -s 2>/dev/null)
+    [ -z "$local_node" ] && echo "Error: No hostname." 1>&2 && return 1
     for cmd in pvesh jq awk date grep sed hostname bc qm; do
-        command -v $cmd > /dev/null || {
-            echo "Missing $cmd" 1>&2;
+        command -v $cmd >/dev/null || {
+            echo "Missing $cmd" 1>&2
             return 1
-        };
-    done;
+        }
+    done
 
-    BOLD='\033[1m';
-    RED='\033[1;31m';
-    GRN='\033[1;32m';
-    YEL='\033[1;33m';
-    NC='\033[0m';
-    NODE_CPU_T=50;
-    NODE_CPU_M=10;
-    NODE_MEM_T=80;
-    NODE_MEM_M=40;
-    VM_CPU_T=70;
-    VM_CPU_M=10;
-    VM_MEM_T=80;
-    VM_MEM_M=40;
-    echo -e "${BOLD}Reading ARP cache...${NC}";
-    arp_map="/tmp/.arp_map";
-    > "$arp_map";
+    BOLD='\033[1m'
+    RED='\033[1;31m'
+    GRN='\033[1;32m'
+    YEL='\033[1;33m'
+    NC='\033[0m'
+    NODE_CPU_T=50
+    NODE_CPU_M=10
+    NODE_MEM_T=80
+    NODE_MEM_M=40
+    VM_CPU_T=70
+    VM_CPU_M=10
+    VM_MEM_T=80
+    VM_MEM_M=40
+    echo -e "${BOLD}Reading ARP cache...${NC}"
+    arp_map="/tmp/.arp_map"
+    >"$arp_map"
 
-	ensure_cmd arp net-tools
+    ensure_cmd arp net-tools
 
-    arp -n | awk '/ether/ {print tolower($3), $1}' > "$arp_map";
-    if command -v arp-scan > /dev/null 2>&1; then
-        ( arp -n | awk '/ether/ {print tolower($3), $1}';
-        sudo arp-scan -I "$(ip route | awk '/default/ {print $5; exit}')" --localnet 2> /dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ {print tolower($2), $1}' ) | awk '!a[$0]++' > "$arp_map" 2> /dev/null &
-    fi;
-    echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}";
-    echo -e "${BOLD}Reading VMs config...${NC}";
-    trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM;
-
+    arp -n | awk '/ether/ {print tolower($3), $1}' >"$arp_map"
+    if command -v arp-scan >/dev/null 2>&1; then
+        (
+            arp -n | awk '/ether/ {print tolower($3), $1}'
+            sudo arp-scan -I "$(ip route | awk '/default/ {print $5; exit}')" --localnet 2>/dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ {print tolower($2), $1}'
+        ) | awk '!a[$0]++' >"$arp_map" 2>/dev/null &
+    fi
+    echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
+    echo -e "${BOLD}Reading VMs config...${NC}"
+    trap 'echo -e "\n${BOLD}Stopped.${NC}"; rm -f "$arp_map"; return 0' INT TERM
 
     # 노드와 IP 정보를 한 번에 가져오기
-members_file="/etc/pve/.members"
-nodelist_count=$(jq '.nodelist | length' "$members_file" 2>/dev/null)
+    members_file="/etc/pve/.members"
+    nodelist_count=$(jq '.nodelist | length' "$members_file" 2>/dev/null)
 
-if [[ "$nodelist_count" -gt 0 ]]; then
-    # 클러스터 노드가 있는 경우
-    while IFS=" " read -r node ip; do
+    if [[ $nodelist_count -gt 0 ]]; then
+        # 클러스터 노드가 있는 경우
+        while IFS=" " read -r node ip; do
+            eval "node_${node}_ip=\"$ip\""
+        done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' "$members_file")
+    else
+        # 단독 노드일 경우
+        node=$(jq -r '.nodename' "$members_file")
+        ip=$(hostname -I | awk '{print $1}') # 첫 번째 IP만 사용
         eval "node_${node}_ip=\"$ip\""
-    done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' "$members_file")
-else
-    # 단독 노드일 경우
-    node=$(jq -r '.nodename' "$members_file")
-    ip=$(hostname -I | awk '{print $1}')  # 첫 번째 IP만 사용
-    eval "node_${node}_ip=\"$ip\""
-fi
+    fi
 
     #while IFS=" " read node ip; do
     #    eval "node_${node}_ip=\"$ip\"";
     #done < <(jq -r '.nodelist | to_entries[] | "\(.key) \(.value.ip)"' /etc/pve/.members);
 
     while :; do
-        now=$(date +%s);
-        output="";
-        output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n";
-        output="$output\n${BOLD}Nodes:${NC}";
+        now=$(date +%s)
+        output=""
+        output="$output\n${BOLD}Uptime ($local_node):${NC} $(uptime)\n"
+        output="$output\n${BOLD}Nodes:${NC}"
         output="$output
 Node          IP Address           Status     CPU(%)       Mem(GB/%)                Uptime
-";
-        output="$output----------------------------------------------------------------------------------------------\n";
+"
+        output="$output----------------------------------------------------------------------------------------------\n"
 
         # pvesh 명령으로 노드 정보 한 번에 처리
         while IFS='|' read -r node status cpu mem maxmem up; do
-			cpu=${cpu:-0}
-			mem=${mem:-0}
-			maxmem=${maxmem:-1}
-			up=${up:-0}
-            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
+            cpu=${cpu:-0}
+            mem=${mem:-0}
+            maxmem=${maxmem:-1}
+            up=${up:-0}
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
             [ "$cpu_p" -ge $NODE_CPU_T ] && cpu_c="$RED" || {
                 [ "$cpu_p" -ge $NODE_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"
-            };
-            mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
-            max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}');
-            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}');
-            [ -n "$mem_p" ] && [ "$mem_p" -ge "$NODE_MEM_T" 2>/dev/null ] && mem_c="$RED" || {
-                [ "$mem_p" -ge "$NODE_MEM_M" 2>/dev/null ] && mem_c="$YEL" || mem_c="$NC"
-            };
-            up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}');
-            node_ip_var="node_${node}_ip";
-            node_ip="${!node_ip_var}";
-            [ "$status" = "offline" ] && status="${RED}offline${NC}" || status="${GRN}online${NC}";
-            [ "$up" -lt 86400 ] && up_fmt="${YEL}${up_fmt}${NC}";
-            line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt");
-            output="$output$line\n";
+            }
+            mem_gb=$(awk -v m="$mem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
+            max_gb=$(awk -v m="$maxmem" 'BEGIN{printf "%.1f", m/1024/1024/1024}')
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
+            [ -n "$mem_p" ] && [ "$mem_p" -ge "$NODE_MEM_T" ] 2>/dev/null && mem_c="$RED" || {
+                [ "$mem_p" -ge "$NODE_MEM_M" ] 2>/dev/null && mem_c="$YEL" || mem_c="$NC"
+            }
+            up_fmt=$(awk -v u="$up" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
+            node_ip_var="node_${node}_ip"
+            node_ip="${!node_ip_var}"
+            [ "$status" = "offline" ] && status="${RED}offline${NC}" || status="${GRN}online${NC}"
+            [ "$up" -lt 86400 ] && up_fmt="${YEL}${up_fmt}${NC}"
+            line=$(printf "%-13s %-20s %-10s %b%6s%%%b    %6s/%-6sGB  (%b%3s%%%b)    %s" "$node" "$node_ip" "$status" "$cpu_c" "$cpu_p" "$NC" "$mem_gb" "$max_gb" "$mem_c" "$mem_p" "$NC" "$up_fmt")
+            output="$output$line\n"
         done < <(pvesh get /cluster/resources --output-format=json | jq -r '
             sort_by(.node) |
             map(select(.type=="node"))[] |
             "\(.node)|\(.status)|\(.cpu)|\(.mem)|\(.maxmem)|\(.uptime // 0)"
-        ');
+        ')
 
-        output="$output\n${BOLD}VMs:${NC}\n";
-        line=$(printf "%-8s %-12s %-7s %-27s %-20s %-12s %-20s %-25s %-20s %-15s" "VMID" "Node" "Type" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)" "Uptime");
-        output="$output$line\n";
-        output="$output-----------------------------------------------------------------------------------------------------------------------------------------------------------\n";
+        output="$output\n${BOLD}VMs:${NC}\n"
+        line=$(printf "%-8s %-12s %-7s %-27s %-20s %-12s %-20s %-25s %-20s %-15s" "VMID" "Node" "Type" "Name" "IP Address" "CPU" "Mem(MB/%)" "Disk(R/W MBs)" "Net(In/Out MBs)" "Uptime")
+        output="$output$line\n"
+        output="$output-----------------------------------------------------------------------------------------------------------------------------------------------------------\n"
 
         pvesh get /cluster/resources --output-format=json | jq -r '
             .[]
             | select((.type=="qemu" or .type=="lxc") and .status=="running")
             | "\(.vmid)|\(.node)|\(.type)|\(.name)|\(.cpu)|\(.mem)|\(.maxmem)|\(.diskread//0)|\(.diskwrite//0)|\(.netin//0)|\(.netout//0)|\(.uptime // 0)"
-        ' > /tmp/.vm_data.$$;
+        ' >/tmp/.vm_data.$$
 
         while IFS='|' read id node vm_type name cpu mem maxmem d_r d_w n_in n_out vm_uptime; do
-            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}');
+            cpu_p=$(awk -v c="$cpu" 'BEGIN{printf "%.0f", c*100}')
             [ "$cpu_p" -ge $VM_CPU_T ] && cpu_c="$RED" || {
                 [ "$cpu_p" -ge $VM_CPU_M ] && cpu_c="$YEL" || cpu_c="$NC"
-            };
-            mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}');
-            max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}');
-            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}');
+            }
+            mem_mb=$(awk -v m="$mem" 'BEGIN{printf "%.0f", m/1024/1024}')
+            max_mb=$(awk -v m="$maxmem" 'BEGIN{printf "%.0f", m/1024/1024}')
+            mem_p=$(awk -v m="$mem" -v max="$maxmem" 'BEGIN{printf "%.0f", m*100/max}')
             [ "$mem_p" -ge $VM_MEM_T ] && mem_c="$RED" || {
                 [ "$mem_p" -ge $VM_MEM_M ] && mem_c="$YEL" || mem_c="$NC"
-            };
-            vm_mac=$(pvesh get /nodes/$node/$vm_type/$id/config --noborder 2> /dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]');
-            vm_ip="${RED}N/A${NC}";
-            [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map");
-            [ -z "$vm_ip" ] && vm_ip="N/A";
-            eval "old_d_r=\${disk_r_$id:-$d_r}";
-            eval "old_d_w=\${disk_w_$id:-$d_w}";
-            eval "old_n_in=\${net_in_$id:-$n_in}";
-            eval "old_n_out=\${net_out_$id:-$n_out}";
-            eval "last_time=\${last_time_$id:-$now}";
-            dt=$((now - last_time));
-            [ $dt -le 0 ] && dt=1;
-            dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
-            dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
-            ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
-            no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}');
-            eval "disk_r_$id=$d_r";
-            eval "disk_w_$id=$d_w";
-            eval "net_in_$id=$n_in";
-            eval "net_out_$id=$n_out";
-            eval "last_time_$id=$now";
-            vm_uptime_fmt=$(awk -v u="$vm_uptime" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}');
-            line=$(printf "%-8s %-12s %-7s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s   %s" "$id" "$node" "$vm_type" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c""$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd" "$vm_uptime_fmt");
-            output="$output$line\n";
-        done < /tmp/.vm_data.$$;
-        rm -f /tmp/.vm_data.$$;
-        find /tmp/ -name ".vm_data.*" -type f -mtime +1 -exec rm -f {} \;;
+            }
+            vm_mac=$(pvesh get /nodes/$node/$vm_type/$id/config --noborder 2>/dev/null | sed -n 's/.*=\([0-9A-Fa-f:]\{17\}\).*/\1/p' | head -n1 | tr '[:upper:]' '[:lower:]')
+            vm_ip="${RED}N/A${NC}"
+            [ -n "$vm_mac" ] && vm_ip=$(awk -v mac="$vm_mac" '$1==mac {print $2}' "$arp_map")
+            [ -z "$vm_ip" ] && vm_ip="N/A"
+            eval "old_d_r=\${disk_r_$id:-$d_r}"
+            eval "old_d_w=\${disk_w_$id:-$d_w}"
+            eval "old_n_in=\${net_in_$id:-$n_in}"
+            eval "old_n_out=\${net_out_$id:-$n_out}"
+            eval "last_time=\${last_time_$id:-$now}"
+            dt=$((now - last_time))
+            [ $dt -le 0 ] && dt=1
+            dr_spd=$(awk -v now="$d_r" -v old="$old_d_r" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            dw_spd=$(awk -v now="$d_w" -v old="$old_d_w" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            ni_spd=$(awk -v now="$n_in" -v old="$old_n_in" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            no_spd=$(awk -v now="$n_out" -v old="$old_n_out" -v t="$dt" 'BEGIN{d=now-old; if(d<0)d=0; printf "%.1f", d/t/1024/1024}')
+            eval "disk_r_$id=$d_r"
+            eval "disk_w_$id=$d_w"
+            eval "net_in_$id=$n_in"
+            eval "net_out_$id=$n_out"
+            eval "last_time_$id=$now"
+            vm_uptime_fmt=$(awk -v u="$vm_uptime" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
+            line=$(printf "%-8s %-12s %-7s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s   %s" "$id" "$node" "$vm_type" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c""$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd" "$vm_uptime_fmt")
+            output="$output$line\n"
+        done </tmp/.vm_data.$$
+        rm -f /tmp/.vm_data.$$
+        find /tmp/ -name ".vm_data.*" -type f -mtime +1 -exec rm -f {} \;
 
-        clear;
-        echo -e "$output";
-        sleep "$interval";
+        clear
+        echo -e "$output"
+        sleep "$interval"
     done
 }
-
 
 # explorer.sh
 explorer() {
@@ -9478,7 +9441,7 @@ EOF
 
         ;;
 
-smtp.relay.cf)
+    smtp.relay.cf)
         cat >"$file_path" <<'EOF'
 # 맨 아래쪽에 추가하는 걸 추천
 relayhost = [smtp.gmail.com]:587
@@ -9488,10 +9451,9 @@ smtp_sasl_security_options = noanonymous
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 EOF
-;;
+        ;;
 
-
-proxmox2telegram.sh)
+    proxmox2telegram.sh)
         cat >"$file_path" <<EOF
 
 webhook: $WEBHOOK_NAME
@@ -9501,23 +9463,18 @@ webhook: $WEBHOOK_NAME
     method post
     url https://api.telegram.org/bot{{ secrets.BOT_TOKEN }}/sendMessage?chat_id={{ secrets.CHAT_ID }}
 EOF
-;;
+        ;;
 
-proxmox2telegram_priv.sh)
+    proxmox2telegram_priv.sh)
         cat >"$file_path" <<EOF
 
 webhook: $WEBHOOK_NAME
     secret name=BOT_TOKEN,value=$ENCODED_TOKEN
     secret name=CHAT_ID,value=$ENCODED_CHAT_ID
 EOF
-;;
+        ;;
 
-
-
-
-
-
-proxmox2telegram_vm_hook.sh)
+    proxmox2telegram_vm_hook.sh)
         cat >"$file_path" <<EOF
 #!/bin/bash
 set -e
@@ -9634,9 +9591,9 @@ curl -s -X POST -m 10 "https://api.telegram.org/bot\${telegram_token}/sendMessag
 exit 0
 
 EOF
-;;
+        ;;
 
-grub40.conf)
+    grub40.conf)
         cat >"$file_path" <<EOF
 # --- 내 커스텀 메뉴 삼신기 시작 ---
 
@@ -9688,9 +9645,9 @@ menuentry 'Proxmox VE - GPU 몰빵 (Passthrough) $kernelv' --class proxmox --cla
 
 # --- 내 커스텀 메뉴 삼신기 끝 ---
 EOF
-;;
+        ;;
 
-# newtemp
+        # newtemp
     6yyP.7dw.sample.yml)
         cat >"$file_path" <<'EOF'
 EOF
