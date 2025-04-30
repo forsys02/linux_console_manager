@@ -3856,11 +3856,11 @@ userinfo() {
             LAST_LOG=$(last -w -n 5 "$USERNAME" 2>/dev/null | grep . || echo "로그인 이력 없음")
             PROCESS_INFO=$(ps -u "$USERNAME" -o pid,tty,stat,time,cmd 2>/dev/null | grep -v "PID" || echo "실행 중인 프로세스 없음")
             if [ -r /var/log/maillog ]; then
-                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
+                MAIL_LOG=$(grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
                 [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
             else
                 if [ -r /var/log/mail.log ]; then
-                    MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
+                    MAIL_LOG=$(grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
                     [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
                 else
                     MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음"
@@ -3975,9 +3975,9 @@ $CHAGE_INFO"
             LAST_LOG=$(last "$USERNAME" | head -n 5 || echo "로그인 이력 없음")
             PROCESS_INFO=$(ps -u "$USERNAME" --forest -o pid,tty,stat,time,cmd 2>/dev/null || echo "실행 중인 프로세스 없음")
             if [ -r /var/log/maillog ]; then
-                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
+                MAIL_LOG=$(grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
             elif [ -r /var/log/mail.log ]; then
-                MAIL_LOG=$(sudo grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
+                MAIL_LOG=$(grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
             else
                 MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음 (/var/log/maillog, /var/log/mail.log)"
             fi
@@ -5965,10 +5965,10 @@ vmip() {
 
         [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan (attempt $((attempt + 1)))..."
 
-        sudo arp-scan -I "$iface" --localnet 2>/dev/null |
+        arp-scan -I "$iface" --localnet 2>/dev/null |
             awk -v dev="$iface" '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[ \t]+([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/ {
             print "ip neigh replace "$1" lladdr "$2" dev "dev
-        }' | sudo bash
+        }' | bash
 
         ip=$(ip neigh | grep -i "$mac" | awk '{print $1}' | head -n1)
 
@@ -6059,7 +6059,7 @@ _vmip() {
 
     while [ "$attempt" -lt 5 ] && [ -z "$ip" ]; do
         trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-        arp_scan_output=$(sudo arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
+        arp_scan_output=$(arp-scan --interface "$iface" "$gateway"/24 2>/dev/null)
         [ "$debug" == "debug" ] && echo "[DEBUG] arp-scan output:\n$arp_scan_output"
 
         ip=$(echo "$arp_scan_output" | grep -i "$mac" | awk '{print $1}')
@@ -6292,7 +6292,7 @@ watch_pve() {
     if command -v arp-scan >/dev/null 2>&1; then
         (
             arp -n | awk '/ether/ {print tolower($3), $1}'
-            sudo arp-scan -I "$(ip route | awk '/default/ {print $5; exit}')" --localnet 2>/dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ {print tolower($2), $1}'
+            arp-scan -I "$(ip route | awk '/default/ {print $5; exit}')" --localnet 2>/dev/null | awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ {print tolower($2), $1}'
         ) | awk '!a[$0]++' >"$arp_map" 2>/dev/null &
     fi
     echo -e "${BOLD}ARP cache loaded. Monitoring '$local_node'. Ctrl+C to exit.${NC}"
@@ -6506,7 +6506,7 @@ rrnet() {
         if [ -f $file ]; then
             cp $file /etc/network/interfaces 2>/dev/null
             #systemctl restart networking.service
-            which ifreload && sudo ifreload -a || sudo systemctl restart networking.service
+            which ifreload && ifreload -a || systemctl restart networking.service
 
             if ping -c 4 8.8.8.8 >/dev/null; then
                 echo "Network configuration from $file is successful."
