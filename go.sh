@@ -157,6 +157,26 @@ export "guestip"
 gateway="$(ip route | grep 'default' | awk '{print $3}')"
 export "gateway"
 
+colorvar() {
+    BOLD='\033[1m'
+    RED1='\033[1;31m'
+    RED='\033[0;31m'
+    GRN1='\033[1;32m'
+    GRN='\033[0;32m'
+    MAG1='\033[1;35m'
+    MAG='\033[0;35m'
+    CYN1='\033[1;36m'
+    CYN='\033[0;36m'
+    YEL1='\033[1;33m'
+    YEL='\033[0;33m'
+    WHT1='\033[1;37m'
+    WHT='\033[0;37m'
+    YBLU='\033[1;33;44m'
+    YRED='\033[1;33;41m'
+    NC='\033[0m'
+}
+colorvar
+
 scutp() {
     echo "--------------------------------"
     echo "init scut print"
@@ -263,7 +283,7 @@ process_commands() {
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
-        echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && RST
+        echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && NC
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
         #if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then
@@ -283,8 +303,8 @@ process_commands() {
         fi
 
         #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [60s.Enter] " && read -re -t 60 x ; }
-        #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -re x; }
-        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -n1 -r; }
+        #[ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && read -n1 -r; }
+        [ ! "$nodone" ] && { echo -en "--> \033[1;34mDone...\033[0m [Enter] " && IFS=' ' read -re newcmds newcmds1 </dev/tty; }
     else
         echo "$command"
         echo "process_commands -> Canceled..."
@@ -466,7 +486,7 @@ menufunc() {
                 echo -ne "$([ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null | sort -u) - $(
                     WHT1
                     hostname
-                    RST
+                    NC
                 )"
                 # offline print
                 # 네트워크 단절시 바로 표시
@@ -474,7 +494,7 @@ menufunc() {
                     echo -ne "==="
                     RED1
                     echo -ne " offline "
-                    RST
+                    NC
                     echo "=================================="
                 else
                     echo "=============================================="
@@ -496,7 +516,7 @@ menufunc() {
                     } || {
                         CYN
                         echo "$output"
-                        RST
+                        NC
                         #if [ -f /dev/shm/dlines ] ; then
                         #	dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
                         #dline
@@ -721,7 +741,7 @@ menufunc() {
                                     } || {
                                         CYN
                                         echo "$output"
-                                        RST
+                                        NC
                                         #if [ -f /dev/shm/dlines ] ; then
                                         #dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
                                         #	dline
@@ -853,9 +873,17 @@ menufunc() {
 
                             if [ -z "$pre_commands" ]; then
                                 while :; do
+                                    # 입력이 없으면 있을때 까지 loop
                                     trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                     history -r
-                                    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                    if [ -n "$newcmds" ]; then
+                                        #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty; }
+                                        unset -v newcmds newcmds1
+                                    else
+                                        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                    fi
+                                    #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                     #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     # flow 메뉴 하부 메뉴 종료
@@ -867,7 +895,14 @@ menufunc() {
                                 # pre_command refresh
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 history -r
-                                IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                if [ -n "$newcmds" ]; then
+                                    #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty; }
+                                    unset -v newcmds newcmds1
+                                else
+                                    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                fi
+                                #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                 # flow 메뉴 하부 메뉴 종료
@@ -1069,7 +1104,7 @@ menufunc() {
                                         # 기본값이 하나일때
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                            [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
+                                            [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && NC
                                             # 이전에 선택했던 값이 있으면 함께 출력
                                             if [ -n "${!org_var_name}" ]; then
                                                 printf "==============================================
@@ -1131,7 +1166,7 @@ menufunc() {
 
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                            [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && RST
+                                            [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && NC
                                             printf "Enter value for \e[1;35;40m[$var_name]\e[0m:"
                                             readv var_value </dev/tty
                                             # ' " \ ->quoting
@@ -1249,7 +1284,11 @@ menufunc() {
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                         #[ $num_commands -eq 1 ] && break
                         if [ "$num_commands" -eq 1 ]; then
+                            #echo "scut:$scut / oldscut: $oldscut / ooldscut: $ooldscut" && readxy
                             if echo "$ooldscut" | grep -q '^flow_'; then
+                                echo "go to $ooldscut" #; readxy
+                                menufunc "$ooldscut"
+                            elif echo "$scut" | grep -q '\<pxx\>'; then
                                 echo "go to $ooldscut" #; readxy
                                 menufunc "$ooldscut"
                             fi
@@ -1281,7 +1320,7 @@ menufunc() {
                             YEL1
                             echo
                             echo "check your cmd_choice: $cmd_choice"
-                            RST
+                            NC
                         } &&
                         case "$cmd_choice" in
                         # --- Basic Navigation & Commands ---
@@ -1363,9 +1402,9 @@ menufunc() {
                             ;;
                         "df")
                             if [[ ! $cmd_choice1 ]]; then
-                                { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrepn /mnt/ 0 | cper | column -t; } && readx && continue
+                                { /bin/df -h | grep -vE '^/dev/loop|/var/lib/docker' | sed -e "s/파일 시스템/파일시스템/g" | cgrepn /mnt/ 0 | cper | column -t; } && readnewcmds && continue
                             else
-                                /bin/df $cmd_choice1 && readx && continue
+                                /bin/df $cmd_choice1 && readnewcmds && continue
                             fi
                             ;;
                         "t")
@@ -1382,16 +1421,16 @@ menufunc() {
                             ;;
                         "e")
                             if [ -f "$cmd_choice1" ]; then cmd_choice1=$(dirname "$cmd_choice1"); fi
-                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "ee")
-                            { ranger /etc 2>/dev/null || explorer /etc; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            { ranger /etc 2>/dev/null || explorer /etc; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "eee")
-                            { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && continue
+                            { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "cdr")
-                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && ls -ltr | tail && bashcomm && continue
+                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm && continue
                             ;;
                         "ll")
                             { journalctl -n10000 -e; } && continue
@@ -1431,7 +1470,7 @@ menufunc() {
                             elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
                                 dline
                                 vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
-                                readxy "Proxmox vm --> $(RED1)$cmd_choice$(RST) Enter" && enter "$cmd_choice"
+                                readxy "Proxmox vm --> $(RED1)$cmd_choice$(NC) Enter" && enter "$cmd_choice"
                                 continue
                             # Check 3: Valid Linux command? (Not purely numeric and exists)
                             #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
@@ -1454,7 +1493,7 @@ menufunc() {
 
                                 GRN1
                                 dline
-                                RST
+                                NC
                                 # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
                                 # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
                                 # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
@@ -1464,7 +1503,7 @@ menufunc() {
                                 trap - INT
                                 GRN1
                                 dline
-                                RST
+                                NC
 
                                 # Clean up the temporary variable
 
@@ -1567,19 +1606,19 @@ menufunc() {
             "e")
                 if [ -f "$choice1" ]; then choice1=$(dirname "$choice1"); fi
                 { ranger $choice1 2>/dev/null || explorer; }
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "ee")
                 { ranger /etc 2>/dev/null || explorer /etc; }
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "eee")
                 #{ ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd) ; }
                 ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd)
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "cdr")
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && RST && dline && ls -ltr | tail && bashcomm
+                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm
                 ;;
             ll)
                 { journalctl -n10000 -e; }
@@ -1660,7 +1699,7 @@ menufunc() {
                 elif [[ -z $choice1 ]] && expr "$choice" : '^[0-9]\+$' >/dev/null && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
                     dline
                     vmslistview | cgrepn running -3 | cgrepn1 $choice 3
-                    readxy "Proxmox vm --> $(RED1)$choice$(RST) Enter" && enter "$choice"
+                    readxy "Proxmox vm --> $(RED1)$choice$(NC) Enter" && enter "$choice"
 
                 # 실제 리눅스 명령이 들어온 경우 실행
                 # Check: is not purely numeric AND is a valid command
@@ -1683,7 +1722,7 @@ menufunc() {
 
                     GRN1
                     dline
-                    RST
+                    NC
                     # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
                     # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
                     # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
@@ -1693,7 +1732,7 @@ menufunc() {
                     trap - INT
                     GRN1
                     dline
-                    RST
+                    NC
 
                     echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                     echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
@@ -2111,7 +2150,7 @@ safe_eval() {
         RED1
         echo "!!! 위험 명령어 감지!"
         echo "   $cmd"
-        RST
+        NC
         readxy "   실행하시겠습니까?" || return 1
     }
     if echo "$cmd" | grep -qE '\|[[:space:]]*less(\s|$)'; then
@@ -2575,7 +2614,7 @@ cpipef() { sed "s/\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}/\x1B[1;33m&\x1B[0m/g;  s/\
 # color_alternate_lines
 stripe() { awk '{printf (NR % 2 == 0) ? "\033[37m" : "\033[36m"; print $0 "\033[0m"}'; }
 
-# ansi ex) RED ; echo "haha" ; BLU ; echo "hoho" ; RST
+# ansi ex) RED ; echo "haha" ; BLU ; echo "hoho" ; NC
 RED() { echo -en "\033[31m"; }
 GRN() { echo -en "\033[32m"; }
 YEL() { echo -en "\033[33m"; }
@@ -2583,7 +2622,7 @@ BLU() { echo -en "\033[34m"; }
 MAG() { echo -en "\033[35m"; }
 CYN() { echo -en "\033[36m"; }
 WHT() { echo -en "\033[37m"; }
-RST() { echo -en "\033[0m"; }
+NC() { echo -en "\033[0m"; }
 
 # 밝은색
 RED1() { echo -en "\033[1;31m"; }
@@ -3004,7 +3043,7 @@ bashcomm() {
         pwdv=$(pwd)
         echo -n "user: $user  |  pwd: "
         [[ -L $pwdv ]] && ls -al "$pwdv" | awk '{print $(NF-2),$(NF-1),$NF}' || echo "$pwdv"
-        RST
+        NC
 
         #trap 'stty sane;break' SIGINT
         trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
@@ -3265,7 +3304,11 @@ EOF
 conf() {
     #readxy $cmd_choice1
     saveVAR
-    vi2 "$envorg" $scut $cmd_choice1
+    if [ -n "$1" ]; then
+        vi2 "$envorg" $1 $cmd_choice1
+    else
+        vi2 "$envorg" $scut $cmd_choice1
+    fi
     savescut && exec "$gofile" "$scut"
 }
 conf1() {
@@ -3382,7 +3425,7 @@ push() {
         result=$?
         #curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
         [ "$result" == 0 ] && { GRN1 && echo "push msg sent"; } || { RED1 && echo "Err:$result ->  push send error"; }
-        RST
+        NC
     fi
     # 기본적으로 인자 출력
     echo "$message"
@@ -3407,7 +3450,7 @@ push1() {
     else
         RED1 && echo "Err:$result -> push1 send error"
     fi
-    RST
+    NC
 
     echo "$message"
 }
@@ -3601,7 +3644,7 @@ alarm() {
         echo ">>> alarm set list..."
         CYN
         atqq
-        RST
+        NC
         ps -ef | grep "[a]larm_task" | awknf8 | cgrep "alarm_task_$input" | grep -v "awk"
     fi
     if [[ ${input:0:4} == "0000" ]]; then
@@ -5211,7 +5254,7 @@ exportvar() {
             export ${n}="${v}"
             YEL1
             echo "Exported: ${n}=${v}"
-            RST
+            NC
             break
         fi
         ((i++))
@@ -5234,11 +5277,12 @@ unsetvar() {
 
 # wait enter
 readx() { read -p "[Enter] " x </dev/tty; }
-
+# enter or cmds
+readnewcmds() { IFS=' ' read -rep "[Enter] " newcmds newcmds1 </dev/tty; }
 readxy() {
     dline
     while true; do
-        [ "$1" ] && printf "%s " "$1" # 메시지 있으면 줄바꿈 없이 출력
+        [ "$1" ] && printf "$CYN1%s$NC " "$1" # 메시지 있으면 줄바꿈 없이 출력
         read -p "preceed? [Enter/y/Y = OK, n = Cancel] " x </dev/tty
         case "$x" in
         [yY] | "") return 0 ;; # 진행
@@ -5981,6 +6025,7 @@ _vmip() {
     fi
 }
 
+lvd() { lvs --noheadings --units g -o lv_name,lv_size,data_percent | awk '$2 != "0.00g" && NF==3 {u=$2*$3/100; printf "%s: %s / %.2fG / %s%%\n", $1, $2, u, $3}' | column -t; }
 vms() { vmslistview | cgrepn running -3; }
 vm() {
     unset -v vmid
@@ -5989,7 +6034,8 @@ vm() {
 
     # If no VMID is provided, show available commands
     if [ -z "$1" ]; then
-        process_commands pxx
+        process_commands pxx y nodone
+        #process_commands "vmslistview | cgrepn running -3" y nodone
         return
     fi
 
@@ -6020,7 +6066,7 @@ vm() {
 
         # Get current VM config
     config | conf)
-        pvesh get "$path/config" --noborder | cgrepline name ostype
+        pvesh get "$path/config" --noborder | cgrepline name ostype | cgrepline1 args hostpci cpu
         ;;
 
     econfig | econf | confige | confe | starte | stope)
@@ -6154,8 +6200,13 @@ watch_pve() {
 
     BOLD='\033[1m'
     RED='\033[1;31m'
+    RED0='\033[0;31m'
     GRN='\033[1;32m'
+    GRN0='\033[0;32m'
+    CYN='\033[1;36m'
+    CYN0='\033[0;36m'
     YEL='\033[1;33m'
+    YEL0='\033[0;33m'
     NC='\033[0m'
     NODE_CPU_T=50
     NODE_CPU_M=10
