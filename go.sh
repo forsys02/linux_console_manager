@@ -2473,11 +2473,11 @@ cdiff() {
 }
 
 # .vim/backup 의 최신 백업파일과 현재 파일의 차이를 보여줌
-fdiff() {
+vidiff() {
     local backup_dir="$HOME/.vim/backup"
 
     if [[ -z $1 ]]; then
-        echo "Usage: fdiff <filename>"
+        echo "Usage: vidiff <filename>"
         return 1
     fi
 
@@ -2507,13 +2507,13 @@ gdifff() {
     [ -n "$d" ] && echo "$d" || cdiff $base/go.env.2.bak $base/go.env
     ls -ltr $base | grep 'go.env.[0-9].bak'
 }
-# vi diff
+# vi backup file diff
 godiff() {
-    fdiff $gofile
+    vidiff $gofile
     ls -al $gofile $envorg
 }
 godifff() {
-    fdiff $envorg
+    vidiff $envorg
     ls -al $gofile $envorg
 }
 
@@ -6124,7 +6124,8 @@ vm() {
         fi
         ;;
 
-    startforce)
+    startforce | startf)
+        # 아이피를 못찾아도 stop 하지 않고 유지
         OUTPUT="$(pvesh create "$path/status/start" 2>&1)"
         echo "$OUTPUT"
         echo "Booting..." && sleepdot 5 && dlines ip checking && vmip $vmid && dline && vms
