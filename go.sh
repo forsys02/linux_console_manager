@@ -171,8 +171,8 @@ colorvar() {
     YEL='\033[0;33m'
     WHT1='\033[1;37m'
     WHT='\033[0;37m'
-    YBLU='\033[1;33;44m'
-    YRED='\033[1;33;41m'
+    YBL='\033[1;33;44m'
+    YRE='\033[1;33;41m'
     NC='\033[0m'
 }
 colorvar
@@ -1156,7 +1156,8 @@ menufunc() {
                                                     masked_dvar_value="${dvar_value}"
                                                 fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
-                                                printf "!!(Cancel:c) Enter value for \e[1;35;40m[ ${var_name} env Default:$masked_dvar_value ] \e[0m:"
+                                                #printf "!!(Cancel:c) Enter value for \e[1;35;40m[ ${var_name} env Default:$masked_dvar_value ] \e[0m:"
+                                                printf "!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name}${NC}${MAG1} env Default:$masked_dvar_value ] \e[0m:"
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
@@ -2632,8 +2633,8 @@ BLU1() { echo -en "\033[1;34m"; }
 MAG1() { echo -en "\033[1;35m"; }
 CYN1() { echo -en "\033[1;36m"; }
 WHT1() { echo -en "\033[1;37m"; }
-YBLU() { echo -en "\033[1;33;44m"; }
-YRED() { echo -en "\033[1;33;41m"; }
+YBL() { echo -en "\033[1;33;44m"; }
+YRE() { echo -en "\033[1;33;41m"; }
 
 # noansi
 noansised() { sed 's/\\033\[[0-9;]*[MKHJm]//g'; }
@@ -2666,7 +2667,8 @@ pipemenu() {
 # pipe 로 넘어온 줄의 첫번째 필드를 select
 pipemenu1() {
     local prompt_message="$@"
-    PS3="==============================================
+    #PS3="==============================================
+    PS3="$(dlines "$prompt_message")
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     export pipeitem=""
     items=$(
