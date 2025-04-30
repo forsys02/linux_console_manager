@@ -4678,13 +4678,68 @@ insert() {
     return 0
 }
 
+change() {
+    local filepath="$1" search="$2" replace="$3" line="$4"
+    local backup_suffix timestamp backup_filename exit_code
+    if [ $# -lt 3 ]; then
+        echo "Usage: change <filepath> <find_string> <replace_string> [line|find <context>]" 1>&2
+        return 1
+    fi
+
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    backup_suffix="_${timestamp}.bak"
+    backup_filename="${filepath}${backup_suffix}"
+
+    cp -a "$filepath" "$backup_filename" || return 2
+
+    if [ "$line" ] && [ "$line" = "line" ]; then
+        perl "-i" -p -e "s{.*}{$replace} if m#^$(perl -e 'print quotemeta shift' "$search")#" "$filepath"
+
+    elif [ "$line" = "find" ] && [ "$5" ]; then
+        # [섹션] 안에서 특정 문자열을 한 번만 치환 (sed 버전)
+        local esc_search esc_replace esc_context sed_script
+        esc_search=$(printf '%s' "$search" | sed 's:[\\/&]:\\&:g')
+        esc_replace=$(printf '%s' "$replace" | sed 's:[\\/&]:\\&:g')
+        esc_context=$(printf '%s' "$5" | sed 's:[\\/&]:\\&:g')
+
+        sed_script="/^\[$esc_context\]/,/^\[/{
+            /$esc_search/ {
+                s/$esc_search/$esc_replace/
+                t end
+            }
+        }
+        :end"
+
+        sed "$sed_script" "$backup_filename" >"$filepath"
+
+    else
+        perl "-i" -p -e "s|$(perl -e 'print quotemeta shift' "$search")|$replace|g" "$filepath"
+    fi
+
+    exit_code=$?
+    if [ $exit_code -eq 0 ]; then
+        echo "Change applied. Backup: $backup_filename"
+        if [ -f "$backup_filename" ]; then
+            echo "--- Diff (backup vs current) ---"
+            cdiff "$backup_filename" "$filepath"
+            echo "------------------------------"
+        else
+            echo "Warning: Backup file '$backup_filename' not found for diff." 1>&2
+        fi
+        return 0
+    else
+        echo "Error during change operation (code: $exit_code). Check backup: $backup_filename" 1>&2
+        return $exit_code
+    fi
+}
+
 # 함수 이름: change
 # 사용법: change <파일경로> <찾을_문자열> <바꿀_문자열> <line:검색라인교체시>
 # 설명:
 #   핵심 기능만 수행: Perl -i로 백업 및 치환, diff로 비교.
 #   구분자 '|||' 사용. 문자열 내 특수문자 처리는 최소화됨 (백슬래시만 처리).
 
-change() {
+_change() {
     local filepath="$1" search="$2" replace="$3" line="$4"
     local backup_suffix timestamp backup_filename exit_code
 
