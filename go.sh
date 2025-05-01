@@ -6127,6 +6127,20 @@ vm() {
         fi
         ;;
 
+    unlock)
+        OUTPUT="$(pvesh delete "$path/lock" 2>&1)"
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -qi "does not exist"; then
+            echo "No lock present on VM $VMID."
+        elif echo "$OUTPUT" | grep -qi "permission denied"; then
+            echo "Failed to unlock VM $VMID: Permission denied."
+            return 1
+        else
+            echo "Unlocking..." && sleepdot 3 && dline && vms
+            echo "unlock Done..."
+        fi
+        ;;
+
     startforce | startf)
         # 아이피를 못찾아도 stop 하지 않고 유지
         OUTPUT="$(pvesh create "$path/status/start" 2>&1)"
@@ -6272,8 +6286,11 @@ vm() {
 
     # Handle unsupported actions
     *)
-        echo "Unsupported action: $action"
-        return 2
+        qm $action $vmid
+        if [ $? != 0 ]; then
+            echo "Unsupported action: $action"
+            return 2
+        fi
         ;;
     esac
     #	[ "$ooldscut" != "pxx" ] && menufunc $ooldscut
