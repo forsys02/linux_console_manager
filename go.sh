@@ -6244,6 +6244,29 @@ vm() {
         fi
         ;;
 
+    destroy)
+        echo "Preparing to destroy VM $vmid..."
+        echo "This will remove VM configuration only (disk will remain)."
+        read -p "Type the VMID ($vmid) again to confirm: " confirm
+        if [ "$confirm" != "$vmid" ]; then
+            echo "VMID mismatch. Aborting."
+            return 1
+        fi
+        qm destroy "$vmid"
+        echo "VM $vmid destroyed (config only)."
+        ;;
+    destroyfull | destroyhard | destroyall)
+        echo "Preparing to FULLY destroy VM $vmid (including disks)..."
+        echo -e "${RED1}!!! This action is irreversible and will remove the VM and all its data!${NC}"
+        read -p "Type the VMID ($vmid) again to confirm: " confirm
+        if [ "$confirm" != "$vmid" ]; then
+            echo "VMID mismatch. Aborting."
+            return 1
+        fi
+        qm destroy "$vmid" --destroy-unreferenced-disks
+        echo "VM $vmid fully destroyed (including disks)."
+        ;;
+
     # Handle unsupported actions
     *)
         echo "Unsupported action: $action"
