@@ -3436,18 +3436,21 @@ push() {
 push1() {
     local message
     message="$*"
-    [ ! "$message" ] && IFS='' read -d '' -t1 message
-    [ ! "$message" ] && message="$HOSTNAME"
+    [ -z "$message" ] && IFS='' read -d '' -t1 message
+    [ -z "$message" ] && message="$HOSTNAME"
 
+    # Telegram 정보가 없으면 메시지만 출력
     if [[ -z ${telegram_token} || -z ${telegram_chatid} ]]; then
-        echo -e "\a[push1] $message" # 벨과 함께 메시지 출력
+        echo -e "\a[push1] $message"
         return 1
     fi
 
+    # Telegram으로 전송
     curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
-        -d chat_id=${telegram_chatid} -d text="${message}" >/dev/null
+        -d chat_id="${telegram_chatid}" -d text="${message}" >/dev/null
+
     result=$?
-    if [ "$result" == 0 ]; then
+    if [ "$result" -eq 0 ]; then
         GRN1 && echo "push1 msg sent"
     else
         RED1 && echo "Err:$result -> push1 send error"
