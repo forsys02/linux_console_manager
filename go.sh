@@ -240,7 +240,7 @@ process_commands() {
             echo "→ 내부 메뉴 [$partcom] 로 점프"
             menufunc "$(scutsub "$partcom")" "$(scuttitle "$partcom")" "$(notscutrelay "$partcom")"
             return 0
-        elif echo "$command" | grep -Eq 'tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
+        elif echo "$command" | grep -Eq 'wget|tail -f|journalctl -f|ping|vmstat|logs -f|top|docker logs|script -q'; then
             # 탈출 ctrlc 만 가능한 경우 -> trap ctrlc 감지시 menu return
             (
                 #echo "ctrl c trap process..."
@@ -1109,10 +1109,10 @@ menufunc() {
                                             if [ -n "${!org_var_name}" ]; then
                                                 printf "==============================================
 >>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name//\\/}$(tput sgr0)
-!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m:"
+!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
                                             else
                                                 printf "==============================================
-!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m:"
+!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
                                             fi
 
                                             # printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
@@ -1157,7 +1157,7 @@ menufunc() {
                                                 fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                                 #printf "!!(Cancel:c) Enter value for \e[1;35;40m[ ${var_name} env Default:$masked_dvar_value ] \e[0m:"
-                                                printf "!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name}${NC}${MAG1} env Default:$masked_dvar_value ] \e[0m:"
+                                                printf "!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name}${NC}${MAG1} env Default:$masked_dvar_value ] ${NC}:"
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
@@ -3451,9 +3451,9 @@ push1() {
 
     result=$?
     if [ "$result" -eq 0 ]; then
-        GRN1 && echo "push1 msg sent"
+        GRN1 && echo "push1 msg sent" && bell
     else
-        RED1 && echo "Err:$result -> push1 send error"
+        RED1 && echo "Err:$result -> push1 send error" && bell
     fi
     NC
 
