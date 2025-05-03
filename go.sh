@@ -40,8 +40,8 @@ envorg="$base/go.env"
 # env 파일을 메모리에 상주 cat 부하 감소
 shm_env_file="/dev/shm/.go.env"
 fallback_env_file="$base/.go.env"
-if rm -f "$shm_env_file" 2>/dev/null; then
-    env="$shm_env_file"
+if [ ! -f $shm_env_file ] || rm -f "$shm_env_file" 2>/dev/null; then
+    [ -d /dev/shm ] && env="$shm_env_file"
 else
     env="$fallback_env_file"
 fi
@@ -5973,7 +5973,8 @@ vmip() {
             print "ip neigh replace "$1" lladdr "$2" dev "dev
         }' | bash
 
-        ip=$(ip neigh | grep -i "$mac" | awk '{print $1}' | head -n1)
+        #ip=$(ip neigh | grep -i "$mac" | awk '{print $1}' | head -n1)
+        ip=$(ip neigh | grep -i "$mac" | awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print $1}' | head -n1)
 
         if [ -z "$ip" ]; then
             [ "$debug" == "debug" ] && echo "[DEBUG] IP not found for MAC=$mac, retrying..."
