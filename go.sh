@@ -6201,12 +6201,21 @@ vm() {
     # Backup the VM using vzdump with snapshot mode
     backup)
         echo "Backing up $vmid using vzdump..."
-        storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage')
+        #storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" '.[] | select( (.nodes == $node) and (.type == "dir") and (.content|contains("backup"))) | .storage')
+        storage=$(pvesh get /storage -output-format=json | jq -r --arg node "$(basename "$(readlink /etc/pve/local)")" \
+            '.[] | select((.nodes == null or .nodes == $node) and (.type == "dir") and (.content | contains("backup"))) | .storage')
+
+        if [[ $(echo "$storage" | wc -l) -gt 1 ]]; then
+            dlines stoage slect
+            storage=$(echo $storage | pipemenu)
+        fi
+
         # 스토리지 없으면 기본값 사용
         if [ -z "$storage" ]; then
             echo "No backup storage found, using default storage (local)."
             storage="local" # 기본값 설정 (필요에 따라 다른 기본값으로 바꿀 수 있음)
         fi
+
         vzdump $vmid --mode snapshot --storage "$storage" --compress zstd --notes-template "{{guestname}}" --remove 0
         bell
         ;;
