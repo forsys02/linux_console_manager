@@ -6123,8 +6123,8 @@ vm() {
         OUTPUT="$(pvesh create "$path/status/$action" 2>&1)"
         echo "$OUTPUT"
         if echo "$OUTPUT" | grep -qE "device is already attached|Duplicate ID|vfio.*error|QEMU exited with code 1" && [ "$action" = "start" ]; then
-            echo "VM $VMID failed to start. Stopping VM..."
-            vm $VMID stop
+            echo "VM $vmid failed to start. Stopping VM..."
+            vm $vmid stop
             return 1
         else
             if echo "$action" | grep -qE "start"; then
@@ -6140,9 +6140,9 @@ vm() {
         OUTPUT="$(pvesh delete "$path/lock" 2>&1)"
         echo "$OUTPUT"
         if echo "$OUTPUT" | grep -qi "does not exist"; then
-            echo "No lock present on VM $VMID."
+            echo "No lock present on VM $vmid."
         elif echo "$OUTPUT" | grep -qi "permission denied"; then
-            echo "Failed to unlock VM $VMID: Permission denied."
+            echo "Failed to unlock VM $vmid: Permission denied."
             return 1
         else
             echo "Unlocking..." && sleepdot 3 && dline && vms
@@ -6169,7 +6169,7 @@ vm() {
     status | st | "")
         pvesh get "$path/status/current" --noborder | cgrepf2 stopped running
         dline
-        lvs --noheadings --units g -o lv_name,lv_size,data_percent | awk -v id="vm-"$VMID '$2 != "0.00g" && $1 ~ "^"id && NF==3 {u=$2*$3/100; printf "%s: %s / %.2fG / %s%%\n", $1, $2, u, $3}'
+        lvs --noheadings --units g -o lv_name,lv_size,data_percent | awk -v id="vm-"$vmid '$2 != "0.00g" && $1 ~ "^"id && NF==3 {u=$2*$3/100; printf "%s: %s / %.2fG / %s%%\n", $1, $2, u, $3}'
         ;;
 
     ip | ipcheck | "")
