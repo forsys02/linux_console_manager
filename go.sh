@@ -5892,11 +5892,11 @@ dfmonitor() {
     done
 }
 
-# proxmox vmid vnname ip print
+# proxmox running vmid vnname ip print
 vmipscan() {
     local IFS=$' \t\n'
     local iface
-    [ "$1" ] && iface="$1" || iface="vmbr0"
+    [ "$1" ] && iface="$1" || iface=$(ip route | awk '/default/ {print $5}')
 
     declare -A mac_ip_map
     while read -r ip mac; do
