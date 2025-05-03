@@ -5969,9 +5969,17 @@ vmip() {
         [ "$debug" == "debug" ] && echo "[DEBUG] Running arp-scan (attempt $((attempt + 1)))..."
 
         arp-scan -I "$iface" --localnet 2>/dev/null |
-            awk -v dev="$iface" '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+[ \t]+([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/ {
-            print "ip neigh replace "$1" lladdr "$2" dev "dev
-        }' | bash
+            awk -v dev="$iface" '
+{
+    ip=$1; mac=$2;
+
+    # IP가 올바른 IPv4 주소 형식인 경우에만 처리
+    if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+        # ARP 테이블 갱신 명령어 출력
+        print "ip neigh del " ip " dev " dev " 2>/dev/null";
+        print "ip neigh add " ip " lladdr " mac " dev " dev " nud reachable";
+    }
+}' | bash
 
         #ip=$(ip neigh | grep -i "$mac" | awk '{print $1}' | head -n1)
         ip=$(ip neigh | grep -i "$mac" | awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {print $1}' | head -n1)
