@@ -2646,6 +2646,7 @@ selectmenu() { select item in $@; do echo $item; done; }
 # pipe 로 넘어온 줄의 모든 필드를 select 구분자-> 빈칸 빈줄 파이프(|}
 pipemenu() {
     local prompt_message="$@"
+    #[ -n "$prompt_message" ] && dlines "$prompt_message"
     PS3="==============================================
 >>> ${prompt_message:+"$prompt_message - "}Select No. : "
     IFS=$' \n|'
@@ -6206,8 +6207,7 @@ vm() {
             '.[] | select((.nodes == null or .nodes == $node) and (.type == "dir") and (.content | contains("backup"))) | .storage')
 
         if [[ $(echo "$storage" | wc -l) -gt 1 ]]; then
-            dlines stoage slect
-            storage=$(echo $storage | pipemenu)
+            storage=$(echo $storage | pipemenu stoage slect)
         fi
 
         # 스토리지 없으면 기본값 사용
