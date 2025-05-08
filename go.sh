@@ -6173,7 +6173,7 @@ vm() {
         lvs --noheadings --units g -o lv_name,lv_size,data_percent | awk -v id="vm-"$vmid '$2 != "0.00g" && $1 ~ "^"id && NF==3 {u=$2*$3/100; printf "%s: %s / %.2fG / %s%%\n", $1, $2, u, $3}'
         ;;
 
-    ip | ipcheck | "")
+    ip | ipcheck)
         vmip $vmid
         ;;
     # Enter the VM (LXC: pct enter, QEMU: SSH)
