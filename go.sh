@@ -1866,6 +1866,18 @@ awkf() {
     fi
 }
 
+sortip() {
+    sort -k1,1 -t. -k1,1n -k2,2n -k3,3n -k4,4n
+}
+
+sortip2() {
+    sort -k2,2 -t. -k2,2n -k3,3n -k4,4n -k5,5n
+}
+
+sortip3() {
+    sort -k3,3 -t. -k3,3n -k4,4n -k5,5n -k6,6n
+}
+
 # colored ip (1 line multi ip apply)
 cip() { awkf '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null; }
 
