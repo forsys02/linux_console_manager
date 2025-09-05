@@ -110,6 +110,9 @@ else
     cat "$envorg2" >>"$env" 2>/dev/null
 fi
 
+# console error level print
+[[ $(tty) == /dev/tty* ]] && echo 3 4 1 7 >/proc/sys/kernel/printk
+
 # cmd 라인뒤 주석제거 // 빈줄은 그대로 //  trim
 #sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
 #sed -i -e 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' -e '/^[[:blank:]]\+$/d' "$env"
@@ -649,7 +652,7 @@ menufunc() {
         # 1 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
         # if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
         # if (echo "$choice" | grep -Eq '^[1-9]$|^[1-9][0-9]$') && [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ] 2>/dev/null; then
-        if [[ $choice != 0* ]] && ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
+        if [[ $choice != 0* ]] && [[ -z $choice1 ]] && ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
@@ -2676,6 +2679,8 @@ pipemenu() {
     unset IFS
     unset PS3
 }
+# pipemenu alias
+pm() { pipemenu "$@"; }
 
 # pipe 로 넘어온 줄의 첫번째 필드를 select
 pipemenu1() {
