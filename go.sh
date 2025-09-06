@@ -3004,14 +3004,14 @@ vmslistold_() {
         awk -F'[ /]' '{print $2, $1, $3, $4}' |
         column -t
 }
-vmslist() {
-    # proxmox9 대응
+vmslistold__() {
+    # Proxmox major version 추출 (빠른 방식)
     local pve_major
-    pve_major=$(pveversion | cut -d'/' -f2 | cut -d'.' -f1)
+    pve_major=$(dpkg-query -W -f='${Version}\n' pve-manager | cut -d'.' -f1)
 
     case "$pve_major" in
     8)
-        # Proxmox 8.x : name=$17 , node=$23
+        # Proxmox 8.x : name=$17 , status=$23
         pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
             awk '{id=$1; name=$17; status=$23;
                       if (name=="") { name="unknown"; status="cluster_down"; }
@@ -3019,7 +3019,7 @@ vmslist() {
             column -t
         ;;
     9)
-        # Proxmox 9.x : name=$17 , node=$22
+        # Proxmox 9.x : name=$19 , status=$25
         pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
             awk '{id=$1; name=$19; status=$25;
                       if (name=="") { name="unknown"; status="cluster_down"; }
@@ -3030,6 +3030,18 @@ vmslist() {
         echo "Unsupported Proxmox version: $pve_major"
         ;;
     esac
+}
+vmslist() {
+    pvesh get /cluster/resources -type vm --output-format json 2>/dev/null |
+        jq -r '
+            .[] |
+            if (.name == null or .name == "") then
+                {id: .id, name: "unknown", status: "cluster_down"}
+            else
+                {id: .id, name: .name, status: .status}
+            end
+            | "\(.id) \(.name) \(.status)"
+        ' | column -t
 }
 
 vmslistview() {
