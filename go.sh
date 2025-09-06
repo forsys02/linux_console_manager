@@ -593,7 +593,7 @@ menufunc() {
         #readxx $LINENO you choice? $choice
         # if [ "$choice" ] && (( ! $choice > 0 )) 2>/dev/null; then choice 에 영어가 들어오면 참인데 오작동 가끔발생
         # readxy "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
-        if [ "$choice" ] && { ! echo "$choice" | grep -Eq '^[1-9][0-9]*$' || echo "$choice" | grep -Eq '^[a-zA-Z]+$'; }; then
+        if [ "$choice" ] && [ -z "$choice1" ] && { ! echo "$choice" | grep -Eq '^[1-9][0-9]*$' || echo "$choice" | grep -Eq '^[a-zA-Z]+$'; }; then
             #readxx $LINENO you choice? yes $choice
             # subshortcut 을 참조하여 title_of_menu 설정
             # ex) chosen_command:{submenu_systemsetup} // title_of_menu:시스템 초기설정과 기타 (submenu) [i]
@@ -997,7 +997,15 @@ menufunc() {
                             if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
 
                                 # 명령줄에 varVAR 형태 기본값 지정을 위한 loop (ex. varA varB 등 한 명령줄에 여러개의 변수요청)
+                                ################
+                                readvarcount=0
                                 while read -r var; do
+                                    ################
+                                    # 변수 입력시 취소가 들어왔으면 while loop 종료
+                                    # echo "readvarcount:$readvarcount var_value:$var_value dvar_value:$dvar_value"
+                                    if [ "$readvarcount" -gt 0 ] && { [ "$var_value" = "Cancel" ] || [ "$dvar_value" = "Cancel" ]; }; then
+                                        break
+                                    fi
                                     var_value=""
                                     dvar_value=""
                                     #echo "init_var_name: $var_name" && readx
@@ -1251,11 +1259,18 @@ menufunc() {
                                         #[ "$var_value" ] && export ${org_var_name}="$(printf %q "$var_value")"
                                     fi
 
+                                    # while loop count
+                                    readvarcount=$((readvarcount + 1))
+
                                     #done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.@-]*\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.@-]*/p' | awk '!seen[$0]++')
                                     # 변수에는 @ 불가 변수값에는 @ 가능 // 구분하여 변수분할
+
                                 done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.-]*\(__[a-zA-Z0-9_.@-]*\)\?\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.-]*/p' | awk '!seen[$0]++')
 
-                            # end of while
+                                ##################
+                                # 끝: 명령줄에 varVAR 형태 기본값 지정을 위한 loop (ex. varA varB 등 한 명령줄에 여러개의 변수요청)
+                                # end of while read -r var; do
+                                ##################
 
                             else # cfm -> n
                                 # Danger item -> canceled
@@ -2982,12 +2997,39 @@ nodeip() {
 # proxmox vmslist
 
 vmslistold() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
-vmslist() {
+vmslistold_() {
     pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
         awk '{print $1,$17,$23}' |
         awk '{if($2=="") print $1,"unknown","cluster down"; else print $0}' |
         awk -F'[ /]' '{print $2, $1, $3, $4}' |
         column -t
+}
+vmslist() {
+    # proxmox9 대응
+    local pve_major
+    pve_major=$(pveversion | cut -d'/' -f2 | cut -d'.' -f1)
+
+    case "$pve_major" in
+    8)
+        # Proxmox 8.x : name=$17 , node=$23
+        pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
+            awk '{id=$1; name=$17; status=$23;
+                      if (name=="") { name="unknown"; status="cluster_down"; }
+                      print id, name, status}' |
+            column -t
+        ;;
+    9)
+        # Proxmox 9.x : name=$17 , node=$22
+        pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
+            awk '{id=$1; name=$19; status=$25;
+                      if (name=="") { name="unknown"; status="cluster_down"; }
+                      print id, name, status}' |
+            column -t
+        ;;
+    *)
+        echo "Unsupported Proxmox version: $pve_major"
+        ;;
+    esac
 }
 
 vmslistview() {
