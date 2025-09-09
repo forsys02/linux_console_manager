@@ -111,7 +111,7 @@ else
 fi
 
 # console error level print
-[[ $(tty) == /dev/tty* ]] && echo 3 4 1 7 >/proc/sys/kernel/printk
+[[ $(tty) == /dev/tty* ]] && echo 3 4 1 7 >/proc/sys/kernel/printk 2>/dev/null
 
 # cmd 라인뒤 주석제거 // 빈줄은 그대로 //  trim
 #sed -i 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env"
