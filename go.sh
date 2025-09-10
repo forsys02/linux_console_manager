@@ -5639,12 +5639,18 @@ bootlog() { dmesg | cpipe | less -RX; }
 # journalctl
 log() { journalctl -e; }
 loge() { journalctl -rp warning; }
-logu() { journalctl -r -u $(systemctl list-unit-files --type=service | grep enable | awk -F'.service' '{print $1}' | pipemenu); }
+er() { journalctl -rp warning; }
+err() {
+    trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+    journalctl -f -p warning
+    trap - SIGINT
+}
 logf() {
     trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
     journalctl -f
     trap - SIGINT
 }
+logu() { journalctl -r -u $(systemctl list-unit-files --type=service | grep enable | awk -F'.service' '{print $1}' | pipemenu); }
 
 # select function
 logsff() { $(declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | pipemenu); }
