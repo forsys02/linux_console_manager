@@ -9275,7 +9275,7 @@ Wants=network-online.target
 User=teldrive
 Group=teldrive
 
-ExecStart=/usr/local/bin/teldrive run \
+ExecStart=/usr/bin/teldrive run \
     --tg-app-id "$telegramappid" \
     --tg-app-hash "$telegramapphash" \
     --jwt-secret "$jwtsecret" \
@@ -9319,7 +9319,7 @@ Wants=network-online.target
 User=teldrive
 Group=teldrive
 
-ExecStart=/usr/local/bin/teldrive run \
+ExecStart=/usr/bin/teldrive run \
     --tg-app-id "$telegramappid" \
     --tg-app-hash "$telegramapphash" \
     --jwt-secret "$jwtsecret" \
