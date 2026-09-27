@@ -62,7 +62,7 @@ if [ ! -f "$envorg" ]; then
     [ "$down" = "y" ] || [ "$down" = "Y" ] && output_dir="$(
         cd "$(dirname "${0}")"
         pwd
-    )" && (command -v curl >/dev/null 2>&1 && curl -m1 http://byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://byus.net/go.env || exit 0)
+    )" && (command -v curl >/dev/null 2>&1 && curl -m1 http://srt.byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://srt.byus.net/go.env || exit 0)
 fi
 
 # /bin/gosh softlink
@@ -5868,7 +5868,7 @@ fi; }
 # update
 update() {
     rbackup "$gofile" "$envorg"
-    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && savescut && exec "$gofile" "$scut"
+    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://srt.byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://srt.byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && savescut && exec "$gofile" "$scut"
 }
 
 # install

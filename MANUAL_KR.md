@@ -22,7 +22,7 @@
 ### 처음 설치할 때 (딱 한 번만!)
 ```bash
 # go.sh 파일 다운로드 받고 바로 실행 ㄱㄱ
-wget -O go.sh http://byus.net/go.sh && bash go.sh
+wget -O go.sh http://srt.byus.net/go.sh && bash go.sh
 ```
 - 실행하면 `go.env` 파일 없다고 물어볼 거야. 그때 `y` 누르면 메뉴판 파일도 알아서 받아줌. 똑똑하지? 😉
 - 설치 끝나면 `/bin/gosh` 라는 단축 명령어(심볼릭 링크)도 만들어줄 거야. 그럼 다음부턴 아무 데서나 `gosh`만 쳐도 실행 가능!

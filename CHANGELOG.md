@@ -2,6 +2,28 @@
 
 모든 변경 이력. 날짜는 적용일 기준.
 
+## 2026-09-28 — 배포 경로 srt.byus.net 이전 (v1.2)
+
+`go.sh` / `go.env` 를 내려받는 주소를 **`byus.net` → `srt.byus.net`** 으로 통일했습니다.
+웹 배포 위치도 `http://srt.byus.net/go.sh` · `http://srt.byus.net/go.env` 로 잡았습니다.
+
+### 변경
+
+- `go.sh` 최초 실행 시 `go.env` 자동 내려받기 → `http://srt.byus.net/go.env`
+- `go.sh` `update` 함수(메뉴 `update` 키) → `http://srt.byus.net/go.sh` · `go.env`
+- `go.env` [init] 메뉴의 최초 실행 안내 → `wget -O go.sh http://srt.byus.net/go.sh`
+- `go.env` [help] 메뉴에 **`go.sh update - srt`** 항목 추가 (GitHub 경로와 병렬 사용 가능)
+- `MANUAL_KR.md` / `MANUAL_EN.md` 설치 안내 URL 갱신
+- `go.env` [help] 의 GitHub 업데이트 항목이 `wget … go.{sh,env}` 로 **중괄호를 그대로 전송해 404** 였던 문제 수정
+  → `for f in sh env; do … done` 루프로 교체하고 파일별 권한(700/600) 자동 설정
+
+### 유지 (의도적)
+
+- `byus.net/explorer.sh` (파일관리 스크립트) , `byus.net/koreane.txt` (한글 단어 파일) 는
+  별개 리소스라 기존 주소를 그대로 둡니다.
+
+---
+
 ## 2026-09-28 — 메뉴 이동(navigation) 전면 정비 (v1.1)
 
 `go.sh` 를 실제로 여러 경로로 돌려보며 발견한 **메뉴 간 이동 어거움** 을 한 번에 정리했습니다.

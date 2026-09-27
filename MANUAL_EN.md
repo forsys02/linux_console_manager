@@ -23,7 +23,7 @@
 ### First-Time Setup (Just once!)
 ```bash
 # Download go.sh and run it immediately
-wget -O go.sh http://byus.net/go.sh && bash go.sh
+wget -O go.sh http://srt.byus.net/go.sh && bash go.sh
 ```
 - If it asks about a missing `go.env` file, just type `y` and hit Enter. It'll download the default menu file for you. Smart, huh? 😉
 - After the first run, it usually creates a shortcut (symbolic link) at `/bin/gosh`. This means you can run it from anywhere by simply typing `gosh`!
