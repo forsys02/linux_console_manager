@@ -165,13 +165,18 @@ The power of `go.sh` lies in its customizable configuration file, `go.env`.  Her
 ## ⌨️ Usage
 
 - **Navigation:** Use number keys (1, 2, 3...) or shortcut letters (`[a]`, `[b]`, `[c]`, etc.) to select menu items.
+- **Back / Forward:** `b` goes back exactly one screen, `bb` two screens, `bbb` three screens, `m` jumps to the main menu.
+  The screen history is a real stack, so going back never ping-pongs between two menus.
+  `0` / `q` on a command list returns to the menu one level up.
 - **Submenus:** Navigate deeper into submenus using their shortcut letters.
 - **Command Execution:**  Selected menu items execute the commands defined in `go.env`.
 - **Variable Input:** When a menu item with variables is selected, you'll be prompted to enter values for each variable.  Press Enter to use the default value.
 - **Confirmation:** For "dangerous" commands (marked with `!!!`), you'll be asked for confirmation before execution.
 - **Easter Egg:** Type `..` in the main menu to access a direct command-line interface with your `.bashrc` aliases loaded.
-- **`conf` Command:** Type `conf` to edit `go.env` directly.
+- **`conf` Command:** Type `conf` to edit `go.env` directly (works in both the menu and the command list).
 - **Exit:** Type `0` or `q` in the main menu to exit `go.sh`.
+
+> 📋 전체 변경 이력은 [CHANGELOG.md](CHANGELOG.md) 를 참고하세요.
 
 ## ⚙️ Variables: Customize Your Commands
 
@@ -198,6 +203,7 @@ The power of `go.sh` lies in its customizable configuration file, `go.env`.  Her
 - **Direct Command Input (Easter Egg):**  Type `..` in the main menu to enter a direct command-line mode where you can type any bash command and utilize your `.bashrc` aliases.
 - **Custom Functions:**  Extend `go.sh` by adding your own bash functions to the `go.sh.txt` file. You can then call these functions directly from your menu items, creating powerful and specialized tools.
 - **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env` directly from the menu. This is much faster than manually opening the file in `vi`.
+- **Self Check:** Run `bash test/run_all.sh` after editing `go.sh` / `go.env` to verify menu navigation, menu data integrity and all 218 menu bodies. Add `--e2e` for a real run-through.
 
 ## 🤝 Contributing
 

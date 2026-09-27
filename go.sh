@@ -351,6 +351,9 @@ menufunc() {
     local title_of_menu_sub="$2"  # ex) debian lamp set flow
     local title_of_menu="$2"      # ex) debian lamp set flow
     local title="$2"              # ex) debian lamp set flow
+    # 진입 컨텍스트 스냅샷 (이후 chosen_command_sub/title_of_menu_sub 이 변형되므로 별도 보관)
+    local NAVENTRY_sub="$1" NAVENTRY_title="$2"
+    declare -a keysarr idx_mapping
     readxx "$LINENO // choice:$choice // title_of_menu:$title_of_menu // chosen_command_sub:$chosen_command_sub // title:$title"
     #readxy "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
 
@@ -363,6 +366,9 @@ menufunc() {
     HISTFILE="$gotmp/go_history.txt"
     #history -r "$HISTFILE"
 
+    # 화면 진입 이력 동기화 (이전 화면은 스택에 보관)
+    nav_sync "$NAVENTRY_sub" "$NAVENTRY_title"
+
     # 탈출코드 또는 ctrlc 가 입력되지 않는 경우 루프 loop
     ############### main loop ###################
     ############### main loop ###################
@@ -370,6 +376,8 @@ menufunc() {
     while true; do # choice loop
         oldchoice="$choice"
         choice=""
+        choice1="" # 이전 입력의 두번째 단어가 남으면 단축키/바로가기 판정이 꼬임
+        nav_shortcut_hit="" # 바로가기 해석 여부 (99 내부값 통과용)
         unset -v skipmain
         #[[ -n "$cmd_choice" && -z "$choice" ]] && choice="$cmd_choice" || choice=""
         cmd_choice=""
@@ -532,8 +540,9 @@ menufunc() {
             local items
             menu_idx=0
             shortcut_idx=0
-            declare -a keysarr
-            declare -a idx_mapping
+            # 이전 화면에서 모은 단축키가 남아있으면 다른 화면의 번호로 점프하므로 초기화
+            keysarr=()
+            idx_mapping=()
 
             readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
             # 메인 or 서브 메뉴 리스트 구성 loop
@@ -561,6 +570,7 @@ menufunc() {
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
             echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
+            echo "   [b] 이전화면  [bb] 2단계전  [bbb] 3단계전  [m] 메인메뉴  [e] 파일관리  [h] 실행히스토리  [conf] 설정편집  [sh] 내장쉔"
             echo "=============================================="
         fi
         ############## 메뉴 출력 끝 ###############
@@ -570,7 +580,7 @@ menufunc() {
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             history -r
-            IFS=' ' read -rep ">>> Select No. ([0-${menu_idx}],[ShortCut],h,e,sh): " choice choice1 </dev/tty
+            IFS=' ' read -rep ">>> Select No. [0-${menu_idx}] 단축키 b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 kr:한글: " choice choice1 </dev/tty
             [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
         fi
@@ -640,10 +650,12 @@ menufunc() {
                         title_of_menu="${itema2#*\}}"
                     fi
 
-                    # choice 99 로 아래 메뉴 진입 시도
+                    # choice 99 로 아래 메뉴 진입 시도 (바로가기 전용 내부 값)
                     readxx $LINENO choice_fail_check: $choice
                     choice=99
+                    nav_shortcut_hit="y" # 99 는 바로가기 해석 결과로만 통과시킨다
                     readxx $LINENO choice_fail_check: $choice
+                    break # 중복 단축키가 있어도 첫번째 항목만 사용
                 fi
             done
         fi
@@ -652,7 +664,9 @@ menufunc() {
         # 1 ~ 98 까지 메뉴 지원 // 99 특수기능 ex) shortcut,conf,kr,q // cf) 100~9999 특수기능(timer)
         # if [ -n "$choice" ] && { case "$choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && { [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ]; }; then
         # if (echo "$choice" | grep -Eq '^[1-9]$|^[1-9][0-9]$') && [ "$choice" -ge 1 ] && [ "$choice" -le "$menu_idx" ] || [ "$choice" -eq 99 ] 2>/dev/null; then
-        if [[ $choice != 0* ]] && [[ -z $choice1 ]] && ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
+        # 99 는 단축키 바로가기 해석용 내부값이므로, 해석에 실패한 99 는 여기서 막는다
+        # (막지 않으면 이전화면 제목이 재사용되어 엉뚱한 메뉴의 명령이 실행됨)
+        if [[ $choice != 0* ]] && [[ -z $choice1 ]] && { [ "$choice" != 99 ] || [ -n "$nav_shortcut_hit" ]; } && ((choice >= 1 && choice <= 99 && choice <= menu_idx || choice == 99)) 2>/dev/null; then
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
@@ -881,17 +895,20 @@ menufunc() {
                                     history -r
                                     if [ -n "$newcmds" ]; then
                                         #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty; }
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty; }
                                         unset -v newcmds newcmds1
                                     else
-                                        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                        IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty
                                     fi
                                     #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
-                                    #trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
-                                    # flow 메뉴 하부 메뉴 종료
-                                    [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to flow menu... [$ooldscut]" &&
-                                        menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
+                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                    # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
+                                    # (이전에는 여기서 menufunc 를 직접 호출해서 아래 case 의 b 처리와 이중 호출됨)
+                                    if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
+                                        cmd_choice="b"
+                                        echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                    fi
                                     [[ -n $cmd_choice ]] && break
                                 done
                             else
@@ -900,16 +917,19 @@ menufunc() {
                                 history -r
                                 if [ -n "$newcmds" ]; then
                                     #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty; }
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty; }
                                     unset -v newcmds newcmds1
                                 else
-                                    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                    IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty
                                 fi
                                 #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
-                                # flow 메뉴 하부 메뉴 종료
-                                [ -z "${cmd_choice-}" ] && echo "${ooldscut-}" | grep -q '^flow' && cmd_choice="b" && echo "Back to flow menu..."
+                                # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
+                                if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
+                                    cmd_choice="b"
+                                    echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                fi
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -926,6 +946,9 @@ menufunc() {
                         ####################### end of choice_list #######################
 
                         # $env 환경파일에서 가져온 명령문 출력 && read cmd_choice
+                        # 실제 CMD 목록을 화면에 띄우는 이 시점에 (메뉴목록) 화면을 이력에 남긴다
+                        # (relay 1줄메뉴나 CMD 목록을 띄우지 않는 경로에서는 이력을 건드리지 않는다)
+                        nav_cmdlist "$title_of_menu" "$sub_menu"
                         choice_list
 
                         # 명령어 선택후
@@ -1303,13 +1326,12 @@ menufunc() {
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                         #[ $num_commands -eq 1 ] && break
                         if [ "$num_commands" -eq 1 ]; then
-                            #echo "scut:$scut / oldscut: $oldscut / ooldscut: $ooldscut" && readxy
-                            if echo "$ooldscut" | grep -q '^flow_'; then
-                                echo "go to $ooldscut" #; readxy
-                                menufunc "$ooldscut"
-                            elif echo "$scut" | grep -q '\<pxx\>'; then
-                                echo "go to $ooldscut" #; readxy
-                                menufunc "$ooldscut"
+                            # 이전에는 ooldscut(파일순서 기준 최근 메뉴) 를 보고 이동해서
+                            # 실제 경로와 다른곳으로 튀거나 아무 이동도 안 하는 경우가 있었음
+                            # 이력 스택의 바로 위 화면으로 정확히 복귀
+                            if [ -n "$NAV_scut" ]; then
+                                echo "go to [${NAV_scut}] ${NAV_title}" #; readxy
+                                nav_back 1
                             fi
                             break
                         fi
@@ -1334,32 +1356,24 @@ menufunc() {
                     readxx $LINENO cmd_choice: $cmd_choice
                     #set -x
                     #[[ -n $cmd_choice && ( $cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/} ) ]] || ! (( cmd_choice >= 1 && cmd_choice <= 99 )) 2>/dev/null &&
-                    [[ -n $cmd_choice && ($cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/}) || $cmd_choice -ge 100 ]] &&
+                    # 숫자판정 : [[ ]] 안에서 문자열에 -ge 를 쓰면 bash 가 "syntax error in conditional expression" 을 뱉고
+                    # case 자체가 실행되지 않았음 → 숫자인지 먼저 expr 로 확인한다
+                    if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '^[0-9]\+$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
                         {
                             YEL1
                             echo
                             echo "check your cmd_choice: $cmd_choice"
                             NC
-                        } &&
+                        }
                         case "$cmd_choice" in
                         # --- Basic Navigation & Commands ---
                         "0" | "q" | ".")
-                            #if [ "$choice" == "99" ]; then
-                            # scut 으로 들어온 경우, 상위메뉴타이틀 찾기
-                            title_of_menu_sub="$(grep -B1 "^${chosen_command_sub}" "$env" | head -n1 | grep "^%%%" | sed -e 's/^%%% //g' -e 's/.*}//')"
-                            title_of_menu=$title_of_menu_sub
-                            readxx $LINENO "quit cmd_choice - pre_commands:$pre_commands"
-                            t_chosen_command_sub=$chosen_command_sub
-                            chosen_command_sub=""
-                            listof_comm
-                            chosen_command_sub=$t_chosen_command_sub
-                            readxx $LINENO "quit cmd_choice after listof_comm - pre_commands:$pre_commands"
-                            #[ -n "$title_of_menu_sub" ] && title_of_menu="$title_of_menu_sub"
-                            readxx $LINENO "quit cmd_choice - env: $env title_of_menu_sub:$title_of_menu_sub {chosen_command_sub}:${chosen_command_sub} SHLVL:$SHLVL "
-                            #fi
+                            # CMD 목록 → 한 단계 위 화면(메뉴목록)으로 복귀
+                            # 기존 grep -B1 방식은 relay 경유 서브메뉴에서 상위메뉴를 분실/오인식함
                             unsetvar varl
                             saveVAR
-                            break # Exit the loop
+                            nav_back 1
+                            continue
                             ;;
 
                         ".." | "sh")
@@ -1370,22 +1384,41 @@ menufunc() {
                             continue  # Run cmds after sub-shell exits
                             ;;
                         "m")
-                            menufunc
+                            nav_main
+                            continue
+                            ;;
+                        # 화면 프롬프트에 안내되지만 이전에는 case 가 없어 동작하지 않던 키들
+                        conf | conf1 | confb | confmy | conff | confc | conffc | pconf)
+                            saveVAR
+                            "$cmd_choice" $cmd_choice1
+                            continue
+                            ;;
+                        str | search)
+                            "$cmd_choice" $cmd_choice1
+                            continue
+                            ;;
+                        ff | ffc | fffc)
+                            "$cmd_choice" $cmd_choice1
+                            continue
+                            ;;
+                        format)
+                            format
+                            continue
                             ;;
                         "restart" | "rest")
                             echo "Restart $gofile.. [$scut]" && sleep 0.5 && savescut && exec "$gofile" "$scut"
                             ;;
                         "b" | "00")
-                            echo "Back to previous menu.. [$ooldscut]" && savescut &&
-                                menufunc "$(scutsub "$ooldscut")" "$(scuttitle "$ooldscut")" "$(notscutrelay "$ooldscut")"
+                            savescut && nav_back 1 # 이전 화면으로
+                            continue
                             ;;
                         "bb")
-                            echo "Back two menus.. [$oooldscut]" && sleep 0.5 && savescut &&
-                                menufunc "$(scutsub "$oooldscut")" "$(scuttitle "$oooldscut")" "$(notscutrelay "$oooldscut")"
+                            savescut && nav_back 2 # 두 단계 이전 화면으로
+                            continue
                             ;;
                         "bbb")
-                            echo "Back three menus.. [$ooooldscut]" && sleep 0.5 && savescut &&
-                                menufunc "$(scutsub "$ooooldscut")" "$(scuttitle "$ooooldscut")" "$(notscutrelay "$ooooldscut")"
+                            savescut && nav_back 3 # 세 단계 이전 화면으로
+                            continue
                             ;;
                         "<" | "before")
                             beforescut=$(st $scut b)
@@ -1542,6 +1575,7 @@ menufunc() {
                             fi
                             ;;
                         esac
+                    fi
 
                     echo "no hook cmd_choice: $cmd_choice --- pre_commands refresh loop"
                     #unset cmd_choice cmd_choice1
@@ -1569,7 +1603,7 @@ menufunc() {
         elif [ "$choice" ]; then
             case "$choice" in
             m) # 메인/서브 메뉴 탈출
-                menufunc
+                nav_main
                 ;;
             0 | "q" | .) # 메인/서브 메뉴 탈출 (quit)
                 # title_of_menu_sub=""
@@ -1578,23 +1612,20 @@ menufunc() {
 
                 # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
                 if [ "$title_of_menu_sub" ]; then
-                    menufunc
+                    nav_main
                 else
                     saveVAR
                     exit 0
                 fi
                 ;;
             b | 00)
-                echo "Back to previous menu.. [$ooldscut]" &&
-                    savescut && menufunc "$(scutsub $ooldscut)" "$(scuttitle $ooldscut)" "$(notscutrelay "$ooldscut")" # back to previous menu
+                savescut && nav_back 1 # 이전 화면으로
                 ;;
             bb)
-                echo "Back two menus.. [$oooldscut]" && sleep 0.5
-                savescut && menufunc "$(scutsub $oooldscut)" "$(scuttitle $oooldscut)" "$(notscutrelay "$oooldscut")" # back to previous menu
+                savescut && nav_back 2 # 두 단계 이전 화면으로
                 ;;
             bbb)
-                echo "Back three menus.. [$ooooldscut]" && sleep 0.5
-                savescut && menufunc "$(scutsub $ooooldscut)" "$(scuttitle $ooooldscut)" "$(notscutrelay "$ooooldscut")" # back to previous menu
+                savescut && nav_back 3 # 세 단계 이전 화면으로
                 ;;
             df)
                 # Original condition checked for ! "$choice1"
@@ -1710,7 +1741,7 @@ menufunc() {
             *) # Handle remaining complex conditions or unrecognized choices
                 # shortcut 과 choice 가 동일할때 choice 없음 쌩엔터
                 if [[ -z $choice1 ]] && [[ $choice == "$scut" ]]; then
-                    echo "이곳이그곳!!! " && sleep 2
+                    echo "이미 '$scut' 화면 입니다. (b: 이전화면 / m: 메인메뉴)" && sleep 1
                     choice=""
                     #readxx $LINENO shortcut move choice $choice
 
@@ -1719,6 +1750,15 @@ menufunc() {
                     dline
                     vmslistview | cgrepn running -3 | cgrepn1 $choice 3
                     readxy "Proxmox vm --> $(RED1)$choice$(NC) Enter" && enter "$choice"
+
+                # Check : 범위를 벗어난 번호 (예: 99 는 바로가기 내부값)
+                elif expr "$choice" : '^[0-9]\+$' >/dev/null; then
+                    echo "'$choice' 는 이 화면에 없는 번호입니다. (0~$menu_idx 또는 단축키)"
+                    choice=""
+
+                # 메뉴/설정 바로가기 (CMD 화면과 동일하게 동작하도록 통일)
+                elif [ -z "$choice1" ] && case "$choice" in conf | conf1 | confb | confmy | conff | confc | conffc | pconf | str | search | ff | ffc | fffc | format) true ;; *) false ;; esac; then
+                    "$choice" $choice1
 
                 # 실제 리눅스 명령이 들어온 경우 실행
                 # Check: is not purely numeric AND is a valid command
@@ -2883,6 +2923,142 @@ scutrelay() {
     scut=$1
     item="$(scutall $scut)"
     echo "$item" | awk '{if (match($0, /\{[^}]+\}$/)) print substr($0, RSTART, RLENGTH)}'
+}
+
+###############################################################################
+# 메뉴 이동 이력 스택 (navigation stack)
+#
+# 기존 oldscut/ooldscut/oooldscut 방식은 "값이 바뀔 때만 밀기"라서
+# 되돌아가기(b)를 연속으로 누르면 A -> B -> A -> B 로 왕복(헛돌이) 하고
+# bb(bb 두 단계 뒤)가 현재메뉴를 가리키는 등 경로가 꼬인다.
+# 실제 이동 경로를 스택으로 관리해 b/bb/bbb 를 정확히 동작시킨다.
+#
+# 스택 항목 형식 : "scut|sub|title|"   (|sub| 은 비워도 됨)
+#   scut   : 메뉴 단축키 (메인메뉴는 "m")
+#   sub    : 서브메뉴 태그 (예: {submenu_sys}) 또는 빈값
+#   title  : 화면 제목 (메뉴 제목줄)
+###############################################################################
+declare -a NAVSTACK
+NAV_scut=""    # 현재 화면의 scut
+NAV_sub=""     # 현재 화면의 서브메뉴 태그
+NAV_title=""   # 현재 화면의 제목
+NAV_MAX=32     # 이력 보관 개수 상한
+
+# 현재 화면을 이력에 저장
+nav_save() { # $1=scut $2=sub $3=title
+    [ -z "$1" ] && return 1
+    # 같은 화면을 연속으로 쌓지 않음 (A->B->A 왕복시 이력 오염 방지)
+    # (빈 배열에서 음수 인덱스를 쓰면 bash2/3 에서 bad array subscript 오류가 나므로 먼저 비었는지 확인)
+    if [ ${#NAVSTACK[@]} -gt 0 ] && [ "${NAVSTACK[$((${#NAVSTACK[@]} - 1))]}" = "$1|$2|$3|" ]; then
+        return 0
+    fi
+    NAVSTACK[${#NAVSTACK[@]}]="$1|$2|$3|"
+    [ ${#NAVSTACK[@]} -gt "$NAV_MAX" ] && NAVSTACK=("${NAVSTACK[@]:1}")
+    return 0
+}
+
+# 이력 마지막 항목 제거
+nav_drop() {
+    [ ${#NAVSTACK[@]} -eq 0 ] && return 1
+    unset "NAVSTACK[$((${#NAVSTACK[@]} - 1))]"
+    NAVSTACK=("${NAVSTACK[@]}")
+    return 0
+}
+
+# 이력 마지막 항목 확인 (제거 않음)
+nav_peek() {
+    [ ${#NAVSTACK[@]} -eq 0 ] && return 1
+    echo "${NAVSTACK[$((${#NAVSTACK[@]} - 1))]}"
+}
+
+# 이력 항목 -> NAV_scut / NAV_sub / NAV_title
+nav_set() {
+    [ -z "$1" ] && return 1
+    NAV_scut="${1%%|*}"
+    local rest="${1#*|}"
+    NAV_sub="${rest%%|*}"
+    NAV_title="${rest#*|}"
+    NAV_title="${NAV_title%|}"
+    [ -n "$NAV_scut" ] || NAV_scut="m"
+    return 0
+}
+
+# 이력 초기화 (go.sh 재실행 / 수동 호출용)
+nav_reset() {
+    NAVSTACK=()
+    NAV_scut=""
+    NAV_sub=""
+    NAV_title=""
+    return 0
+}
+
+# 화면 전환 : 현재 화면을 이력에 남기고 새 화면으로 이동
+nav_goto() { # $1=scut $2=sub $3=title
+    [ "$NAV_scut|$NAV_sub" = "$1|$2" ] && return 0 # 같은 화면이면 이력 불필요
+    [ -n "$NAV_scut" ] && nav_save "$NAV_scut" "$NAV_sub" "$NAV_title"
+    NAV_scut="$1"
+    NAV_sub="$2"
+    NAV_title="$3"
+    [ -n "$NAV_scut" ] || NAV_scut="m"
+    return 0
+}
+
+# menufunc 진입시 호출 : 진입 컨텍스트(sub, title) 로 이력 동기화
+#   $1=sub(또는 scut)  $2=title
+#   호출 형태 3가지
+#     menufunc                      → ("",        "")
+#     menufunc "{submenu_sys}" "타"  → ("{submenu_sys}", "타")
+#     menufunc "px"                 → ("px",       "")
+nav_sync() {
+    local nsub="$1" ntitle="$2" nscut=""
+    if [ -n "$nsub" ] && [ "${nsub:0:1}" != "{" ]; then
+        if [ -z "$ntitle" ]; then
+            ntitle="$(scuttitle "$nsub")" # menufunc "px" 처럼 제목이 없을때
+        else
+            nsub="" # $1 이 단축키로 넘어온 경우 서브태그 아님
+        fi
+    fi
+    nscut=$(echo "$ntitle" | awk -F'[][]' '{print $2}')
+    [ -n "$nscut" ] || nscut="m"
+    nav_goto "$nscut" "$nsub" "$ntitle"
+}
+
+# CMD 목록 화면 진입 : 메뉴목록 화면을 이력에 남김
+nav_cmdlist() { # $1=선택된 메뉴제목  $2=sub_menu
+    local cscut
+    cscut=$(echo "$1" | awk -F'[][]' '{print $2}')
+    [ -n "$cscut" ] || return 0
+    nav_goto "$cscut" "$2" "$1"
+}
+
+# 이전 화면으로 이동 (b / bb / bbb)
+nav_back() { # $1=단계수(기본 1)
+    local n="${1:-1}" d="" k iv=""
+    for k in $(seq 1 "$n" 2>/dev/null || echo 1); do
+        d="$(nav_peek)" || break
+        nav_drop
+    done
+    if [ -z "$d" ]; then
+        nav_reset
+        echo "◀ 이전 화면 이력이 없습니다. 메인메뉴로 이동합니다."
+        menufunc
+        return 0
+    fi
+    nav_set "$d" # 현재 화면을 되돌린것으로 처리 (재 저장 방지)
+    # 바로가기(직접 CMD 화면 진입)는 실제 메뉴 단축키일 때만 지정
+    # ([scut] 없는 메뉴 / 존재하지 않는 단축키면 빈값으로 둔다)
+    if [ "$NAV_scut" != "m" ] && st "$NAV_scut" >/dev/null 2>&1; then
+        iv="$(notscutrelay "$NAV_scut")"
+    fi
+    echo "◀ 이전 메뉴로 이동.. [${NAV_scut}] ${NAV_title}"
+    menufunc "$NAV_sub" "$NAV_title" "$iv"
+}
+
+# 메인메뉴로 이동 (이력은 남김)
+nav_main() {
+    nav_goto "m" "" ""
+    echo "◀ 메인메뉴로 이동"
+    menufunc
 }
 
 # 함수 이름: sub_to_scut
