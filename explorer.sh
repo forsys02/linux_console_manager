@@ -53,7 +53,7 @@ _pages=1; _page=0; _sel=0
 _SORT=name         # name | mtime | size
 _HIDDEN=0          # 0=숨김 감춤 1=보임
 _SORTZ=0
-_REDRAW_ALL=0      # 1 이면 부분 갱신 대신 화면 전체 재도画
+_REDRAW_ALL=0      # 1 이면 부분 갱신 대신 화면 전체 재도화
 _MSGWAIT_BASE=${_MSGWAIT_BASE:-1.1}   # 결과 메시지 대기 초 (환경변수로 조정 가능)
 _MSGWAIT=1.1
 _LASTPAT=''
@@ -194,9 +194,17 @@ _collect() {
 # ═══════════════════════════════════════════════════════════════════════
 #  키 / 한 줄 입력
 # ═══════════════════════════════════════════════════════════════════════
+#  키 1회 읽기 → 전역 _KEY ( UP DOWN NEXT PREV HOME END DELK ESC 또는 문자 1개 )
+#    방향키는 ESC [ A 처럼 시퀀스다. ESC 를 읽은 뒤 뒤 2바이트를 함께 읽으면
+#    [A [B [C [D 뿐 아니라 [1~ [3~ [5~ [6~ [H [F 까지 한 번에 분해된다.
+#    (한 글자씩 쪼개 읽으면 실측 키가 소실되므로 이 방식을 반드시 유지한다)
 _key() {
     _KEY=''; _SEQ=''
     IFS= read -r -sn1 _KEY < /dev/tty || return 1
+    # ★ read -n 의 기본 구분자가 개행이라 Enter 는 "빈 문자열 + 상태 0" 으로 온다.
+    #   EOF 는 상태 1 이므로 위에서 return 1 로 빠져나간다. 여기서 빈 값을 Enter 로 바꿔야
+    #   Enter 가 동작한다. (v1 은 case 의 "" 패턴이 이 역할을 했었다)
+    [ -z "$_KEY" ] && _KEY=$'\n'
     if [ "$_KEY" = $'\x1b' ]; then
         read -n2 -t1 _SEQ < /dev/tty
         case $_SEQ in
@@ -204,12 +212,12 @@ _key() {
             '[B'|'OB') _KEY=DOWN ;;
             '[C'|'OC') _KEY=NEXT ;;
             '[D'|'OD') _KEY=PREV ;;
-            '[H'|'OH'|'[1~') _KEY=HOME ;;
-            '[F'|'OF'|'[4~') _KEY=END  ;;
-            '[5~') _KEY=PREV ;;
-            '[6~') _KEY=NEXT ;;
-            '[3~') _KEY=DELK  ;;
-            *) _KEY=ESC ;;
+            '[H'|'OH'|'[1') _KEY=HOME ;;
+            '[F'|'OF'|'[4') _KEY=END  ;;
+            '[5')        _KEY=PREV ;;   # PageUp
+            '[6')        _KEY=NEXT ;;   # PageDown
+            '[3')        _KEY=DELK  ;;   # Delete
+            *)           _KEY=ESC   ;;
         esac
     fi
     return 0
@@ -472,6 +480,12 @@ _do_copy_move() {
     case "$dst/" in "$src/"*) _msg err '목적지가 원본 안이라 작업할 수 없습니다.'; return 1 ;; esac
 
     _join "$dst" "$base"; target=$REPLY
+    # ★ 같은 폴더로 복사하면 target 이 곧 src 가 된다.
+    #   이 상태로 덮어쓰기 분기를 타면 원본을 지워버리므로 반드시 먼저 막는다.
+    if [ "$target" = "$src" ]; then
+        _msg warn "목적지가 원본과 같습니다. 작업하지 않습니다."
+        return 1
+    fi
     if [ -e "$target" ] || [ -L "$target" ]; then
         if ! _confirm "이미 있습니다. 덮어쓸까요? → $target"; then
             _msg warn "건너뜀: $target"; return 1
@@ -801,16 +815,17 @@ explorer() {
 
         _key || break
         case $_KEY in
-            UP|k|$'\x0b') [ $_sel -gt 0 ] && _sel=$(( _sel - 1 )) ;;
-            DOWN|j|$'\x0a') [ $_sel -lt ${#_items[@]} ] && _sel=$(( _sel + 1 )) ;;
-            NEXT|l|$'\x06')
-                _page=$(( _page + 1 )); [ $_page -ge $_pages ] && _page=$(( _pages - 1 )) ;;
-            PREV|h|$'\x02')
-                _page=$(( _page - 1 )); [ $_page -lt 0 ] && _page=0 ;;
-            HOME|g|$'\x01') _sel=0; _page=0 ;;
-            END|G|$'\x05')
-                _sel=$(( ${#_items[@]} - 1 )); [ $_sel -lt 0 ] && _sel=0
-                _page=$(( _sel / _page_size )) ;;
+            UP|k)       [ $_sel -gt 0 ] && _sel=$(( _sel - 1 )) ;;
+            DOWN|j)     [ $_sel -lt ${#_items[@]} ] && _sel=$(( _sel + 1 )) ;;
+            NEXT|l)     _page=$(( _page + 1 ))
+                         [ $_page -ge $_pages ] && _page=$(( _pages - 1 ))
+                         _sel=$(( _page * _page_size ))
+                         [ $_sel -gt $(( ${#_items[@]} - 1 )) ] && _sel=$(( ${#_items[@]} - 1 )) ;;
+            PREV|h)     _page=$(( _page - 1 )); [ $_page -lt 0 ] && _page=0
+                         _sel=$(( _page * _page_size )) ;;
+            HOME|g)     _sel=0; _page=0 ;;
+            END|G)      _sel=$(( ${#_items[@]} - 1 )); [ $_sel -lt 0 ] && _sel=0
+                         _page=$(( _sel / _page_size )) ;;
             $'\x7f'|$'\x08') _go_up ;;
             $'\r'|$'\n')
                 _sel_resolve

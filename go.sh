@@ -111,21 +111,75 @@ decrypt() {
 [ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
 [ -f ~/.go.export.var ] && source "$HOME/.go.export.var" #&& rm -f "$HOME/.go.export.var"
 
+# 터미널 출력 인코딩 (go.sh 자체 리터럴을 이 기준으로 변환한다) : utf8 | euckr
+GOTERM_ENC="utf8"
+
+# ---------------------------------------------------------
+# 인코딩 변환 (잘림 방지)
+#
+#  RHEL 7.2 (glibc 2.17) 의 iconv 는 //IGNORE 를 지정해도
+#  EUC-KR 로 표현 안 되는 문자를 만나면 그 자리에서 출력이 통째로 중단한다.
+#    예) go.env 7393줄 중 2884줄만 나옴 -> 메인메뉴가 10번에서 잘림
+#  그래서 //IGNORE 결과를 믿지 않고 줄수를 검증한 뒤,
+#  잘렸으면 //TRANSLIT 로 다시 시도한다. (//TRANSLIT 는 완주한다)
+# ---------------------------------------------------------
+iconv_safe() { # $1=from $2=to $3=출력파일
+    local f="$1" t="$2" o="$3"
+    local a b c
+    a=$(wc -l < "$f" 2>/dev/null || echo 0)
+    iconv -f "$f" -t "$t//IGNORE" "$f" > "$o.t1" 2>/dev/null
+    b=$(wc -l < "$o.t1" 2>/dev/null || echo 0)
+    if [ "$b" -ge "$a" ]; then
+        mv -f "$o.t1" "$o"
+        return 0
+    fi
+    iconv -f "$f" -t "$t//TRANSLIT" "$f" > "$o.t2" 2>/dev/null
+    c=$(wc -l < "$o.t2" 2>/dev/null || echo 0)
+    if [ "$c" -ge "$b" ]; then
+        mv -f "$o.t2" "$o"
+    else
+        rm -f "$o.t2" 2>/dev/null
+    fi
+    rm -f "$o.t1" 2>/dev/null
+    return 0
+}
+
+# go.sh 자체 리터럴(UTF-8) 을 터미널 인코딩으로 변환해 출력
+#   구서버(EUC-KR 터미널)에서는 go.sh 에 박힌 한글 리터럴만 깨져 보인다.
+#   go.env 는 iconv 로 변환되지만 go.sh 자신은 변환되지 않아 하단 안내가 두부더미가 된다.
+ko() { # 사용법 : ko "포맷문자열" [인자...]
+    if [ "$GOTERM_ENC" = "euckr" ]; then
+        printf "$1" "${@:2}" | iconv -f utf-8 -t euc-kr//TRANSLIT 2>/dev/null
+    else
+        printf "$1" "${@:2}"
+    fi
+}
+
 # 터미널 자동감지
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
 if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
-    cat "$envorg" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
+    iconv_safe euc-kr utf-8 "$env"
     ad
     # cat go.my.env >> go.env
-    cat "$envorg2" 2>/dev/null | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+    iconv_safe euc-kr utf-8 "$env.my"
+    sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"
+    [ -f "$env.my" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env.my" >> "$env"; rm -f "$env.my"; }
 # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
 elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
-    cat "$envorg" | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >"$env"
-    cat "$envorg2" 2>/dev/null | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null | sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' >>"$env"
+    GOTERM_ENC="euckr"
+    iconv_safe utf-8 euc-kr "$env"
+    iconv_safe utf-8 euc-kr "$env.my"
+    sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"
+    [ -f "$env.my" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env.my" >> "$env"; rm -f "$env.my"; }
 else
     cp -a "$envorg" "$env"
     cat "$envorg2" >>"$env" 2>/dev/null
+    # LANG 이 비어 있어도 터미널은 euc-kr 일 수 있다. EUC-KR 터미널이면 go.sh 리터럴 변환이 필요하다.
+    case "$(locale charmap 2>/dev/null)" in
+        EUC-KR | euc-KR | CP949 | cp949) GOTERM_ENC="euckr" ;;
+    esac
 fi
+export GOTERM_ENC
 
 # console error level print
 [[ $(tty) == /dev/tty* ]] && echo 3 4 1 7 >/proc/sys/kernel/printk 2>/dev/null
@@ -151,7 +205,7 @@ sed -i \
 #                       버리면 모든 메뉴가 EOF 까지 하나로 합쳐진다(에러 없이 조용히 깨진다).
 #
 #  locale 자동감지(기존 동작)와 L 키 수동전환을 이 필터 하나로 통합했다.
-#  go.env 는 KR/EN 양쪽 출력이 기존 sed 와 byte-identical 임을 실측 검증済み.
+#  go.env 는 KR/EN 양쪽 출력이 기존 sed 와 byte-identical 임을 실측 검증 완료.
 #############################################################
 envlang_master="$env.lang"
 GOLANG=""
@@ -494,30 +548,31 @@ print_menulist() {
 #     (help 는 '매뉴얼/업데이트' 메뉴로 이미 쓰고 있어 별도 키로 분리했다)
 ###############################################################
 menu_keybar() { # compact 한줄 (폭 65~68칸. 메뉴 최장줄(약 70칸) 안에 들어간다)
+    # ko 는 printf "$1" 이므로 줄바꿈은 문자열에 \n 을 넣어야 한다.
     if [ "$GOLANG" = "kr" ]; then
-        echo "  [b]뒤로 [bb]2 [m]메인 [e]파일 [h]이력 [conf]설정 [L]언어 [?]도움말"
+        ko "  [b]뒤로 [bb]2 [m]메인 [e]파일 [h]이력 [conf]설정 [L]언어 [?]도움말\n"
     else
-        echo "  [b]back [bb]2 [m]menu [e]file [h]hist [conf]set [L]lang [?]keys"
+        ko "  [b]back [bb]2 [m]menu [e]file [h]hist [conf]set [L]lang [?]keys\n"
     fi
 }
 
 menu_keyhelp() { # detail 몇줄
     if [ "$GOLANG" = "kr" ]; then
-        echo "=============================================="
-        echo "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인   < >  앞/다음"
-        echo "  보기  [e]파일  [h]이력  [conf]설정편집  [sh]내장쉔   . 앞자리생략"
-        echo "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)"
+        ko "==============================================\n"
+        ko "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인   < >  앞/다음\n"
+        ko "  보기  [e]파일  [h]이력  [conf]설정편집  [sh]내장쉔   . 앞자리생략\n"
+        ko "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)\n"
     else
-        echo "=============================================="
-        echo "  move  [b]back  [bb]x2  [bbb]x3  [m]main   < >  prev/next"
-        echo "  view  [e]file  [h]history  [conf]config  [sh]shell   . omit number"
-        echo "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)"
+        ko "==============================================\n"
+        ko "  move  [b]back  [bb]x2  [bbb]x3  [m]main   < >  prev/next\n"
+        ko "  view  [e]file  [h]history  [conf]config  [sh]shell   . omit number\n"
+        ko "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)\n"
     fi
 }
 
 menu_prompt() { # $1=최대번호
     if [ "$GOLANG" = "kr" ]; then
-        printf '>>> 선택 [0-%s]   [?] 도움말 : ' "$1"
+        ko ">>> 선택 [0-%s]   [?] 도움말 : " "$1"
     else
         printf '>>> Select [0-%s]   [?] keys : ' "$1"
     fi
@@ -591,9 +646,9 @@ menufunc() {
         # 현재 메뉴 언어 배지 (L 토글 후에도 현재 언어가 항상 보인다)
         golang_badge() {
             if [ "$GOLANG" = "kr" ]; then
-                printf '\033[1;32m[한글]\033[0m'
+                ko '\033[1;32m[한글]\033[0m'
             else
-                printf '\033[1;36m[EN]\033[0m'
+                ko '\033[1;36m[EN]\033[0m'
             fi
         }
         [ "$title_of_menu_sub" ] && {
@@ -1673,7 +1728,7 @@ menufunc() {
                                 # 캐시 재구축 후 여기로 돌아와야 scutsub/scuttitle 이 값을 준다
                                 build_shortcutarr
                                 if [ "$_lnew" = "kr" ]; then
-                                    echo "한글 메뉴로 전환 [L]"
+                                    ko "한글 메뉴로 전환 [L]"
                                 else
                                     echo "English menu [L]"
                                 fi
@@ -1684,7 +1739,7 @@ menufunc() {
                                 fi
                                 continue
                             fi
-                            echo "언어 전환 실패 (마스터 파일 없음?) : $envlang_master"
+                            ko "언어 전환 실패 (마스터 파일 없음?) : %s" "$envlang_master"
                             continue
                             ;;
                         "?")
@@ -1956,13 +2011,13 @@ menufunc() {
                     #   서브메뉴에서 L 을 눌렀는데 메인메뉴로 튀는 문제가 생긴다.
                     #   이 태그는 언어와 무관하다 (%%%e -> %%% 정규화시 {submenu_*} 가 보존됨)
                     if [ "$_lnew" = "kr" ]; then
-                        echo "한글 메뉴로 전환 [L]"
+                        ko "한글 메뉴로 전환 [L]"
                     else
                         echo "English menu [L]"
                     fi
                     continue
                 fi
-                echo "언어 전환 실패 (마스터 파일 없음?) : $envlang_master"
+                ko "언어 전환 실패 (마스터 파일 없음?) : %s" "$envlang_master"
                 ;;
             krr)
                 # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
