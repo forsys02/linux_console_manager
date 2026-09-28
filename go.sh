@@ -430,10 +430,12 @@ process_commands() {
         if [ "${command}" != "${command#:}" ]; then
             partcom=$(echo "$command" | awk '
     {
-        split($0, blocks, /[;:]/)
+        nblk = split($0, blocks, /[;:]/)
+        # ": scut" 형태면 앞의 빈 블록(인덱스 1)을 건너뛰고 2부터 본다.
+        # 콜론이 없으면 1부터 본다.
         start = ($0 ~ /^:/) ? 2 : 1
 
-        for (i = start + 1; i <= length(blocks); i++) {
+        for (i = start; i <= nblk; i++) {
             blk = blocks[i]
             gsub(/^[ \t]+|[ \t]+$/, "", blk)
             n = split(blk, a, /[ \t]+/)
