@@ -664,35 +664,53 @@ menu_read() {
 #   - 구분자 : 최상위 ';'   ( go.sh 의 단계구분 ';;' 는 단계경계로 따로 처리 )
 #   - 따옴표 / 괄호 / 중괄호 안쪽의 ';' 는 쪼개지 않는다.
 #     ( awk '{for(i=2; i<=NF; i+=2) ...}' 같은 프로그램 내부는 통째로 보존 )
-#   - 출력 : 번호 붙은 문장들( 한 문장 = 한 줄 ). 총 문장수 = 출력 줄수.
-#   - ';;' 구간 뒤 문장은 2칸 더 들여써 단계구분을 보여준다.
+#   - 블록구문( for/while/until/case/select ... do/done/esac/fi )은 쪼개지 않는다.
+#     ( 쪼개면 'for i in x' / 'do echo' 처럼 문법이 깨진 조각으로 보인다 )
+#   - 112칸을 넘는 문장은 5칸 들여쓰기로 이어붙여 화면 밖으로 나가지 않게 한다.
+#   - 출력 : 번호 붙은 문장들( 문장 1개 = fold 포함 여러줄 가능 ). 총 문장수 = wc -l 이 아님.
 ###############################################################
 cmd_unfold() { # $1 = 명령문 1줄
     printf '%s\n' "$1" | awk '
-    function flush(s,  ind) {
+    function blkstart(s) { return (s ~ /^[ \t]*(if|for|while|until|case|select)([ \t]|$)/) }
+    function blkend(s)   { t = s; sub(/[ \t]+$/, "", t); return (t ~ /(^|[ \t;])(done|esac|fi)([ \t;]|$)/) }
+    function flush(   s, t) {
+        s = cur
         gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s)
+        cur = ""
         if (s == "") return
         n++
-        printf "  %d) %s\n", n, s
+        t = ""
+        while (length(s) > 112) { t = t substr(s, 1, 112) "\n     "; s = substr(s, 113) }
+        print "  " n ") " t s
     }
     {
-        line = $0; cur = ""; q = ""; d = 0; esc = 0; n = 0
+        line = $0; cur = ""; q = ""; d = 0; esc = 0; bd = 0; n = 0
         L = length(line)
         for (i = 1; i <= L; i++) {
             c = substr(line, i, 1)
-            if (esc)       { cur = cur c; esc = 0; continue }
-            if (c == "\\") { cur = cur c; esc = 1; continue }
-            if (q == "") {
-                if (c == "\047")   { q = "\047" }
-                else if (c == "\"") { q = "\"" }
-                else if (c == "(" || c == "{" || c == "[") { d++ }
-                else if (c == ")" || c == "}" || c == "]") { if (d > 0) d-- }
-                else if (c == ";" && d == 0) {
-                    flush(cur); cur = ""
-                    if (substr(line, i + 1, 1) == ";") { i++ } # 단계구분 ;; 는 한 번에 넘긴다
+            if (esc)        { cur = cur c; esc = 0; continue }
+            if (c == "\\")  { cur = cur c; esc = 1; continue }
+            if (q != "") {                                   # 따옴표 안 = 문자 그대로
+                if (c == q) q = ""
+                cur = cur c
+                continue
+            }
+            if (c == "\047") { q = "\047"; cur = cur c; continue }
+            if (c == "\"")  { q = "\"";  cur = cur c; continue }
+            if (c == "(" || c == "{" || c == "[") { d++; cur = cur c; continue }
+            if (c == ")" || c == "}" || c == "]") { if (d > 0) d--; cur = cur c; continue }
+            if (c == ";") {
+                if (d > 0) { cur = cur c; continue }        # 괄호 안 ; 는 보존
+                if (bd > 0) {                                # 블록 내부
+                    if (blkend(cur)) { bd--; flush(cur); if (bd == 0 && substr(line, i + 1, 1) == ";") i++ }
+                    else cur = cur c
                     continue
                 }
-            } else if (c == q) { q = "" }
+                if (blkstart(cur)) { bd = 1; cur = cur c; continue } # 블록 시작 = 쪼개지 않음
+                flush(cur)
+                if (substr(line, i + 1, 1) == ";") i++      # 단계구분 ;; 는 한 번에 넘긴다
+                continue
+            }
             cur = cur c
         }
         flush(cur)
@@ -707,7 +725,7 @@ cmd_unfold() { # $1 = 명령문 1줄
 #   - 선택(cmd_choice)을 비워두므로 실행으로 넘어가지 않는다.
 ###############################################################
 cmd_desc_peek() {
-    local _q="" _qi="" _qd="" _qc=""
+    local _q="" _qi="" _qd="" _qc="" _uq="" _un=0
     case "${cmd_choice-}" in
         "?")
             if [ -n "${cmd_choice1-}" ]; then _q="${cmd_choice1}"; else _q="?"; fi
@@ -730,14 +748,15 @@ cmd_desc_peek() {
             printf '\x1b[1;30m  ( go.env 에 #h 설명이 없습니다 )\x1b[0m\n'
         fi
         # [풀기] 문장이 여러개로 이어붙은 명령은 순서대로 풀어 보여준다.
-        #        ( ;; 와 ; 기준으로 분리, 따옴표 안쪽 ; 는 보존 )
+        #        ( ;; 와 ; 기준으로 분리, 따옴표/괄호/블록구문 안 ; 는 보존 )
         #        한 문장짜리 짧은 명령은 예전처럼 '--> 원본' 한 줄로 보여준다.
         if [ -n "$_qc" ]; then
             _uq="$(cmd_unfold "$_qc")"
-            _un=$(printf '%s\n' "$_uq" | wc -l)
+            # 문장 첫줄만 "  N) " 패턴이므로 grep -c 로 문장수를 센다 (fold 연속줄 제외)
+            _un=$(printf '%s\n' "$_uq" | grep -c '^  [0-9][0-9]*) ')
             if [ "${_un:-0}" -gt 1 ]; then
                 printf '\x1b[1;36m  -- command unfolded, %s steps --\x1b[0m\n' "$_un"
-                printf '%s\n' "$_uq" | fold -sw 120 | sed -e '2,$s/^/     /'
+                printf '%s\n' "$_uq"
             else
                 printf '\x1b[1;30m  --> %s\x1b[0m\n' "$_qc"
             fi
