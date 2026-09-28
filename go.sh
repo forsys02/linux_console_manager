@@ -570,12 +570,12 @@ menu_keybar() { # compact 한줄 (폭 65~68칸. 메뉴 최장줄(약 70칸) 안�
 menu_keyhelp() { # detail 몇줄
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
-        ko "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인   < >  앞/다음\n"
+        ko "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인  [ESC]위  < >  앞/다음\n"
         ko "  보기  [e]파일  [h]이력  [conf]설정편집  [sh]내장쉔   . 앞자리생략\n"
         ko "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
-        ko "  move  [b]back  [bb]x2  [bbb]x3  [m]main   < >  prev/next\n"
+        ko "  move  [b]back  [bb]x2  [bbb]x3  [m]main  [ESC]back  < >  prev/next\n"
         ko "  view  [e]file  [h]history  [conf]config  [sh]shell   . omit number\n"
         ko "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)\n"
     fi
@@ -587,6 +587,74 @@ menu_prompt() { # $1=최대번호
     else
         printf '>>> Select [0-%s]   [?] keys : ' "$1"
     fi
+}
+
+###############################################################
+# [ESC] 단독 ESC 를 Ctrl-D 와 동일하게 (상위메뉴 복귀 / 종료)
+#   문제: read -e(readline) 는 단독 ESC 를 그냥 버린다.
+#         (실측: ESC+Enter => 값 "" rc=0) -> Ctrl-D(rc=1) 경로와 구분 불가
+#   해법: 첫 1바이트만 먼저 선취해서 ESC(0x1b) 인지 먼저 판별한다.
+#     1) Ctrl-D(0x04)              -> rc=1  (기존 EOF 경로 그대로)
+#     2) ESC + 뒤따르는 바이트 없음  -> rc=1  (단독 ESC = Ctrl-D 와 동일)
+#     3) ESC[ / ESC O               -> 화살표등 다른 시퀀스 -> 삼킨뒤 readline 위임
+#     4) 그 외 첫글자                -> 값 맨 앞에 붙여 원래대로 복원
+#   - 첫글자는 공백분리 하지 않고 통째로 읽은뒤 붙인다.
+#     (공백 2단어 입력 "h e" 가 "he" 로 뭉개지는 것 방지)
+#   - 첫글자 위치에서 백스페이스/지우개키는 무시하고 다시 대기한다.
+#   - 사용법: menu_read "프롬프트" "변수1" "변수2"
+#             반환 0 = 정상입력 / 1 = ESC 또는 Ctrl-D (호출부가 q 처리)
+###############################################################
+menu_read() {
+    local _mrp="$1" _n1="$2" _n2="$3" _c="" _x="" _rest="" _rc=0 _eol=0
+    local -a _w=()
+    _MENU_V1=""
+    _MENU_V2=""
+    printf '%s' "$_mrp" # readline 프롬프트는 여기서 직접 출력
+    while :; do
+        _c=""
+        # 첫글자 대기(무제한). 사용자가 ESC 를 누르면 여기서 잡힌다
+        IFS= read -rsn1 _c </dev/tty 2>/dev/null || { _rc=1; break; }
+        if [ "$_c" = $'\004' ]; then _rc=1; break; fi # Ctrl-D
+        if [ "$_c" = $'\033' ]; then                  # ESC
+            _x=""
+            IFS= read -rsn1 -t 0.35 _x </dev/tty 2>/dev/null
+            # 뒤바이트 없음(또는 ESC 연속) = 단독 ESC -> Ctrl-D 와 동일
+            if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then _rc=1; break; fi
+            # '[' 'O' = 화살표/기능키 시퀀스 -> 나머지만 삼키고 readline 위임
+            if [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
+                IFS= read -rsn1 -t 0.35 _x </dev/tty 2>/dev/null
+            fi
+            _c=""
+            break
+        fi
+        case "$_c" in
+            $'\010' | $'\011' | $'\025' | $'\177') _c="" && continue ;; # 편집키 무시
+            $'\012' | $'\015') _c="" && _eol=1 && break ;;               # Enter = 빈입력
+            [[:cntrl:]]) _c="" && continue ;;                            # 그외 제어문자 무시
+        esac
+        break
+    done
+    if [ "$_rc" -eq 0 ] && [ "$_eol" -eq 0 ]; then
+        # 첫글자는 위에서 무음( -s ) 으로 읽었으므로 화면에 되돌려 준다.
+        # (되돌려주지 않으면 "8" 을 눌러도 화면엔 아무것도 안 보인다)
+        [ -n "$_c" ] && printf '%s' "$_c" >/dev/tty
+        IFS= read -re _rest </dev/tty # 나머지는 readline 으로 (기존과 동일)
+        _rc=$?
+        # 첫글자가 이미 있는 상태의 Ctrl-D 는 원래 readline 과 똑같이 정상입력
+        [ "$_rc" -ne 0 ] && [ -n "$_c" ] && _rc=0
+        IFS=' ' read -ra _w <<<"$_rest" # 공백기준 분리 (원래 IFS=' ' 와 동일)
+        _MENU_V1="$_c${_w[0]-}"
+        [ "${#_w[@]}" -gt 1 ] && _MENU_V2="${_w[*]:1}"
+        # readline 버퍼가 비어있으면(입력이 첫글자 1개뿐) Enter 를 받아도 개행이
+        # 안 나온다 -> 다음 출력 줄이 프롬프트줄에 붙는다. 직접 내려준다.
+        [ -z "$_rest" ] && printf '\n' >/dev/tty
+    else
+        # Enter(빈입력) / ESC / Ctrl-D : 커서를 다음줄로 내려 기존 표기와 맞춘다
+        printf '\n' >/dev/tty
+    fi
+    [ -n "$_n1" ] && printf -v "$_n1" '%s' "$_MENU_V1"
+    [ -n "$_n2" ] && printf -v "$_n2" '%s' "$_MENU_V2"
+    return $_rc
 }
 
 ###############################################################
@@ -849,7 +917,7 @@ menufunc() {
             history -r
             _mp="$(menu_prompt "$menu_idx")"
             while :; do
-                IFS=' ' read -rep "$_mp" choice choice1 </dev/tty
+                menu_read "$_mp" choice choice1
                 _rr=$?
                 # [?] 는 단축키 안내를 아래쪽에 몇줄만 띄우고, 화면을 지우지 않고 다시 입력받는다
                 if [ "$choice" = "?" ]; then
@@ -858,7 +926,7 @@ menufunc() {
                     choice1=""
                     continue
                 fi
-                [ "$_rr" -eq 1 ] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
+                [ "$_rr" -eq 1 ] && choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
                 break
             done
             unset -v _mp _rr
@@ -1175,13 +1243,13 @@ menufunc() {
                                     history -r
                                     if [ -n "$newcmds" ]; then
                                         #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty; }
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
                                         unset -v newcmds newcmds1
                                     else
-                                        IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty
+                                        menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
                                     fi
                                     #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
                                     trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                     # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
                                     # (이전에는 여기서 menufunc 를 직접 호출해서 아래 case 의 b 처리와 이중 호출됨)
@@ -1197,13 +1265,13 @@ menufunc() {
                                 history -r
                                 if [ -n "$newcmds" ]; then
                                     #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty; }
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
                                     unset -v newcmds newcmds1
                                 else
-                                    IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty
+                                    menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
                                 fi
                                 #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
+                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
                                 # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
                                 if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
