@@ -660,6 +660,45 @@ menu_read() {
 }
 
 ###############################################################
+# [풀기] 긴 한줄 명령을 순서대로 분해해 보여준다
+#   - 구분자 : 최상위 ';'   ( go.sh 의 단계구분 ';;' 는 단계경계로 따로 처리 )
+#   - 따옴표 / 괄호 / 중괄호 안쪽의 ';' 는 쪼개지 않는다.
+#     ( awk '{for(i=2; i<=NF; i+=2) ...}' 같은 프로그램 내부는 통째로 보존 )
+#   - 출력 : 번호 붙은 문장들( 한 문장 = 한 줄 ). 총 문장수 = 출력 줄수.
+#   - ';;' 구간 뒤 문장은 2칸 더 들여써 단계구분을 보여준다.
+###############################################################
+cmd_unfold() { # $1 = 명령문 1줄
+    printf '%s\n' "$1" | awk '
+    function flush(s,  ind) {
+        gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s)
+        if (s == "") return
+        n++
+        printf "  %d) %s\n", n, s
+    }
+    {
+        line = $0; cur = ""; q = ""; d = 0; esc = 0; n = 0
+        L = length(line)
+        for (i = 1; i <= L; i++) {
+            c = substr(line, i, 1)
+            if (esc)       { cur = cur c; esc = 0; continue }
+            if (c == "\\") { cur = cur c; esc = 1; continue }
+            if (q == "") {
+                if (c == "\047")   { q = "\047" }
+                else if (c == "\"") { q = "\"" }
+                else if (c == "(" || c == "{" || c == "[") { d++ }
+                else if (c == ")" || c == "}" || c == "]") { if (d > 0) d-- }
+                else if (c == ";" && d == 0) {
+                    flush(cur); cur = ""
+                    if (substr(line, i + 1, 1) == ";") { i++ } # 단계구분 ;; 는 한 번에 넘긴다
+                    continue
+                }
+            } else if (c == q) { q = "" }
+            cur = cur c
+        }
+        flush(cur)
+    }'
+}
+###############################################################
 # [#h] CMD 목록 "설명 조회" — 실행하지 않고 설명만 보고한다
 #   입력 : "?8" 또는 "? 8"  ->  8 번 명령의 #h 설명 + 원본 명령줄 출력
 #          "?"              ->  단축키 도움말
@@ -690,7 +729,19 @@ cmd_desc_peek() {
         else
             printf '\x1b[1;30m  ( go.env 에 #h 설명이 없습니다 )\x1b[0m\n'
         fi
-        [ -n "$_qc" ] && printf '\x1b[1;30m  --> %s\x1b[0m\n' "$_qc"
+        # [풀기] 문장이 여러개로 이어붙은 명령은 순서대로 풀어 보여준다.
+        #        ( ;; 와 ; 기준으로 분리, 따옴표 안쪽 ; 는 보존 )
+        #        한 문장짜리 짧은 명령은 예전처럼 '--> 원본' 한 줄로 보여준다.
+        if [ -n "$_qc" ]; then
+            _uq="$(cmd_unfold "$_qc")"
+            _un=$(printf '%s\n' "$_uq" | wc -l)
+            if [ "${_un:-0}" -gt 1 ]; then
+                printf '\x1b[1;36m  -- command unfolded, %s steps --\x1b[0m\n' "$_un"
+                printf '%s\n' "$_uq" | fold -sw 120 | sed -e '2,$s/^/     /'
+            else
+                printf '\x1b[1;30m  --> %s\x1b[0m\n' "$_qc"
+            fi
+        fi
     else
         echo " [?] 뒤에는 목록에 있는 번호만 입력가능합니다 (1-$(( ${display_idx:-1} - 1 )))"
     fi
