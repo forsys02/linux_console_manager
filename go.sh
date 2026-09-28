@@ -123,24 +123,31 @@ GOTERM_ENC="utf8"
 #  그래서 //IGNORE 결과를 믿지 않고 줄수를 검증한 뒤,
 #  잘렸으면 //TRANSLIT 로 다시 시도한다. (//TRANSLIT 는 완주한다)
 # ---------------------------------------------------------
-iconv_safe() { # $1=from $2=to $3=출력파일
-    local f="$1" t="$2" o="$3"
+iconv_safe() { # 사용법 : iconv_safe <from> <to> <입력파일> <출력파일>
+    #  ⚠ 변수명을 f 로 두면 안 된다. iconv 의 -f 는 --from-encoding 플래그라
+    #    "iconv -f $f" 가 인코딩이 아니라 파일명으로 해석되어 변환이 통째로 실패한다.
+    #    (실 사고: 메뉴가 빈 화면으로 뜬다)
+    local s="$1" d="$2" i="$3" o="$4"
     local a b c
-    a=$(wc -l < "$f" 2>/dev/null || echo 0)
-    iconv -f "$f" -t "$t//IGNORE" "$f" > "$o.t1" 2>/dev/null
+    [ -f "$i" ] || { cp -f "$i" "$o" 2>/dev/null; return 1; }
+    a=$(wc -l < "$i" 2>/dev/null || echo 0)          # 원본 라인수
+    iconv -f "$s" -t "$d//IGNORE"  "$i" > "$o.t1" 2>/dev/null
     b=$(wc -l < "$o.t1" 2>/dev/null || echo 0)
-    if [ "$b" -ge "$a" ]; then
+    if [ "$b" -ge "$a" ]; then                       # 완주했으면 그대로 채택
         mv -f "$o.t1" "$o"
         return 0
     fi
-    iconv -f "$f" -t "$t//TRANSLIT" "$f" > "$o.t2" 2>/dev/null
+    # 잘렸으면 //TRANSLIT 로 재시도 (완주한다)
+    iconv -f "$s" -t "$d//TRANSLIT" "$i" > "$o.t2" 2>/dev/null
     c=$(wc -l < "$o.t2" 2>/dev/null || echo 0)
-    if [ "$c" -ge "$b" ]; then
+    if [ "$c" -ge "$a" ]; then
         mv -f "$o.t2" "$o"
     else
         rm -f "$o.t2" 2>/dev/null
     fi
     rm -f "$o.t1" 2>/dev/null
+    # 최종 안전망 : 결과가 비었으면 원본을 그대로 복사한다 (빈 메뉴 방지)
+    [ -s "$o" ] || cp -f "$i" "$o" 2>/dev/null
     return 0
 }
 
@@ -158,18 +165,18 @@ ko() { # 사용법 : ko "포맷문자열" [인자...]
 # 터미널 자동감지
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
 if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
-    iconv_safe euc-kr utf-8 "$env"
+    iconv_safe euc-kr utf-8 "$envorg" "$env"
     ad
     # cat go.my.env >> go.env
-    iconv_safe euc-kr utf-8 "$env.my"
-    sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"
+    [ -s "$envorg2" ] && iconv_safe euc-kr utf-8 "$envorg2" "$env.my"
+    [ -f "$env" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"; }
     [ -f "$env.my" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env.my" >> "$env"; rm -f "$env.my"; }
 # 터미널 utf8 환경아니고 go.env 가 utf8 인경우 -> euckr 로 인코딩
 elif [ ! "$(echo $LANG | grep -i "utf")" ] && [ "$(file "$envorg" | grep -i "utf")" ]; then
     GOTERM_ENC="euckr"
-    iconv_safe utf-8 euc-kr "$env"
-    iconv_safe utf-8 euc-kr "$env.my"
-    sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"
+    iconv_safe utf-8 euc-kr "$envorg" "$env"
+    [ -s "$envorg2" ] && iconv_safe utf-8 euc-kr "$envorg2" "$env.my"
+    [ -f "$env" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"; }
     [ -f "$env.my" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env.my" >> "$env"; rm -f "$env.my"; }
 else
     cp -a "$envorg" "$env"
@@ -179,6 +186,8 @@ else
         EUC-KR | euc-KR | CP949 | cp949) GOTERM_ENC="euckr" ;;
     esac
 fi
+# 어떤 이유로든 $env 가 비면 메뉴가 통째로 사라진다. 마지막 안전망.
+[ -s "$env" ] || cp -a "$envorg" "$env" 2>/dev/null
 export GOTERM_ENC
 
 # console error level print
