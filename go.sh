@@ -139,13 +139,107 @@ sed -i \
     -e 's/[[:blank:]]\+$//' `# 줄 끝 공백 제거 trim` \
     "$env"
 
-# not kr
-# english menu tilte set
-if (($(locale | grep -ci "kr") == 0)); then
-    sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' "$env"
-else
-    sed -i '/^%%%e /d' "$env"
+#############################################################
+# 메뉴 언어 필터 golang_filter   (L 키 = 한글 <-> English 즉시 토글)
+#
+#  [원칙 1] 마커 정규화 : %%%e / #e / :e / %%e  ->  %%% / # / : / %%
+#  [원칙 2] 고아 보존   : 영문 대응 라인이 '바로 다음 줄' 에 있을 때만 한 쌍으로 취급.
+#                       짝 없는 라인은 두 언어 모두에서 반드시 살아남는다.
+#                       (go.env 의 '%%' 선명령 199줄 중 160줄은 한글 없는 실제 기능명령)
+#                       -> 한쪽 통째 삭제를 하면 이 160개가 죽는다. 반드시 이 규칙을 지킬것.
+#  [원칙 3] 빈줄 억제 금지 : 빈줄은 아래 listof_comm awk 의 메뉴블록 구분자다.
+#                       버리면 모든 메뉴가 EOF 까지 하나로 합쳐진다(에러 없이 조용히 깨진다).
+#
+#  locale 자동감지(기존 동작)와 L 키 수동전환을 이 필터 하나로 통합했다.
+#  go.env 는 KR/EN 양쪽 출력이 기존 sed 와 byte-identical 임을 실측 검증済み.
+#############################################################
+envlang_master="$env.lang"
+GOLANG=""
+
+golang_filter() { # $1 = kr|en   (성공 0 / 실패 1)
+    [ "$1" = "kr" ] || [ "$1" = "en" ] || return 1
+    [ -s "$envlang_master" ] || return 1
+    # 마스터 무결성 검사 : 영문 헤더(%%e 계열)가 한 줄도 없으면 이미 언어필터가 씌워진 손상본이다.
+    # 그 상태로 L 을 누르면 조용히 엉뚱한 언어가 출력되므로 여기서 막는다.
+    grep -q '^%%%e ' "$envlang_master" 2>/dev/null || return 1
+    awk -v LG="$1" '
+        function emit(s) { printf "%s\n", s }
+        function classify(s,   t, sd, n) {
+            if      (s ~ /^%%%e /) { t="H"; sd="en"; n="%%% " substr(s,6) }
+            else if (s ~ /^%%% /)  { t="H"; sd="kr"; n="%%% " substr(s,5) }
+            else if (s ~ /^%%e /)  { t="P"; sd="en"; n="%% "  substr(s,5) }
+            else if (s ~ /^%% /)   { t="P"; sd="kr"; n="%% "  substr(s,4) }
+            else if (s ~ /^#e /)   { t="C"; sd="en"; n="# "   substr(s,4) }
+            else if (s ~ /^# /)    { t="C"; sd="kr"; n="# "   substr(s,3) }
+            else if (s ~ /^:e /)   { t="L"; sd="en"; n=": "   substr(s,4) }
+            else if (s ~ /^: /)    { t="L"; sd="kr"; n=": "   substr(s,3) }
+            else                   { t="X"; sd="";  n=s }
+            TYPE=t; SIDE=sd; NORM=n
+        }
+        function store() { p_has=1; p_type=TYPE; p_side=SIDE; p_norm=NORM }
+        function reset() { p_has=0; p_type=""; p_side=""; p_norm="" }
+        BEGIN { p_has=0; p_type=""; p_side=""; p_norm="" }
+        {
+            classify($0)
+            if (TYPE == "X") { if (p_has) { emit(p_norm); reset() } emit($0); next }
+            if (!p_has) { store(); next }
+            if (TYPE == p_type && SIDE != p_side) {
+                if (LG == p_side) emit(p_norm); else emit(NORM)
+                reset(); next
+            }
+            emit(p_norm)
+            store()
+        }
+        END { if (p_has) emit(p_norm) }
+    ' "$envlang_master" >"$env.lf" 2>/dev/null || {
+        rm -f "$env.lf" 2>/dev/null
+        return 1
+    }
+    # 안전장치 : 결과가 비었거나 원본보다 길면(awk 오류) 원본 훼손 방지를 위해 폐기
+    _lf_n=$(wc -l <"$env.lf" 2>/dev/null)
+    _mf_n=$(wc -l <"$envlang_master" 2>/dev/null)
+    if [ -z "$_lf_n" ] || [ "$_lf_n" -lt 1 ] || [ "$_lf_n" -gt "$_mf_n" ] 2>/dev/null; then
+        rm -f "$env.lf" 2>/dev/null
+        return 1
+    fi
+    mv -f "$env.lf" "$env" 2>/dev/null || return 1
+    GOLANG="$1"
+    export GOLANG
+    return 0
+}
+
+# 언어 전환 + 언어결합 캐시 무효화
+#   바로가기 배열(shortcutarr/shortcutstr)은 최초 1회만 만들어지고 계속 재사용된다.
+#   여기서 비우지 않으면 제목이 옛 언어인 채로 scuttitle/scutsub/st 가 계속 동작한다.
+golang_toggle() { # $1 = kr|en
+    golang_filter "$1" || return 1
+    shortcutarr=()
+    shortcutstr="@@@"
+    return 0
+}
+
+# 인코딩만 확정된 "두 언어 모두 포함" 원본을 마스터로 보관 (L 토글의 재실행 지점)
+cp -f "$env" "$envlang_master" 2>/dev/null
+
+# 시작시 언어 결정 : 수동지정(go.my.env 의 GOLANG=kr|en) 우선, 없으면 기존 locale 자동감지
+[ -z "$GOLANG" ] && [ -f "$HOME/go.my.env" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$HOME/go.my.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+if [ "$GOLANG" != "kr" ] && [ "$GOLANG" != "en" ]; then
+    GOLANG=""
+    if (($(locale | grep -ci "kr") == 0)); then
+        GOLANG="en"
+    else
+        GOLANG="kr"
+    fi
 fi
+# 필터 실패시 기존 sed 방식으로 폴백한다 (마스터를 그대로 쓰면 두 언어가 함께 보여 메뉴가 중복된다)
+if ! golang_filter "$GOLANG"; then
+    if (($(locale | grep -ci "kr") == 0)); then
+        sed -i -e '/^%%% /d' -e 's/^%%%e /%%% /g' "$env"
+    else
+        sed -i '/^%%%e /d' "$env"
+    fi
+fi
+export GOLANG
 
 # tmp 폴더 set
 if [[ $(id -u) == "0" ]] && echo "" >>/tmp/go_history.txt 2>/dev/null; then
@@ -414,15 +508,23 @@ menufunc() {
         choiceloop=$((choiceloop + 1))
 
         # 서브메뉴 타이틀 변경
+        # 현재 메뉴 언어 배지 (L 토글 후에도 현재 언어가 항상 보인다)
+        golang_badge() {
+            if [ "$GOLANG" = "kr" ]; then
+                printf '\033[1;32m[한글]\033[0m'
+            else
+                printf '\033[1;36m[EN]\033[0m'
+            fi
+        }
         [ "$title_of_menu_sub" ] && {
             # 서브메뉴
             scut=$(echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}')
             readxx $LINENO scutset scut: $scut
-            title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m"
+            title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m $(golang_badge)"
         } || {
             # 메인메뉴
             scut="m"
-            title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
+            title="\x1b[1;33;44m Main Menu \x1b[0m $(golang_badge) Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
         updatescut() {
             [ "$scut" ] && {
@@ -457,6 +559,17 @@ menufunc() {
             # 바로가기 버튼 중복 체크
             #scut_dups=$(echo "$allof_shortcut_item" | grep -o '\[[^]]\+\]' | sort | uniq -d | sed 's/^\[//;s/\]$//')
             scut_dups=$(echo "$allof_shortcut_item" | sed -n 's/.*\[\([^]]\+\)\].*/\1/p' | sort | uniq -d)
+            # [L] 언어토글 키는 대문자를 쓴다.
+            # scut 매칭은 case-sensitive 라 [l] 과 [L] 은 중복으로 안 잡히지만,
+            # 사용자가 [L] 을 직접 정의하면 [L] 이 언어토글에 가로채여 그 메뉴로 못 들어간다.
+            # 그래서 대소문자 무시 충돌도 같이 경고한다.
+            scut_dups_ci=$(echo "$allof_shortcut_item" | sed -n 's/.*\[\([^]]\+\)\].*/\1/p' | tr 'A-Z' 'a-z' | sort | uniq -d)
+            for scut in $(echo "$scut_dups_ci" | grep -v "^$" | sort -u); do
+                [ -n "$(echo "$scut_dups" | grep -ix "$scut")" ] && continue
+                echo -e "\n\033[1;33m⚠️ 대소문자만 다른 scut 충돌 감지 : [$scut] vs [$(echo "$scut" | tr 'a-z' 'A-Z')]\033[0m"
+                echo -e "   \033[1;33m대문자 [L] 은 '한글/English 언어전환' 전용키다. 충돌을 피하려면 소문자로 바꾸세요.\033[0m"
+                grep -n "\[$(echo "$scut" | tr 'a-z' 'A-Z')\]\|\[$scut\]" "$env" | head -5 | sed 's/^/   > /'
+            done
 
             for scut in $scut_dups; do
                 echo -e "\n\033[1;31m⚠️ 중복된 scut 감지: [$scut]\033[0m"
@@ -586,8 +699,11 @@ menufunc() {
                 printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
-            echo "0.  Exit [q] // Hangul_Crash ??? --> [kr] "
+            echo "0.  Exit [q]"
             echo "   [b] 이전화면  [bb] 2단계전  [bbb] 3단계전  [m] 메인메뉴  [e] 파일관리  [h] 실행히스토리  [conf] 설정편집  [sh] 내장쉔"
+            # [L] 언어(한글/English) 는 대문자 단독키라 다른 소문자 키와 물리적으로 구분된다.
+            # [kr] 은 인코딩(euc-kr<->utf8) 변환이라 '한글'=>음 깨짐 보정 키다. (언어와 다른 기능)
+            echo -e "   \e[1;33m[L] 언어: 한글/English (L k=한글  L e=English)   [kr] 인코딩변환(글자 깨질때)\e[0m"
             echo "=============================================="
         fi
         ############## 메뉴 출력 끝 ###############
@@ -597,7 +713,7 @@ menufunc() {
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             history -r
-            IFS=' ' read -rep ">>> Select No. [0-${menu_idx}] 단축키 b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 kr:한글: " choice choice1 </dev/tty
+            IFS=' ' read -rep ">>> Select No. [0-${menu_idx}] 단축키 b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN kr:인코딩: " choice choice1 </dev/tty
             [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
         fi
@@ -912,10 +1028,10 @@ menufunc() {
                                     history -r
                                     if [ -n "$newcmds" ]; then
                                         #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty; }
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty; }
                                         unset -v newcmds newcmds1
                                     else
-                                        IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty
+                                        IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty
                                     fi
                                     #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
@@ -934,10 +1050,10 @@ menufunc() {
                                 history -r
                                 if [ -n "$newcmds" ]; then
                                     #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty; }
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty; }
                                     unset -v newcmds newcmds1
                                 else
-                                    IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정: " cmd_choice cmd_choice1 </dev/tty
+                                    IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty
                                 fi
                                 #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
@@ -1463,6 +1579,31 @@ menufunc() {
                             #"conffc")
                             #    conffc && continue
                             #    ;;
+                        L)
+                            # [L] CMD 화면에서도 언어 전환 (메뉴 화면과 동일 키)
+                            #  CMD 목록(chosen_commands)은 listof_comm 계산값이라 언어 전환 후 낡는다.
+                            #  재계산 대신 현재 메뉴 목록으로 되돌아가 새 언어로 다시 진입한다(안전·명확).
+                            case "$cmd_choice1" in
+                                k) _lnew="kr" ;;
+                                e) _lnew="en" ;;
+                                *) _lnew="$([ "$GOLANG" = "kr" ] && echo en || echo kr)" ;;
+                            esac
+                            if golang_toggle "$_lnew"; then
+                                if [ "$_lnew" = "kr" ]; then
+                                    echo "한글 메뉴로 전환 [L]"
+                                else
+                                    echo "English menu [L]"
+                                fi
+                                if [ "$scut" != "m" ] && [ -n "$scut" ]; then
+                                    menufunc "$(scutsub "$scut")" "$(scuttitle "$scut")" "$(notscutrelay "$scut")"
+                                else
+                                    nav_main
+                                fi
+                                continue
+                            fi
+                            echo "언어 전환 실패 (마스터 파일 없음?) : $envlang_master"
+                            continue
+                            ;;
                         "h")
                             gohistory && continue
                             ;;
@@ -1698,6 +1839,34 @@ menufunc() {
                 ;;
             ... | , | bash) # alias 를 쓸수 있는 bash
                 /bin/bash
+                ;;
+            L)
+                # [L] 메뉴 언어 즉시 전환 (한글 <-> English)  // 인코딩 변환이 아니다
+                #  'kr'(인코딩)과 혼동되지 않으려고 대문자 단일키를 택했다.
+                #  go.env [scut] 211개 / go.sh case 라벨 전부에 대문자가 하나도 없어 충돌 0.
+                #  L 단독 = 토글 ,  "L k" = 한글 ,  "L e" = English
+                case "$choice1" in
+                    k) _lnew="kr" ;;
+                    e) _lnew="en" ;;
+                    *) _lnew="$([ "$GOLANG" = "kr" ] && echo en || echo kr)" ;;
+                esac
+                if golang_toggle "$_lnew"; then
+                    # 현재 화면 제목은 언어결합 값이라 재생성해야 아래 listof_comm 매칭이 된다
+                    title_of_menu_sub=""
+                    title_of_menu=""
+                    if [ "$scut" != "m" ] && [ -n "$scut" ]; then
+                        title_of_menu_sub="$(scuttitle "$scut")"
+                        title_of_menu="$title_of_menu_sub"
+                    fi
+                    chosen_command_sub=""
+                    if [ "$_lnew" = "kr" ]; then
+                        echo "한글 메뉴로 전환 [L]"
+                    else
+                        echo "English menu [L]"
+                    fi
+                    continue
+                fi
+                echo "언어 전환 실패 (마스터 파일 없음?) : $envlang_master"
                 ;;
             krr)
                 # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
@@ -3062,6 +3231,16 @@ nav_back() { # $1=단계수(기본 1)
         return 0
     fi
     nav_set "$d" # 현재 화면을 되돌린것으로 처리 (재 저장 방지)
+    # [L] 로 언어를 전환한 뒤에는 이력에 쌓아둔 제목이 옛 언어 문자열로 남아 있다.
+    # 그대로 쓰면 아래 listof_comm 의 헤더 텍스트 매칭이 실패해서
+    # '명령목록이 통째로 빈 화면'이 되므로, 저장된 제목이 현재 $env 에서 더 이상
+    # 발견되지 않을 때에만 scut 기준으로 현재 언어 제목으로 다시 해석한다.
+    # (제목이 유효한 정상 경로에서는 NAV_title 을 전혀 건드리지 않는다)
+    if [ -n "$NAV_title" ] && [ "$NAV_scut" != "m" ] && [ -f "$env" ] && ! grep -qF "$NAV_title" "$env" 2>/dev/null; then
+        _nav_rt="$(scuttitle "$NAV_scut")"
+        [ -n "$_nav_rt" ] && NAV_title="$_nav_rt"
+        unset -v _nav_rt
+    fi
     # 바로가기(직접 CMD 화면 진입)는 실제 메뉴 단축키일 때만 지정
     # ([scut] 없는 메뉴 / 존재하지 않는 단축키면 빈값으로 둔다)
     if [ "$NAV_scut" != "m" ] && st "$NAV_scut" >/dev/null 2>&1; then
