@@ -12,18 +12,20 @@
 clear
 
 # ── 표시 상수 ──────────────────────────────────────────────────────────
-_C_RESET="\033[0;m"
-_C_DIR="\033[36m"          # 폴더
-_C_LINK="\033[35m"         # 심볼릭 링크
-_C_EXEC="\033[1;32m"       # 실행 파일
-_C_FILE="\033[0;m"         # 일반 파일
-_C_DIM="\033[2m"
-_C_SEL="\033[7;40m"        # 선택(반전)
-_C_OK="\033[1;32m"
-_C_WARN="\033[1;33m"
-_C_ERR="\033[1;31m"
-_C_HEAD="\033[1;37m"
-_ESC_N='\n'                # 표시용 기호 : 단일따옴표 = 역슬래시+문자 (2바이트)
+#   주의 : 큰따옴표 안의 "\033" 은 이스케이프되지 않고 리터럴 4글자가 된다.
+#   (printf 서식문자열에 넣을 때만 해석되므로, 인자로 넘길 때는 $'...' 필수)
+_C_RESET=$'\033[0;m'
+_C_DIR=$'\033[36m'            # 폴더
+_C_LINK=$'\033[35m'           # 심볼릭 링크
+_C_EXEC=$'\033[1;32m'         # 실행 파일
+_C_FILE=$'\033[0;m'           # 일반 파일
+_C_DIM=$'\033[2m'
+_C_SEL=$'\033[7;40m'          # 선택(반전)
+_C_OK=$'\033[1;32m'
+_C_WARN=$'\033[1;33m'
+_C_ERR=$'\033[1;31m'
+_C_HEAD=$'\033[1;37m'
+_ESC_N='\n'                   # 표시용 기호 : 단일따옴표 = 역슬래시+문자 (2바이트)
 _ESC_T='\t'
 _ESC_R='\r'
 
@@ -52,6 +54,7 @@ _SORT=name         # name | mtime | size
 _HIDDEN=0          # 0=숨김 감춤 1=보임
 _SORTZ=0
 _REDRAW_ALL=0      # 1 이면 부분 갱신 대신 화면 전체 재도画
+_MSGWAIT_BASE=${_MSGWAIT_BASE:-1.1}   # 결과 메시지 대기 초 (환경변수로 조정 가능)
 _MSGWAIT=1.1
 _LASTPAT=''
 _STAT_TMP=''
@@ -118,10 +121,12 @@ _term_init() {
     _page_size=$(( th - _UI_RESERVED ))
     [ $_page_size -gt 20 ] && _page_size=20
     [ $_page_size -lt 3 ]  && _page_size=3
-    # 상태줄1 여백 : "경로 "4 + "  "2 + "[이름순] "9 + " "1 + "[숨김 OFF] "12 + "  "2 + "폴더 N · 파일 M"16 = 46
-    _w_path=$(( tw - 48 ))
-    # 상태줄2 여백 : "선택  "4 + "  · 종류 · 크기 · 시각"28 = 32
+    # 각 줄이 터미널 폭을 넘지 않도록 "고정 부분"을 정확히 빼고 경로칸만 남긴다.
+    #   상태줄1 : "경로 "4 + 경로 + "  [이름순] [숨김 OFF]  폴더 N · 파일 M"36
+    _w_path=$(( tw - 40 ))
+    #   상태줄2 : "선택  "4 + 경로 + "  · 종류 · 크기 · 시각"28
     _w_sel=$(( tw - 34 ))
+    #   목록    : "%-4s "5 + 이름
     _w_item=$(( tw - 6 ))
     [ $_w_path -lt 16 ] && _w_path=16
     [ $_w_sel  -lt 16 ] && _w_sel=16
@@ -129,7 +134,8 @@ _term_init() {
     _barw $(( tw < 46 ? tw - 4 : 41 )); _BAR=$REPLY
 
     _HELP='이동 ▲▼ ←→ | Enter 들어가기·작업메뉴 | s 작업메뉴 | d 삭제 | o 정렬 | H 숨김 | / 검색 | D 폴더만들기 | t 파일만들기 | f 하위검색 | i 정보 | ? 도움말 | q 종료'
-    _fit "$_HELP" "$tw"; _HELP=$REPLY
+    _fit "$_HELP" $(( tw - 4 ))          # ">>> " 4칸을 미리 뺀다
+    _HELP=$REPLY
 }
 _term_restore() { stty sane 2>/dev/null; }
 
@@ -354,7 +360,9 @@ _status2() {
     sz='?'; mt='?'
     if stat -c '%s|%y' -- "$_SEL_PATH" >"$_STAT_TMP" 2>/dev/null; then
         IFS='|' read -r sz mt < "$_STAT_TMP"
-        mt=${mt#* }; mt=${mt:5:5} ${mt:11:5}
+        # mt = "2026-09-28 10:52:55.419091390 +0900"  →  "09-28 10:52"
+        # (공백이 섞인 대입은 반드시 인용할 것. 아니면 뒤쪽이 명령어로 실행된다)
+        mt="${mt:5:5} ${mt:11:5}"
         _hsize "$sz"; sz=$REPLY
     fi
     _fit "$_SEL_PATH" "$_w_sel"
@@ -845,7 +853,7 @@ explorer() {
             '?') _help ;;
             q|Q|0) break ;;
         esac
-        _MSGWAIT=1.1
+        _MSGWAIT=$_MSGWAIT_BASE
         _term_init
         if [ "$_REDRAW_ALL" = 1 ]; then
             _full; _REDRAW_ALL=0

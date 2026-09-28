@@ -218,6 +218,44 @@ golang_toggle() { # $1 = kr|en
     return 0
 }
 
+# scut 의 현재 언어 제목을 $env 에서 직접 읽는다. (출력 없음)
+#   golang_toggle 직후에는 shortcutarr 캐시가 비워져 있으므로
+#   scuttitle 을 쓰면 빈 문자열이 나와 화면이 메인메뉴로 튀는다.
+#   캐시 재구축을 기다리지 않고 $env 를 직접 읽으면 언제나 정확하다.
+#   서브태그 {submenu_*} 와 맨뒤 @@@ 는 제거하고 제목만 돌려준다.
+golang_title_of() { # $1 = scut
+    [ -z "$1" ] && return 0
+    [ "$1" = "m" ] && return 0
+    # 주의 : sed 에서 \{ 는 '구간 시작' 연산자로 해석돼 구문이 깨진다.
+    #        중괄호는 반드시 문자클래스 [{][}] 로 다룬다.
+    grep -E "^%%% .*\\[$1\\]" "$env" 2>/dev/null | head -1 | awk '{
+        s = $0
+        sub(/^%%% /, "", s)
+        if (s ~ /^[{]/) sub(/^[^{]*[}][ ]*/, "", s)
+        sub(/@@@.*/, "", s)
+        print s
+    }'
+    return 0
+}
+
+# 바로가기 배열 재구축 (중복검사 대화상자는 포함하지 않는다)
+#   언어 전환 직후 scuttitle/scutsub/st 가 당장 필요하므로 캐시를 바로 다시 만들어 준다.
+#   scutrelay / relay 태그까지 함께 붙여 scutsub·notscutrelay 가 정상 동작하게 한다.
+build_shortcutarr() {
+    IFS=$'\n' _bsi="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
+    shortcutarr=()
+    shortcutstr="@@@"
+    _bidx=0
+    for _bitems in $_bsi; do
+        _bsname=$(echo "$_bitems" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
+        shortcutarr[$_bidx]="${_bsname}@@@${_bitems}"
+        shortcutstr="${shortcutstr}${_bsname}|${_bidx}@@@"
+        ((_bidx++))
+    done
+    unset -v _bsi _bidx _bsname _bitems
+    return 0
+}
+
 # 인코딩만 확정된 "두 언어 모두 포함" 원본을 마스터로 보관 (L 토글의 재실행 지점)
 cp -f "$env" "$envlang_master" 2>/dev/null
 
@@ -635,19 +673,8 @@ menufunc() {
 
             #echo "$allof_shortcut_item"
 
-            shortcutarr=()
-            shortcutstr="@@@"
-            idx=0
-            # 쇼트컷네임,%%%제목줄,relaymenu
-            for items in $allof_shortcut_item; do
-                shortcutname=$(echo "$items" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
-                shortcutarr[$idx]="${shortcutname}@@@${items}"
-                #shortcutstr="${shortcutstr}${shortcutname}@@@"
-                #idx 담은 변수로 조정
-                shortcutstr="${shortcutstr}${shortcutname}|${idx}@@@"
-                ((idx++))
-            done
-            # printarr shortcutarr # debug
+            # 배열 생성만 분리된 함수로 위임 (언어 전환 후 캐시 재생성에서도 같은 로직 사용)
+            build_shortcutarr
         fi
 
         # choice 가 없을때 선택할수 있는 메뉴 출력
@@ -1643,6 +1670,8 @@ menufunc() {
                                 *) _lnew="$([ "$GOLANG" = "kr" ] && echo en || echo kr)" ;;
                             esac
                             if golang_toggle "$_lnew"; then
+                                # 캐시 재구축 후 여기로 돌아와야 scutsub/scuttitle 이 값을 준다
+                                build_shortcutarr
                                 if [ "$_lnew" = "kr" ]; then
                                     echo "한글 메뉴로 전환 [L]"
                                 else
@@ -1912,14 +1941,20 @@ menufunc() {
                     *) _lnew="$([ "$GOLANG" = "kr" ] && echo en || echo kr)" ;;
                 esac
                 if golang_toggle "$_lnew"; then
-                    # 현재 화면 제목은 언어결합 값이라 재생성해야 아래 listof_comm 매칭이 된다
+                    # 캐시를 즉시 재구축한다. 안 하면 scuttitle/scutsub 가 빈 배열을 읽어
+                    #   제목이 빈 문자열이 되고 화면이 메인메뉴로 튀는다.
+                    build_shortcutarr
+                    # 현재 화면 제목만 새 언어로 다시 읽는다.
                     title_of_menu_sub=""
                     title_of_menu=""
                     if [ "$scut" != "m" ] && [ -n "$scut" ]; then
-                        title_of_menu_sub="$(scuttitle "$scut")"
+                        title_of_menu_sub="$(golang_title_of "$scut")"
                         title_of_menu="$title_of_menu_sub"
                     fi
-                    chosen_command_sub=""
+                    # chosen_command_sub({submenu_*}) 는 의도적으로 비우지 않는다.
+                    #   비우면 print_menulist 가 메인메뉴 분기로 떨어져
+                    #   서브메뉴에서 L 을 눌렀는데 메인메뉴로 튀는 문제가 생긴다.
+                    #   이 태그는 언어와 무관하다 (%%%e -> %%% 정규화시 {submenu_*} 가 보존됨)
                     if [ "$_lnew" = "kr" ]; then
                         echo "한글 메뉴로 전환 [L]"
                     else
