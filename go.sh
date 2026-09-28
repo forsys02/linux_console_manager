@@ -232,6 +232,8 @@ golang_filter() { # $1 = kr|en   (성공 0 / 실패 1)
             else if (s ~ /^%%% /)  { t="H"; sd="kr"; n="%%% " substr(s,5) }
             else if (s ~ /^%%e /)  { t="P"; sd="en"; n="%% "  substr(s,5) }
             else if (s ~ /^%% /)   { t="P"; sd="kr"; n="%% "  substr(s,4) }
+            else if (s ~ /^#he /)  { t="D"; sd="en"; n="#h " substr(s,5) }
+            else if (s ~ /^#h /)   { t="D"; sd="kr"; n="#h " substr(s,4) }
             else if (s ~ /^#e /)   { t="C"; sd="en"; n="# "   substr(s,4) }
             else if (s ~ /^# /)    { t="C"; sd="kr"; n="# "   substr(s,3) }
             else if (s ~ /^:e /)   { t="L"; sd="en"; n=": "   substr(s,4) }
@@ -583,9 +585,9 @@ menu_keyhelp() { # detail 몇줄
 
 menu_prompt() { # $1=최대번호
     if [ "$GOLANG" = "kr" ]; then
-        ko ">>> 선택 [0-%s]   [?] 도움말 : " "$1"
+        ko ">>> 선택 [0-%s]   [?] 도움말  [?번호] 설명보기 : " "$1"
     else
-        printf '>>> Select [0-%s]   [?] keys : ' "$1"
+        printf '>>> Select [0-%s]   [?] keys  [?no] desc : ' "$1"
     fi
 }
 
@@ -655,6 +657,47 @@ menu_read() {
     [ -n "$_n1" ] && printf -v "$_n1" '%s' "$_MENU_V1"
     [ -n "$_n2" ] && printf -v "$_n2" '%s' "$_MENU_V2"
     return $_rc
+}
+
+###############################################################
+# [#h] CMD 목록 "설명 조회" — 실행하지 않고 설명만 보고한다
+#   입력 : "?8" 또는 "? 8"  ->  8 번 명령의 #h 설명 + 원본 명령줄 출력
+#          "?"              ->  단축키 도움말
+#   반환 : 0 = 조회를 처리했음(목록 제자리 유지, 선택 아님)
+#          1 = 일반 선택 입력(처리 대상 아님)
+#   - 선택(cmd_choice)을 비워두므로 실행으로 넘어가지 않는다.
+###############################################################
+cmd_desc_peek() {
+    local _q="" _qi="" _qd="" _qc=""
+    case "${cmd_choice-}" in
+        "?")
+            if [ -n "${cmd_choice1-}" ]; then _q="${cmd_choice1}"; else _q="?"; fi
+            ;;
+        "?"*) _q="${cmd_choice#\?}" ;;
+    esac
+    [ -z "$_q" ] && return 1
+    _q="${_q//[[:space:]]/}"
+    echo
+    if [ "$_q" = "?" ]; then
+        menu_keyhelp
+    elif [[ "$_q" =~ ^[0-9]+$ ]] && [ "$_q" -ge 1 ] && [ "$_q" -lt "${display_idx:-0}" ]; then
+        _qi="${original_indices[$((_q - 1))]}"
+        _qd="${chosen_desc[$((_qi - 1))]-}"
+        _qc="${chosen_commands[$((_qi - 1))]-}"
+        printf "\x1b[1;33m>>> %s 번 명령\x1b[0m\n" "$_q"
+        if [ -n "$_qd" ]; then
+            printf '%s\n' "$_qd" | sed -e 's/^/\x1b[1;37m  /' -e 's/$/\x1b[0m/'
+        else
+            printf '\x1b[1;30m  ( go.env 에 #h 설명이 없습니다 )\x1b[0m\n'
+        fi
+        [ -n "$_qc" ] && printf '\x1b[1;30m  --> %s\x1b[0m\n' "$_qc"
+    else
+        echo " [?] 뒤에는 목록에 있는 번호만 입력가능합니다 (1-$(( ${display_idx:-1} - 1 )))"
+    fi
+    echo
+    cmd_choice=""
+    cmd_choice1=""
+    return 0
 }
 
 ###############################################################
@@ -1048,6 +1091,39 @@ menufunc() {
                 #unset IFS ; dline ; echo "$allof_chosen_commands" ; dline
                 # 제목배고 선명령 빼고 순서 명령문들 배열
                 IFS=$'\n' chosen_commands=($(echo "${allof_chosen_commands}" | grep -v "^%% "))
+                # [#h] "명령 설명" 태그 : #h 줄은 번호를 달지 않고(원래 # 주석 규칙 그대로)
+                #      바로 아래 명령줄의 설명으로 붙인다. chosen_commands 와 같은 인덱스로
+                #      chosen_desc 를 만들어두면 목록표시/실행표시 양쪽에서 짝 조회가 된다.
+                #      (길이를 유지하므로 num_commands / original_indices 계산은 그대로)
+                #      - #h 뒤에 연속으로 여러줄을 쓰면 그 전체가 한 설명(줄바꿈 유지)이 된다
+                #      - 영문 설명은 바로 다음줄에 #he 로 쓰면 L 언어토글에 연동된다
+                unset chosen_desc
+                chosen_desc=()
+                _cd_pending=""
+                _cd_ifs="$IFS"
+                IFS=$'\n'
+                for _cd_line in $(echo "${allof_chosen_commands}" | grep -v "^%% "); do
+                    if [[ "$_cd_line" =~ ^[[:space:]]*#h(e)?[[:space:]]+(.*)$ ]]; then
+                        # 태그 줄 자체에는 설명을 붙이지 않는다 (바로 다음 명령줄의 짝)
+                        _cd_text="${BASH_REMATCH[2]}"
+                        _cd_text="${_cd_text%$'\r'}"
+                        if [ -n "$_cd_pending" ]; then
+                            _cd_pending="$_cd_pending"$'\n'"$_cd_text" # 여러줄 설명 누적
+                        else
+                            _cd_pending="$_cd_text"
+                        fi
+                        chosen_desc+=("")
+                    elif [[ "$_cd_line" =~ ^[[:space:]]*# ]]; then
+                        # 일반 주석줄은 설명을 소비하지 않는다.
+                        # (#h 와 명령줄 사이에 참고주석이 있어도 설명은 명령줄에 붙는다)
+                        chosen_desc+=("")
+                    else
+                        chosen_desc+=("$_cd_pending") # 이 명령줄에 붙을 설명
+                        _cd_pending=""
+                    fi
+                done
+                IFS="$_cd_ifs"
+                unset _cd_line _cd_pending _cd_text _cd_ifs
                 # 선명령 모듬 배열
                 # pre_commands=()
                 IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
@@ -1063,6 +1139,7 @@ menufunc() {
                 while true; do # 하부 메뉴 CMDs cmd_choice loop
                     cmdloop=$((cmdloop + 1))
                     chosen_command=""
+                    chosen_desc="" # [#h] 이 선택에 붙은 설명. 매 회차 초기화 (이전값 잔류 방지)
                     num_commands=${#chosen_commands[@]} # 줄길이 체크
 
                     # 명령줄이 1줄이면 바로 실행 1줄 이상이면 리스트 출력
@@ -1127,6 +1204,15 @@ menufunc() {
                             for item in $(seq 1 ${#chosen_commands[@]}); do
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
+
+                                # [#h] 이 명령줄에 붙은 설명 (위 #h 태그에서 넘어온 값, 여러줄 가능)
+                                _hdesc="${chosen_desc[$((item - 1))]-}"
+
+                                # [#h] 태그 줄 자체는 여기서 소비한다.
+                                #      (설명은 짝이 되는 아래 명령줄에서 대표줄로 출력되므로 중복출력 방지)
+                                if [[ "$c_cmd" =~ ^[[:space:]]*#h(e)?[[:space:]]+ ]]; then
+                                    continue
+                                fi
 
                                 # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
                                 # 파일경로에 $포함 변수경로는 제외
@@ -1198,9 +1284,18 @@ menufunc() {
                                     processed_cmd="${c_cmd:0:max_len}..."
                                 fi
 
-                                # 명령문에 색깔 입히기 // 주석은 탈출코드 주석색으로 조정 listansi 색칠 color
-                                # 줄길이 길면 다음줄로 fold
-                                printf "\e[1m%-3s\e[0m " ${pi}
+                                # [#h] 설명(도움말)이 붙은 명령줄은 설명이 대표줄이 되고,
+                                #      원본 명령줄은 그 아래 어두운 회색 보조줄로 내려간다.
+                                #      -> 번호를 보고 무엇인지 알 수 있고, 원본도 함께 확인 가능
+                                #      (설명 여러 줄이면 첫줄만 번호칸, 나머지는 같은 들여쓰기)
+                                # 명령줄이 길어지면 제한자 이내로 출력 (위 max_len 처리분)
+                                if [ -n "$_hdesc" ]; then
+                                    printf "\e[1m%-3s\e[0m " ${pi}
+                                    printf '%s\n' "$_hdesc" | sed -e '1!s/^/     /' -e 's/^/\x1b[1;37m/' -e 's/$/\x1b[0m/'
+                                    echo
+                                else
+                                    printf "\e[1m%-3s\e[0m " ${pi}
+                                fi
                                 #echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                 echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
                                     -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
@@ -1220,7 +1315,16 @@ menufunc() {
                                     -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
                                     -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
                                     -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
-                                    -e 's/#$/\x1b[1;36m#\x1b[0m/' `# 주석을 청록색으로 포맷`
+                                    -e 's/#$/\x1b[1;36m#\x1b[0m/' `# 주석을 청록색으로 포맷` |
+                                    {
+                                        # [#h] 설명이 있는 명령줄의 원본은 보조줄로 물린다.
+                                        #      (기존 색칠은 유지하되 아래로 밀고 앞줄 공백을 더 준다)
+                                        if [ -n "$_hdesc" ]; then
+                                            sed -e 's/^/    /'
+                                        else
+                                            cat
+                                        fi
+                                    }
 
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
@@ -1251,6 +1355,8 @@ menufunc() {
                                     #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
                                     trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                    # [#h] 설명 조회("?8") 처리였다면 목록 제자리에서 다시 입력받는다
+                                    cmd_desc_peek && continue
                                     # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
                                     # (이전에는 여기서 menufunc 를 직접 호출해서 아래 case 의 b 처리와 이중 호출됨)
                                     if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
@@ -1261,23 +1367,30 @@ menufunc() {
                                 done
                             else
                                 # pre_command refresh
-                                trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
-                                history -r
-                                if [ -n "$newcmds" ]; then
-                                    #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
-                                    unset -v newcmds newcmds1
-                                else
-                                    menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
-                                fi
-                                #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
-                                trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
-                                # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
-                                if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
-                                    cmd_choice="b"
-                                    echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
-                                fi
+                                # ([#h] 설명조회("?8")로 목록을 제자리 유지하기 위해 루프로 감싼다.
+                                #  peek 아니면 break 로 빠져나가 기존 동작을 그대로 따른다)
+                                while :; do
+                                    trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+                                    history -r
+                                    if [ -n "$newcmds" ]; then
+                                        #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
+                                        unset -v newcmds newcmds1
+                                    else
+                                        menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
+                                    fi
+                                    #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
+                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
+                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+                                    # [#h] 설명 조회("?8") 처리였다면 목록 제자리에서 다시 입력받는다
+                                    cmd_desc_peek && continue
+                                    # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
+                                    if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
+                                        cmd_choice="b"
+                                        echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                    fi
+                                    break
+                                done
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -1302,6 +1415,8 @@ menufunc() {
                         # 명령어 선택후
                         if [ -n "$cmd_choice" ] && { case "$cmd_choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && [ "$cmd_choice" -ge 1 ] && [ "$cmd_choice" -le "$num_commands" ]; then
                             chosen_command=${chosen_commands[$((cmd_choice - 1))]}
+                            # [#h] 선택한 줄에 붙어있던 설명을 함께 챙긴다 (실행 직전 표시용)
+                            chosen_desc="${chosen_desc[$((cmd_choice - 1))]-}"
                         fi
 
                     else
@@ -1334,6 +1449,13 @@ menufunc() {
                     ################ 실졍 명령줄이 넘어온경우
                     elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]; then
                         echo
+                        # [#h] 이 명령에 붙은 설명(도움말)을 실행 직전에 다시 보여준다
+                        #      (CMD 목록에서 번호만 보고 실행한 경우 무엇을 누르는지 확인용)
+                        if [ -n "${chosen_desc-}" ]; then
+                            echo
+                            printf '%s\n' "$chosen_desc" | sed -e 's/^/\x1b[1;37m  /' -e 's/$/\x1b[0m/'
+                            echo
+                        fi
                         # Danger 판단
                         if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
                             # !!! 제거 # !!! 앞에 공백이 간혹 있을때 버그 방지
