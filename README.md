@@ -203,7 +203,6 @@ The power of `go.sh` lies in its customizable configuration file, `go.env`.  Her
 - **Direct Command Input (Easter Egg):**  Type `..` in the main menu to enter a direct command-line mode where you can type any bash command and utilize your `.bashrc` aliases.
 - **Custom Functions:**  Extend `go.sh` by adding your own bash functions to the `go.sh.txt` file. You can then call these functions directly from your menu items, creating powerful and specialized tools.
 - **`conf` Command Workflow:** Use the `conf` command to quickly edit `go.env` directly from the menu. This is much faster than manually opening the file in `vi`.
-- **Self Check:** Run `bash test/run_all.sh` after editing `go.sh` / `go.env` to verify menu navigation, menu data integrity and all 218 menu bodies. Add `--e2e` for a real run-through.
 
 ## 🤝 Contributing
 
