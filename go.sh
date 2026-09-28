@@ -444,6 +444,48 @@ print_menulist() {
 }
 
 ###############################################################
+# 하단 단축키 안내 (언어 인식 + 터미널 폭 대응)
+#   $1 = compact(기본 1줄) | detail([?] 입력시 몇줄)
+#   $2 = 최대 표시번호 (0-N)
+#
+#  [왜 이렇게 했나]
+#   - 예전 하단 3줄은 한글 하드코딩이라, [L] 로 English 로 바꿔도
+#     메뉴만 영어고 하단은 계속 한글이었다.
+#   - 설명이 길어 메뉴 본문보다 폭이 넓어져 정돈이 깨졌다.
+#   => 기본은 폭 안에 들어가는 1줄 요약, 상세는 [?] 로 언제든 꺼내 본다.
+#     (help 는 '매뉴얼/업데이트' 메뉴로 이미 쓰고 있어 별도 키로 분리했다)
+###############################################################
+menu_keybar() { # compact 한줄 (폭 65~68칸. 메뉴 최장줄(약 70칸) 안에 들어간다)
+    if [ "$GOLANG" = "kr" ]; then
+        echo "  [b]뒤로 [bb]2 [m]메인 [e]파일 [h]이력 [conf]설정 [L]언어 [?]도움말"
+    else
+        echo "  [b]back [bb]2 [m]menu [e]file [h]hist [conf]set [L]lang [?]keys"
+    fi
+}
+
+menu_keyhelp() { # detail 몇줄
+    if [ "$GOLANG" = "kr" ]; then
+        echo "=============================================="
+        echo "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인   < >  앞/다음"
+        echo "  보기  [e]파일  [h]이력  [conf]설정편집  [sh]내장쉔   . 앞자리생략"
+        echo "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)"
+    else
+        echo "=============================================="
+        echo "  move  [b]back  [bb]x2  [bbb]x3  [m]main   < >  prev/next"
+        echo "  view  [e]file  [h]history  [conf]config  [sh]shell   . omit number"
+        echo "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)"
+    fi
+}
+
+menu_prompt() { # $1=최대번호
+    if [ "$GOLANG" = "kr" ]; then
+        printf '>>> 선택 [0-%s]   [?] 도움말 : ' "$1"
+    else
+        printf '>>> Select [0-%s]   [?] keys : ' "$1"
+    fi
+}
+
+###############################################################
 # 메인 서비스 함수 menufunc
 ###############################################################
 declare -a shortcutarr shortcutstr
@@ -700,10 +742,9 @@ menufunc() {
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
             echo "0.  Exit [q]"
-            echo "   [b] 이전화면  [bb] 2단계전  [bbb] 3단계전  [m] 메인메뉴  [e] 파일관리  [h] 실행히스토리  [conf] 설정편집  [sh] 내장쉔"
-            # [L] 언어(한글/English) 는 대문자 단독키라 다른 소문자 키와 물리적으로 구분된다.
-            # [kr] 은 인코딩(euc-kr<->utf8) 변환이라 '한글'=>음 깨짐 보정 키다. (언어와 다른 기능)
-            echo -e "   \e[1;33m[L] 언어: 한글/English (L k=한글  L e=English)   [kr] 인코딩변환(글자 깨질때)\e[0m"
+            # 하단은 1줄 요약만. 상세는 [?] 로 위 menu_keyhelp 참고.
+            # 언어를 L 로 바꾸어도 하단이 따라가도록 $GOLANG 기준.
+            menu_keybar
             echo "=============================================="
         fi
         ############## 메뉴 출력 끝 ###############
@@ -713,8 +754,21 @@ menufunc() {
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             history -r
-            IFS=' ' read -rep ">>> Select No. [0-${menu_idx}] 단축키 b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN kr:인코딩: " choice choice1 </dev/tty
-            [[ $? -eq 1 ]] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
+            _mp="$(menu_prompt "$menu_idx")"
+            while :; do
+                IFS=' ' read -rep "$_mp" choice choice1 </dev/tty
+                _rr=$?
+                # [?] 는 단축키 안내를 아래쪽에 몇줄만 띄우고, 화면을 지우지 않고 다시 입력받는다
+                if [ "$choice" = "?" ]; then
+                    menu_keyhelp
+                    choice=""
+                    choice1=""
+                    continue
+                fi
+                [ "$_rr" -eq 1 ] && choice="q" # ctrl d 로 빠져나가는 경우 ctrld
+                break
+            done
+            unset -v _mp _rr
             trap - SIGINT SIGTERM EXIT   # 트랩 해제 (이후에는 기본 동작)
         fi
         unset -v skipmain
@@ -1028,10 +1082,10 @@ menufunc() {
                                     history -r
                                     if [ -n "$newcmds" ]; then
                                         #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty; }
+                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty; }
                                         unset -v newcmds newcmds1
                                     else
-                                        IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty
+                                        IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty
                                     fi
                                     #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                     [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
@@ -1050,10 +1104,10 @@ menufunc() {
                                 history -r
                                 if [ -n "$newcmds" ]; then
                                     #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty; }
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty; }
                                     unset -v newcmds newcmds1
                                 else
-                                    IFS=' ' read -rep ">>> Select No. [0-$((display_idx - 1))] b:뒤로 bb:2단계 m:메인 h:이력 e:파일 conf:설정 L:한글/EN: " cmd_choice cmd_choice1 </dev/tty
+                                    IFS=' ' read -rep "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 </dev/tty
                                 fi
                                 #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
                                 [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 로 빠져나가는 경우
@@ -1602,6 +1656,13 @@ menufunc() {
                                 continue
                             fi
                             echo "언어 전환 실패 (마스터 파일 없음?) : $envlang_master"
+                            continue
+                            ;;
+                        "?")
+                            # [?] CMD 화면에서도 단축키 안내를 아래쪽에 몇줄 띄운다
+                            menu_keyhelp
+                            cmd_choice=""
+                            cmd_choice1=""
                             continue
                             ;;
                         "h")
