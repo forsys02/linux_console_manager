@@ -62,7 +62,24 @@ if [ ! -f "$envorg" ]; then
     [ "$down" = "y" ] || [ "$down" = "Y" ] && output_dir="$(
         cd "$(dirname "${0}")"
         pwd
-    )" && (command -v curl >/dev/null 2>&1 && curl -m1 http://srt.byus.net/go.env -o "${output_dir}/go.env" || wget -q -O "${output_dir}/go.env" -T 1 http://srt.byus.net/go.env || exit 0)
+    )" && {
+        # (2026-09-28) 기존: curl -m1 / wget -T 1 = 1초 타임아웃 + 실패해도 조용히 진행
+        #   → go.env 없이 실행되어 메뉴 데이터가 통째로 비어버림.
+        #   임시파일에 받고 용량 확인 후 mv 하므로, 실패 시 .go.env 지우지 않고 확실히 중단한다.
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL --retry 2 --connect-timeout 5 -m 60 http://srt.byus.net/go.env -o "${output_dir}/.go.env.dl" 2>/dev/null || rm -f "${output_dir}/.go.env.dl"
+        else
+            wget -q -T 10 --tries=2 http://srt.byus.net/go.env -O "${output_dir}/.go.env.dl" 2>/dev/null || rm -f "${output_dir}/.go.env.dl"
+        fi
+        if [ -s "${output_dir}/.go.env.dl" ]; then
+            mv -f "${output_dir}/.go.env.dl" "${output_dir}/go.env"
+            echo ">>> go.env downloaded: ${output_dir}/go.env ($(wc -c <"${output_dir}/go.env") bytes)"
+        else
+            echo ">>> ❌ go.env 다운로드 실패 (http://srt.byus.net/go.env)"
+            echo ">>>    네트워크/서버 상태를 확인한 뒤 go.sh 를 다시 실행하세요. (중단)"
+            exit 1
+        fi
+    }
 fi
 
 # /bin/gosh softlink
@@ -5865,10 +5882,50 @@ utt() { if ! file -i "$1" | grep -qi utf-8; then
     iconv -f euc-kr -t utf-8//IGNORE "$1" >"$1.temp" && cat "$1.temp" >"$1" && rm -f "$1.temp"
 fi; }
 
+# 안전한 다운로드 헬퍼 (2026-09-28)
+#   wget -O / curl -o 는 실패 시 대상 파일을 0바이트로 TRUNCATE 해서
+#   go.sh 자체가 파괴된다. 그래서 .dl 임시파일에 받고,
+#   최소 크기를 확인한 뒤 mv 로 원자적 교체한다.
+# _go_dl <url> <출력경로> <최소크기>
+_go_dl() {
+    local url="$1" out="$2" min="${3:-1000}" tmp="$2.dl"
+    rm -f "$tmp"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 --connect-timeout 5 -m 60 "$url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
+    else
+        wget -q -T 10 --tries=2 "$url" -O "$tmp" 2>/dev/null || rm -f "$tmp"
+    fi
+    [ -s "$tmp" ] || { echo " ❌ 다운로드 실패: $url" >&2; return 1; }
+    [ "$(wc -c <"$tmp")" -ge "$min" ] || { echo " ❌ 용량 비정상(정상 아님): $url" >&2; rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+    return 0
+}
+
 # update
 update() {
     rbackup "$gofile" "$envorg"
-    echo "update file: $gofile $envorg" && sleep 1 && [ -f "$gofile" ] && wget -q -T 3 http://srt.byus.net/go.sh -O "$gofile" && chmod 700 "$gofile" && [ -f "$envorg" ] && wget -q -T 3 http://srt.byus.net/go.env -O "$envorg" && chmod 600 "$envorg" && savescut && exec "$gofile" "$scut"
+    echo "update file: $gofile $envorg"
+    sleep 1
+    [ -f "$gofile" ] || { echo " ❌ $gofile 없음 - 갱신 중단" >&2; return 1; }
+    if ! _go_dl http://srt.byus.net/go.sh "$gofile" 100000; then
+        echo " ❌ go.sh 갱신 실패 - 기존 파일 그대로 보존됨" >&2
+        return 1
+    fi
+    bash -n "$gofile" 2>/dev/null || {
+        echo " ❌ 받은 go.sh 문법 오류 - 백업본으로 복구" >&2
+        [ -f "$gofile.1.bak" ] && cp -a "$gofile.1.bak" "$gofile"
+        return 1
+    }
+    chmod 700 "$gofile"
+    if [ -f "$envorg" ]; then
+        if _go_dl http://srt.byus.net/go.env "$envorg" 100000; then
+            chmod 600 "$envorg"
+        else
+            echo " ❌ go.env 갱신 실패 - 갱신 중단" >&2
+            return 1
+        fi
+    fi
+    savescut && exec "$gofile" "$scut"
 }
 
 # install
@@ -6737,7 +6794,11 @@ explorer() {
             ranger "$1"
         else
             sh="$HOME/explorer.sh"
-            [ -f "$sh" ] || curl -m1 http://byus.net/explorer.sh -o "$sh" && chmod 755 "$sh"
+            # (2026-09-28) srt.byus.net 이 유일 배포처로 통일 / byus.net 은 예비 경로
+            [ -f "$sh" ] || { curl -fsSL -m 10 http://srt.byus.net/explorer.sh -o "$sh" 2>/dev/null \
+                || curl -fsSL -m 10 http://byus.net/explorer.sh -o "$sh" 2>/dev/null \
+                || rm -f "$sh"; }
+            [ -s "$sh" ] && chmod 755 "$sh"
             "$sh" "$1"
         fi
     }
@@ -6757,7 +6818,12 @@ old_explorer() {
         return
     }
     explorer="$HOME/explorer.sh"
-    [ -f "$explorer" ] && "$explorer" "$1" || { curl -m1 http://byus.net/explorer.sh -o "$explorer" && chmod 755 "$explorer" && "$explorer" "$1"; }
+    [ -f "$explorer" ] && "$explorer" "$1" || {
+        curl -fsSL -m 10 http://srt.byus.net/explorer.sh -o "$explorer" 2>/dev/null \
+            || curl -fsSL -m 10 http://byus.net/explorer.sh -o "$explorer" 2>/dev/null \
+            || rm -f "$explorer"
+        [ -s "$explorer" ] && chmod 755 "$explorer" && "$explorer" "$1"
+    }
 }
 exp() { explorer "$@"; }
 
