@@ -609,6 +609,14 @@ menu_prompt() { # $1=최대번호
 menu_read() {
     local _mrp="$1" _n1="$2" _n2="$3" _c="" _x="" _rest="" _rc=0 _eol=0
     local -a _w=()
+    #  [규칙] IFS 고정 (인수 분리 버그 근본 차단)
+    #   아래 "${_w[*]:1}" 은 배열 결합이면서 **IFS 의 첫 글자를 구분자로 쓴다.**
+    #   IFS 가 $'\n' 로 오염되어 있으면 "shutdown -h now" 의 now 가
+    #   공백이 아니라 '줄바꿈' 으로 붙어 choice1="-h\nnow" 가 되고,
+    #   safe_eval 에 2줄짜리 명령이 전달되어 인수가 깨진다 (실측).
+    #   menu_read 는 어디서 호출되든 동일하게 동작해야 하므로
+    #   함수 진입 즉시 기본값으로 고정한다 (안전망 1줄).
+    local IFS=$' \t\n'
     _MENU_V1=""
     _MENU_V2=""
     printf '%s' "$_mrp" # readline 프롬프트는 여기서 직접 출력
@@ -1154,7 +1162,14 @@ menufunc() {
                 # 재하청 메뉴는 relay_sub 를 sub_menu 로 사용.
                 [ -n "$chosen_command_relay_sub" ] && sub_menu="$chosen_command_relay_sub" && chosen_command_relay_sub=""
                 readxx $LINENO "lisof_comm func in - IFS check title_of_menu: $title_of_menu sub_menu: $sub_menu {chosen_command_sub}:${chosen_command_sub-} chosen_command_relay_sub:$chosen_command_relay_sub"
-                # %%% 부터 빈줄까지 변수에
+                #  [규칙] IFS 진입 시 저장 / 종료 시 복원 (인수 분리 버그 근본 차단)
+                #   아래 IFS=$'\n' xxx=($(...)) 3곳은 '명령 없이 대입만 하는 문장'이라
+                #   IFS 를 영구히 $'\n' 로 바꿔버린다 (실측).
+                #   그 결과 프롬프트(menu_read)의 "${_w[*]:1}" 이 공백이 아니라
+                #   '줄바꿈' 으로 인수를 붙여 "shutdown -h now" 가 2줄로 쪼개진다.
+                #   중간에 break 로 빠져나가도 복원되도록 함수 최상단에서 저장한다.
+                _lic_ifs="$IFS"
+                # %%% 부부터 빈줄까지 변수에
                 #IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN {gsub(/[\(\)\[\]]/, "\\\\&", title_of_menu)} !flag && $0 ~ title_of_menu{flag=1; next} /^$/{flag=0} flag')"
                 IFS=$'\n' allof_chosen_commands="$(cat "$env" | awk -v title_of_menu="%%% ${sub_menu}${title_of_menu}" 'BEGIN { gsub(/[][().*+?^$\\|]/, "\\\\&", title_of_menu) } !flag && $0 ~ title_of_menu { flag=1; next } /^$/ { flag=0 } flag')"
 
@@ -1197,6 +1212,10 @@ menufunc() {
                 # 선명령 모듬 배열
                 # pre_commands=()
                 IFS=$'\n' pre_commands=($(echo "${allof_chosen_commands}" | grep "^%% "))
+                #  [규칙] 진입시 저장한 IFS 로 복원 (위 주석 참고)
+                #   미복원 시 프롬프트의 인수 결합이 줄바꿈으로 바뀌어 명령이 쪼개진다.
+                IFS="$_lic_ifs"
+                unset _lic_ifs
             }
             listof_comm
 
