@@ -37,11 +37,12 @@ gofile="$base/go.sh"
 envorg="$base/go.env"
 
 # env="$base/.go.env"
-# env 파일을 메모리에 상주 cat 부하 감소
+# env 파일을 메모리에 상주 cat 부하 감소 (/dev/shm 미지원 환경 안전 폴백)
 shm_env_file="/dev/shm/.go.env"
 fallback_env_file="$base/.go.env"
-if [ ! -f $shm_env_file ] || rm -f "$shm_env_file" 2>/dev/null; then
-    [ -d /dev/shm ] && env="$shm_env_file"
+if [ -d /dev/shm ] && [ -w /dev/shm ]; then
+    rm -f "$shm_env_file" 2>/dev/null
+    env="$shm_env_file"
 else
     env="$fallback_env_file"
 fi
@@ -98,18 +99,33 @@ fi
 
 # varVAR reuse -> saveVAR -> autoloadVAR
 # loadVAR
+encrypt() {
+    # 인수중 마지막 인자 -> key ex) encrypt hello world mykey or echo "hello world" | encrypt mykey
+    [ "$1" ] && local k="${!#}"
+    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}"
+    local message=""
+    IFS='' read -r -d '' -t1 message
+    [ "$2" ] && message="$message $(echo "${*:1:$(($# - 1))}" | tr '\n' ' ')"
+    printf '%s' "$message" | openssl enc -des-ede3-cbc -pass pass:"$k" 2>/dev/null | perl -MMIME::Base64 -ne 'print encode_base64($_);'
+}
 decrypt() {
     [ "$1" ] && local k="${!#}"
-    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" #echo "k: $k";
-    IFS='' read -d '' -t1 encrypted_message
+    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}"
+    local encrypted_message=""
+    IFS='' read -r -d '' -t1 encrypted_message
     [ "$2" ] && encrypted_message="$encrypted_message $(echo "${*:1:$(($# - 1))}")"
-    echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null
+    printf '%s' "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:"$k" -d 2>/dev/null
 }
 [ -f ~/.go.private.var ] && source ~/.go.private.var
-# +분 이내 export 된 변수 재사용
-[ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +3600 -exec rm -f "$HOME/.go.export.var" \;
-[ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
-[ -f ~/.go.export.var ] && source "$HOME/.go.export.var" #&& rm -f "$HOME/.go.export.var"
+# 10분 이내 export 된 변수 재사용 (복호화 성공 시에만 source 하고 즉시 삭제하여 평문 재복호화 버그 방지)
+if [ -f "$HOME/.go.export.var" ]; then
+    if find "$HOME/.go.export.var" -type f -mmin +10 2>/dev/null | grep -q .; then
+        rm -f "$HOME/.go.export.var"
+    elif decrypt < "$HOME/.go.export.var" > "$HOME/.go.export.var.dec" 2>/dev/null && [ -s "$HOME/.go.export.var.dec" ]; then
+        source "$HOME/.go.export.var.dec" 2>/dev/null
+    fi
+    rm -f "$HOME/.go.export.var" "$HOME/.go.export.var.dec" 2>/dev/null
+fi
 
 # 터미널 출력 인코딩 (go.sh 자체 리터럴을 이 기준으로 변환한다) : utf8 | euckr
 GOTERM_ENC="utf8"
@@ -166,7 +182,6 @@ ko() { # 사용법 : ko "포맷문자열" [인자...]
 # 터미널 utf8 환경이고 go.env 가 euckr 인경우 -> utf8 로 인코딩
 if [ "$(echo $LANG | grep -i "utf")" ] && [ ! "$(file "$envorg" | grep -i "utf")" ]; then
     iconv_safe euc-kr utf-8 "$envorg" "$env"
-    ad
     # cat go.my.env >> go.env
     [ -s "$envorg2" ] && iconv_safe euc-kr utf-8 "$envorg2" "$env.my"
     [ -f "$env" ] && { sed 's/\([[:blank:]]\+\)#\([[:blank:]]\|$\).*/\1/' "$env" > "$env.p" && mv -f "$env.p" "$env"; }
@@ -325,7 +340,11 @@ build_shortcutarr() {
 cp -f "$env" "$envlang_master" 2>/dev/null
 
 # 시작시 언어 결정 : 수동지정(go.my.env 의 GOLANG=kr|en) 우선, 없으면 기존 locale 자동감지
-[ -z "$GOLANG" ] && [ -f "$HOME/go.my.env" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$HOME/go.my.env" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+local_myenv=""
+[ -f "$envorg2" ] && local_myenv="$envorg2"
+[ -z "$local_myenv" ] && [ -f "$HOME/go.my.env" ] && local_myenv="$HOME/go.my.env"
+[ -z "$GOLANG" ] && [ -n "$local_myenv" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+unset -v local_myenv
 if [ "$GOLANG" != "kr" ] && [ "$GOLANG" != "en" ]; then
     GOLANG=""
     if (($(locale | grep -ci "kr") == 0)); then
@@ -362,7 +381,7 @@ publicip="$(wget --timeout=1 -q -O - http://icanhazip.com 2>/dev/null || wget --
 export "publicip"
 
 localip=$(ip -4 addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | tr '\n' ' ')
-[ ! "localip" ] && localip=$(ip -4 addr show | awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' | grep -vE "127.0.0.1|255$" | tr '\n' ' ')
+[ -z "$localip" ] && localip=$(ip -4 addr show | awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}' | grep -vE "127.0.0.1|255$" | tr '\n' ' ')
 export "localip"
 
 localip1=${localip%% *}
@@ -4144,9 +4163,14 @@ saveVAR() {
 }
 loadVAR() {
     [ -f ~/.go.private.var ] && source ~/.go.private.var
-    [ -f ~/.go.export.var ] && find "$HOME/.go.export.var" -type f -mmin +10 -exec rm -f "$HOME/.go.export.var" \;
-    [ -f ~/.go.export.var ] && cat "$HOME/.go.export.var" | decrypt >"$HOME/.go.export.var." && mv -f "$HOME/.go.export.var." "$HOME/.go.export.var"
-    [ -f ~/.go.export.var ] && source "$HOME/.go.export.var" && rm -f "$HOME/.go.export.var"
+    if [ -f "$HOME/.go.export.var" ]; then
+        if find "$HOME/.go.export.var" -type f -mmin +10 2>/dev/null | grep -q .; then
+            rm -f "$HOME/.go.export.var"
+        elif decrypt < "$HOME/.go.export.var" > "$HOME/.go.export.var.dec" 2>/dev/null && [ -s "$HOME/.go.export.var.dec" ]; then
+            source "$HOME/.go.export.var.dec" 2>/dev/null
+        fi
+        rm -f "$HOME/.go.export.var" "$HOME/.go.export.var.dec" 2>/dev/null
+    fi
 }
 editVAR() {
     [ -f ~/.go.private.var ] && vim ~/.go.private.var
@@ -6706,22 +6730,7 @@ decrypt_file() {
     o="${i%.enc}"
     openssl enc -des-ede3-cbc -d -in "$i" -out "$o" -pass pass:"$k" 2>/dev/null && chmod 600 "$o"
 }
-encrypt() {
-    # 인수중 마지막 인자 -> key ex) encrypt hello world mykey or echo "hello world" | encrypt mykey
-    [ "$1" ] && local k="${!#}"
-    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" #echo "k: $k"
-    IFS='' read -d '' -t1 message
-    [ "$2" ] && message="$message $(echo "${*:1:$(($# - 1))}" | tr '\n' ' ')"
-    #echo "msg: $message"
-    echo -n "$message" | openssl enc -des-ede3-cbc -pass pass:$k 2>/dev/null | perl -MMIME::Base64 -ne 'print encode_base64($_);'
-}
-decrypt() {
-    [ "$1" ] && local k="${!#}"
-    [ ! "$k" ] && k="${ENC_KEY:-$HOSTNAME}" #echo "k: $k";
-    IFS='' read -d '' -t1 encrypted_message
-    [ "$2" ] && encrypted_message="$encrypted_message $(echo "${*:1:$(($# - 1))}")"
-    echo -n "$encrypted_message" | perl -MMIME::Base64 -ne 'print decode_base64($_);' | openssl enc -des-ede3-cbc -pass pass:$k -d 2>/dev/null
-}
+# [중복 제거] encrypt() 와 decrypt() 는 상단(100행 부근)에 -r 플래그 및 printf 안전 처리와 함께 일원화 선언됨
 
 # 중복 실행 방지 함수
 runlock() {
