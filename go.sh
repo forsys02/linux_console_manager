@@ -344,6 +344,7 @@ local_myenv=""
 [ -f "$envorg2" ] && local_myenv="$envorg2"
 [ -z "$local_myenv" ] && [ -f "$HOME/go.my.env" ] && local_myenv="$HOME/go.my.env"
 [ -z "$GOLANG" ] && [ -n "$local_myenv" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+[ -z "$GOVIEW" ] && [ -n "$local_myenv" ] && GOVIEW="$(grep -m1 '^[[:blank:]]*GOVIEW=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
 unset -v local_myenv
 if [ "$GOLANG" != "kr" ] && [ "$GOLANG" != "en" ]; then
     GOLANG=""
@@ -362,6 +363,33 @@ if ! golang_filter "$GOLANG"; then
     fi
 fi
 export GOLANG
+
+# ===============================================================
+# [V] 보기 모드 (easy: 쉬움 모드 ↔ cmd: 기존 명령어 모드)
+#   기본값: easy (초보자 친화적 설명 및 확인 카드 표시)
+# ===============================================================
+GOVIEW="${GOVIEW:-easy}"
+export GOVIEW
+
+goview_toggle() {
+    if [ "$GOVIEW" = "easy" ]; then
+        GOVIEW="cmd"
+        if [ "$GOLANG" = "kr" ]; then
+            ko "보기 모드: 명령어 모드 (기존) [V]\n"
+        else
+            echo "View mode: Command mode [V]"
+        fi
+    else
+        GOVIEW="easy"
+        if [ "$GOLANG" = "kr" ]; then
+            ko "보기 모드: 쉬움 모드 (설명 및 카드 확인) [V]\n"
+        else
+            echo "View mode: Easy mode [V]"
+        fi
+    fi
+    export GOVIEW
+    return 0
+}
 
 # tmp 폴더 set
 if [[ $(id -u) == "0" ]] && echo "" >>/tmp/go_history.txt 2>/dev/null; then
@@ -592,21 +620,27 @@ menu_keyhelp() { # detail 몇줄
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
         ko "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인  [ESC]위  < >  앞/다음\n"
-        ko "  보기  [e]파일  [h]이력  [conf]설정편집  [sh]내장쉔   . 앞자리생략\n"
+        ko "  보기  [V]쉬움/명령어전환  [e]파일  [h]이력  [conf]설정  [sh]내장쉘\n"
         ko "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
         ko "  move  [b]back  [bb]x2  [bbb]x3  [m]main  [ESC]back  < >  prev/next\n"
-        ko "  view  [e]file  [h]history  [conf]config  [sh]shell   . omit number\n"
+        ko "  view  [V]easy/cmd toggle  [e]file  [h]hist  [conf]config  [sh]shell\n"
         ko "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)\n"
     fi
 }
 
 menu_prompt() { # $1=최대번호
-    if [ "$GOLANG" = "kr" ]; then
-        ko ">>> 선택 [0-%s]   [?] 도움말  [?번호] 설명보기 : " "$1"
+    local _vtxt=""
+    if [ "${GOVIEW:-easy}" = "easy" ]; then
+        [ "$GOLANG" = "kr" ] && _vtxt="[V]명령어모드" || _vtxt="[V]cmd-mode"
     else
-        printf '>>> Select [0-%s]   [?] keys  [?no] desc : ' "$1"
+        [ "$GOLANG" = "kr" ] && _vtxt="[V]쉬움모드" || _vtxt="[V]easy-mode"
+    fi
+    if [ "$GOLANG" = "kr" ]; then
+        ko ">>> 선택 [0-%s]   %s   [?] 도움말 : " "$1" "$_vtxt"
+    else
+        printf '>>> Select [0-%s]   %s   [?] keys : ' "$1" "$_vtxt"
     fi
 }
 
@@ -795,6 +829,206 @@ cmd_desc_peek() {
     cmd_choice=""
     cmd_choice1=""
     return 0
+}
+
+###############################################################
+# [#h] 쉬움 모드(Easy Mode) 항목 렌더링
+#   - 배지: [위험](빨강), [변경](노랑), [조회](초록)
+#   - 설명 제목: 1) #h 첫 줄  2) 직전 # 주석  3) : 라벨 ;  4) 명령어 축약
+###############################################################
+render_item_easy() {
+    local pi="$1"
+    local c_cmd="$2"
+    local hdesc="$3"
+    local prev_comm="$4"
+    local badge=""
+    local title=""
+
+    # 1. 배지 결정
+    if [[ "$c_cmd" =~ ^[[:space:]]*!!! ]]; then
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+    elif [[ "$c_cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill) ]]; then
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+    else
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+    fi
+
+    # 2. 제목 결정 (4단 폴백 사다리)
+    if [ -n "$hdesc" ]; then
+        title="$(echo "$hdesc" | head -n1)"
+    elif [ -n "$prev_comm" ] && [ "${#prev_comm}" -gt 2 ]; then
+        title="$prev_comm"
+    elif [[ "$c_cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
+        title="${BASH_REMATCH[1]}"
+        title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    else
+        local raw_cmd="$c_cmd"
+        raw_cmd="${raw_cmd#!!!}"
+        raw_cmd="$(echo "$raw_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if ((${#raw_cmd} > 60)); then
+            title="${raw_cmd:0:57}..."
+        else
+            title="$raw_cmd"
+        fi
+    fi
+
+    printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
+}
+
+###############################################################
+# [#h] 쉬움 모드(Easy Mode) 번호 선택 시 확인 카드 (Card UI)
+#   인수: $1 = 명령줄 원문
+#         $2 = #h 설명 전체
+#         $3 = 선택한 표시 번호 (예: 2)
+#         $4 = 전체 표시 개수 (예: 8)
+#   반환: 0 = 실행 승인
+#         1 = 취소 (n 또는 ESC)
+#         2 = 설정 편집 (e)
+###############################################################
+show_cmd_card() {
+    local cmd="$1"
+    local desc="$2"
+    local sel_num="${3:-1}"
+    local total_num="${4:-1}"
+
+    local is_danger=0
+    local badge=""
+    local title=""
+    local body=""
+
+    # 위험 판단
+    if [[ "$cmd" =~ ^[[:space:]]*!!! ]]; then
+        is_danger=1
+        cmd="${cmd#*!!!}"
+        cmd="${cmd# }"
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+    elif [[ "$cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill) ]]; then
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+    else
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+    fi
+
+    # 제목 및 본문 분리
+    if [ -n "$desc" ]; then
+        title="$(echo "$desc" | head -n1)"
+        body="$(echo "$desc" | sed '1d')"
+    elif [[ "$cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
+        title="${BASH_REMATCH[1]}"
+        title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        body=""
+    else
+        title="${cmd:0:60}"
+        body=""
+    fi
+
+    echo
+    echo "======================================================================"
+    printf " [%s/%s] %s   %b\n" "$sel_num" "$total_num" "$title" "$badge"
+    echo "======================================================================"
+
+    # 무엇을 하나요 (설명 섹션)
+    if [ -n "$body" ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            printf "\x1b[1;36m 무엇을 하나요\x1b[0m\n"
+        else
+            printf "\x1b[1;36m Description\x1b[0m\n"
+        fi
+        printf '%s\n' "$body" | sed -e 's/^/   /'
+        echo
+    elif [ -n "$title" ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            printf "\x1b[1;36m 무엇을 하나요\x1b[0m\n"
+        else
+            printf "\x1b[1;36m Description\x1b[0m\n"
+        fi
+        printf "   %s\n\n" "$title"
+    fi
+
+    # 실행 시 물어보는 값 (변수 안내)
+    local vars=""
+    vars="$(echo "$cmd" | grep -oE 'var[A-Z][a-zA-Z0-9_@-]*' | sort -u)"
+    if [ -n "$vars" ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            printf "\x1b[1;35m 실행 시 물어보는 값 (변수)\x1b[0m\n"
+        else
+            printf "\x1b[1;35m Prompt Variables\x1b[0m\n"
+        fi
+        for v in $vars; do
+            local v_clean="${v//@space@/ }"
+            v_clean="${v_clean//@colon@/:}"
+            v_clean="${v_clean//@dot@/.}"
+            v_clean="${v_clean//@@//}"
+            local vname="${v_clean%%__*}"
+            vname="${vname#var}"
+            local vopts="${v_clean#*__}"
+            if [ "$vopts" != "$v_clean" ] && [ -n "$vopts" ]; then
+                local vdef="${vopts%%__*}"
+                printf "   \x1b[1;37m%-10s\x1b[0m 기본값: %s\n" "$vname" "$vdef"
+            else
+                printf "   \x1b[1;37m%-10s\x1b[0m\n" "$vname"
+            fi
+        done
+        echo
+    fi
+
+    # 실제로 실행되는 명령 (cmd_unfold)
+    local uq="$(cmd_unfold "$cmd")"
+    local un=$(printf '%s\n' "$uq" | grep -c '^  [0-9][0-9]*) ')
+    if [ "${un:-0}" -gt 1 ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            printf "\x1b[1;33m 실제로 실행되는 명령 (%s단계)\x1b[0m\n" "$un"
+        else
+            printf "\x1b[1;33m Commands to execute (%s steps)\x1b[0m\n" "$un"
+        fi
+        printf '%s\n' "$uq"
+    else
+        if [ "$GOLANG" = "kr" ]; then
+            printf "\x1b[1;33m 실제로 실행되는 명령\x1b[0m\n"
+        else
+            printf "\x1b[1;33m Command to execute\x1b[0m\n"
+        fi
+        printf "   %s\n" "$cmd"
+    fi
+    echo "----------------------------------------------------------------------"
+
+    # 사용자 확인 프롬프트
+    local card_ans="" card_ans1=""
+    if [ "$is_danger" -eq 1 ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            menu_read " !! 위험한 명령입니다. 실행하려면 yes 를 입력하세요.    [n] 취소 : " card_ans card_ans1
+        else
+            menu_read " !! Dangerous command. Type yes to execute.    [n] Cancel : " card_ans card_ans1
+        fi
+        local rc=$?
+        if [ $rc -eq 1 ] || { [ "$card_ans" != "yes" ] && [ "$card_ans" != "YES" ]; }; then
+            echo " [취소됨]"
+            return 1
+        fi
+        return 0
+    else
+        if [ "$GOLANG" = "kr" ]; then
+            menu_read " [Enter] 실행    [n] 취소    [e] 편집(conf) : " card_ans card_ans1
+        else
+            menu_read " [Enter] Run    [n] Cancel    [e] Edit conf : " card_ans card_ans1
+        fi
+        local rc=$?
+        if [ $rc -eq 1 ]; then
+            echo " [취소됨]"
+            return 1
+        fi
+        case "$card_ans" in
+            "" | "y" | "Y")
+                return 0
+                ;;
+            "e" | "E")
+                return 2
+                ;;
+            *)
+                echo " [취소됨]"
+                return 1
+                ;;
+        esac
+    fi
 }
 
 ###############################################################
@@ -1247,7 +1481,7 @@ menufunc() {
                 while true; do # 하부 메뉴 CMDs cmd_choice loop
                     cmdloop=$((cmdloop + 1))
                     chosen_command=""
-                    chosen_desc="" # [#h] 이 선택에 붙은 설명. 매 회차 초기화 (이전값 잔류 방지)
+                    sel_desc="" # [#h] 이 선택에 붙은 설명. 매 회차 초기화 (이전값 잔류 방지)
                     num_commands=${#chosen_commands[@]} # 줄길이 체크
 
                     # 명령줄이 1줄이면 바로 실행 1줄 이상이면 리스트 출력
@@ -1275,7 +1509,13 @@ menufunc() {
                             echo -n "=============================================="
                             echo -n " :: $cmdloop"
                             echo
-                            echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)") \n"
+                            local _vmode_badge=""
+                            if [ "${GOVIEW:-easy}" = "easy" ]; then
+                                [ "$GOLANG" = "kr" ] && _vmode_badge="보기: 쉬움 (V 로 전환)" || _vmode_badge="View: Easy (toggle V)"
+                            else
+                                [ "$GOLANG" = "kr" ] && _vmode_badge="보기: 명령어 (V 로 전환)" || _vmode_badge="View: Cmd (toggle V)"
+                            fi
+                            echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)")  \x1b[1;36m${_vmode_badge}\x1b[0m\n"
                             echo "=============================================="
                             # pre excute
 
@@ -1307,6 +1547,7 @@ menufunc() {
                             display_idx=1
                             unset original_indices
                             original_indices=()
+                            local prev_comment=""
 
                             # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리
                             for item in $(seq 1 ${#chosen_commands[@]}); do
@@ -1314,111 +1555,94 @@ menufunc() {
                                 c_cmd="${chosen_commands[$((item - 1))]}"
 
                                 # [#h] 이 명령줄에 붙은 설명 (위 #h 태그에서 넘어온 값, 여러줄 가능)
-                                #      -> 목록에는 펼치지 않고 ?번호 조회/실행직전 표시에만 쓴다
                                 _hdesc="${chosen_desc[$((item - 1))]-}"
 
                                 # [#h] 태그 줄 자체는 여기서 소비한다.
-                                #      (설명은 짝이 되는 아래 명령줄에서 대표줄로 출력되므로 중복출력 방지)
                                 if [[ "$c_cmd" =~ ^[[:space:]]*#h(e)?[[:space:]]+ ]]; then
                                     continue
                                 fi
 
-                                # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
-                                # 파일경로에 $포함 변수경로는 제외
-                                file_paths="$(echo "$c_cmd" | awk '
-/^[[:space:]]*#/ { next }
+                                # 주석줄인 경우
+                                if [ "$(echo "$c_cmd" | xargs -0 | cut -c1)" = "#" ]; then
+                                    prev_comment="${c_cmd#*#}"
+                                    prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+                                    if [ "${GOVIEW:-easy}" != "easy" ]; then
+                                        printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m\n" "$prev_comment"
+                                    fi
+                                    continue
+                                fi
 
+                                # 주석 아닌 경우 배열 순번에 줄번호 할당
+                                pi="${display_idx}."
+                                original_indices=("${original_indices[@]}" "$item")
+                                display_idx=$((display_idx + 1))
+
+                                if [ "${GOVIEW:-easy}" = "easy" ]; then
+                                    # 쉬움 모드 렌더링
+                                    render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment"
+                                    prev_comment=""
+                                else
+                                    # 기존 명령어 모드 렌더링
+                                    prev_comment=""
+                                    # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
+                                    file_paths="$(echo "$c_cmd" | awk '
+/^[[:space:]]*#/ { next }
 {
     for (i = 1; i <= NF; i++) {
         token = $i
-
-        # 따옴표 제거
         gsub(/^["'"'"']|["'"'"']$/, "", token)
-		gsub(/[^a-zA-Z0-9\/_.-]+$/, "", token)
-
-
-        # $가 포함된 변수 경로는 제외
+        gsub(/[^a-zA-Z0-9\/_.-]+$/, "", token)
         if (token ~ /\$/) continue
-
-        # URL 제외
         if (token ~ /^https?:\/\//) continue
-
-        # 경로 형식 필터링
         if (token ~ /^\/[^[:space:]]+$/ &&
             token ~ /\/[^\/]+\/[^\/]+/ &&
             token !~ /^\/dev\// &&
             token !~ /^\/proc\// &&
             token !~ /var[A-Z][a-zA-Z0-9_.-]*/) {
-
-# 		 print "DEBUG: Checking token [" token "]" > "/dev/stderr" # 에러 출력으로 보내서 확인 용이하게
-
-            # 실제로 존재하는 파일인 경우만 출력
             cmd = "[ -f \"" token "\" ]"
             if (system(cmd) == 0)
                 print token
         }
     }
 }')"
+                                    IFS=$' \n'
+                                    processed_paths=""
+                                    for file_path in $file_paths; do
+                                        if ! echo "$processed_paths" | grep -q -F "$file_path"; then
+                                            [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
+                                            c_cmd="${c_cmd//$file_path/${file_marker}${file_path}${file_marker}}"
+                                            processed_paths="${processed_paths}${file_path}"$'\n'
+                                        fi
+                                    done
+                                    unset IFS
 
-                                # 해당 서버에 없는 경로에 대해서는 음영처리 // 있는 경로는 밝게
-                                # 서버에 따라 환경파일의 경로가 달라 파일 존재 여부 밝음/어둠으로 체크
-                                IFS=$' \n'
-                                processed_paths=""
-                                for file_path in $file_paths; do
-                                    if ! echo "$processed_paths" | grep -q -F "$file_path"; then
-                                        [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
-                                        c_cmd="${c_cmd//$file_path/${file_marker}${file_path}${file_marker}}"
-                                        processed_paths="${processed_paths}${file_path}"$'\n'
+                                    max_len=330
+                                    processed_cmd="$c_cmd"
+                                    if ((${#c_cmd} > max_len)); then
+                                        processed_cmd="${c_cmd:0:max_len}..."
                                     fi
-                                done
-                                unset IFS
 
-                                # 주석 아닌경우 배열 순번에 줄번호를 할당 (주석은 번호할당 열외)
-                                # 시작하는 공백을 제거후 할당
-                                pi=""
-                                if [ "$(echo "$c_cmd" | xargs -0 | cut -c1)" != "#" ]; then
-
-                                    pi="${display_idx}." # 줄번호
-                                    # 배열 확장
-                                    # 주석뺀 명령줄에 번호를 주고, 번호와 명령줄을 배열을 만듬 -> 19번 선택시 19번 배열의 명령줄 실행
-                                    original_indices=("${original_indices[@]}" "$item")
-                                    display_idx=$((display_idx + 1))
+                                    printf "\e[1m%-3s\e[0m " ${pi}
+                                    echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
+                                        -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' \
+                                        -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' \
+                                        -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' \
+                                        -e 's/@space@/ /g' \
+                                        -e 's/@colon@/:/g' \
+                                        -e 's/@dot@/./g' \
+                                        -e '/^#/! s/@@/\//g' \
+                                        -e '/^#/! s/\(!!!\|eval\|exportvar\|export\)/\x1b[1;33m\1\x1b[0m/g' \
+                                        -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' \
+                                        -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \)/\x1b[1;34m&\x1b[0m/g' \
+                                        -e '/^#/! s/\(hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\)/\x1b[1;34m&\x1b[0m/g' \
+                                        -e '/^#/! s/\(^: [^;]*\|^\!\!\! : [^;]\)/\x1b[1;34m&\x1b[0m/g' \
+                                        -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' \
+                                        -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' \
+                                        -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' \
+                                        -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' \
+                                        -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
+                                        -e 's/#$/\x1b[1;36m#\x1b[0m/'
                                 fi
-
-                                # 명령줄이 길어지면 제한자 이내로 출력 (약 3줄까지 출력)
-                                max_len=330
-                                processed_cmd="$c_cmd"
-                                if ((${#c_cmd} > max_len)); then
-                                    # max_len 까지만 자르고 "..." 추가
-                                    processed_cmd="${c_cmd:0:max_len}..."
-                                fi
-
-                                # [#h] 설명(도움말)은 목록에 절대 펼치지 않는다.
-                                #      (목록은 1페이지 완주가 설계목표 -> 설명을 섞으면 스크롤이 생김)
-                                #      대신 "?번호" 를 치면 그때만 설명 + 원본 명령을 보여준다.
-                                #      여기서도 #h 태그줄 자체는 건너뛰어(위 continue) 목록에 안 나온다.
-                                printf "\e[1m%-3s\e[0m " ${pi}
-                                #echo "$c_cmd" | fold -sw 120 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
-                                echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' `# 첫 번째 줄 제외 각 라인 들여쓰기` \
-                                    -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' `# '@@@@' ! -fd file_path 밝은 흰색` \
-                                    -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' `# '@@@' ! -fd file_path 어두운 회색` \
-                                    -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
-                                    -e 's/@space@/ /g' `# 변수에 @space@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
-                                    -e 's/@colon@/:/g' `# 변수에 @colon@ 를 쓸경우 변환 ` \
-                                    -e 's/@dot@/./g' `# 변수에 @dot@ 를 쓸경우 공백으로 변환; 눈에는 _ 로 표시 ` \
-                                    -e '/^#/! s/@@/\//g' `# 변수에 @@ 를 쓸경우 / 로 변환 ` \
-                                    -e '/^#/! s/\(!!!\|eval\|exportvar\|export\)/\x1b[1;33m\1\x1b[0m/g' `# '!!!' 경고표시 진한 노란색` \
-                                    -e '/^#/! s/\(status\|running\)/\x1b[33m\1\x1b[0m/g' `# status yellow` \
-                                    -e '/^#/! s/\(template_insert\|template_copy\|template_view\|template_edit\|batcat \|vi2 \|vi3 \|tac \|cat3 \|cat \)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
-                                    -e '/^#/! s/\(hash_add\|hash_restore\|hash_remove\|change\|insert\|explorer\)/\x1b[1;34m&\x1b[0m/g' `# 파란색` \
-                                    -e '/^#/! s/\(^: [^;]*\|^\!\!\! : [^;]\)/\x1b[1;34m&\x1b[0m/g' `# : abc ; 형태 파란색` \
-                                    -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' `# stop disable red` \
-                                    -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' `# start enable green` \
-                                    -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' `# ';;' 청록색` \
-                                    -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' `# 주석행의 탈출코드 조정` \
-                                    -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' `# 주석을 청록색으로 포맷` \
-                                    -e 's/#$/\x1b[1;36m#\x1b[0m/' `# 주석을 청록색으로 포맷`
-
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
                             echo "=============================================="
@@ -1493,6 +1717,7 @@ menufunc() {
                             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
                             # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
                             # cmd_choice 는 4번 골랐다고 4번이 아니고 4번에 해당되는 줄번호를 가짐
+                            display_choice="$cmd_choice"
                             [ "$cmd_choice" ] && [[ $cmd_choice == [0-9] || $cmd_choice == [1-9][0-9] ]] && [ "$cmd_choice" -gt 0 ] && cmd_choice=${original_indices[$((cmd_choice - 1))]}
                         } # end of choice_list()
                         ####################### end of choice_list #######################
@@ -1509,7 +1734,7 @@ menufunc() {
                         if [ -n "$cmd_choice" ] && { case "$cmd_choice" in [0-9] | [1-9][0-9]) true ;; *) false ;; esac } && [ "$cmd_choice" -ge 1 ] && [ "$cmd_choice" -le "$num_commands" ]; then
                             chosen_command=${chosen_commands[$((cmd_choice - 1))]}
                             # [#h] 선택한 줄에 붙어있던 설명을 함께 챙긴다 (실행 직전 표시용)
-                            chosen_desc="${chosen_desc[$((cmd_choice - 1))]-}"
+                            sel_desc="${chosen_desc[$((cmd_choice - 1))]-}"
                         fi
 
                     else
@@ -1542,25 +1767,47 @@ menufunc() {
                     ################ 실졍 명령줄이 넘어온경우
                     elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]; then
                         echo
-                        # [#h] 이 명령에 붙은 설명(도움말)을 실행 직전에 다시 보여준다
-                        #      (CMD 목록에서 번호만 보고 실행한 경우 무엇을 누르는지 확인용)
-                        if [ -n "${chosen_desc-}" ]; then
-                            echo
-                            printf '%s\n' "$chosen_desc" | sed -e 's/^/\x1b[1;37m  /' -e 's/$/\x1b[0m/'
-                            echo
-                        fi
-                        # Danger 판단
-                        if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
-                            # !!! 제거 # !!! 앞에 공백이 간혹 있을때 버그 방지
-                            chosen_command=${chosen_command#* }
-                            chosen_command=${chosen_command#!!!}
-                            echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
-                            echo
-                            # !!! -> danger print -> var cfm
-                            printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
-                        else
-                            echo
+                        if [ "${GOVIEW:-easy}" = "easy" ]; then
+                            # [V] 쉬움 모드: 번호 선택 시 확인 카드 (Card UI)
+                            show_cmd_card "$chosen_command" "${sel_desc:-${chosen_desc-}}" "${display_choice:-1}" "$((display_idx - 1))"
+                            local card_rc=$?
+                            if [ $card_rc -eq 1 ]; then
+                                # 취소 (n 또는 ESC) -> 목록 제자리로 복귀
+                                cmd_choice=""
+                                chosen_command=""
+                                continue
+                            elif [ $card_rc -eq 2 ]; then
+                                # e (설정 편집)
+                                conf
+                                cmd_choice=""
+                                chosen_command=""
+                                continue
+                            fi
+                            # 실행 승인 (0)
+                            if [[ "$chosen_command" =~ ^[[:space:]]*!!! ]]; then
+                                chosen_command=${chosen_command#* }
+                                chosen_command=${chosen_command#!!!}
+                            fi
                             cfm=y
+                        else
+                            # 기존 명령어 모드 (cmd):
+                            # [#h] 이 명령에 붙은 설명(도움말)을 실행 직전에 다시 보여준다
+                            if [ -n "${sel_desc:-${chosen_desc-}}" ]; then
+                                echo
+                                printf '%s\n' "${sel_desc:-${chosen_desc-}}" | sed -e 's/^/\x1b[1;37m  /' -e 's/$/\x1b[0m/'
+                                echo
+                            fi
+                            # Danger 판단
+                            if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
+                                chosen_command=${chosen_command#* }
+                                chosen_command=${chosen_command#!!!}
+                                echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
+                                echo
+                                printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
+                            else
+                                echo
+                                cfm=y
+                            fi
                         fi
                         # ;; 로 이어진 명령들은 순차적으로 실행 (앞의 결과를 보고 뒤의 변수를 입력 가능)
                         # 명령즐을 ;; 기준으로 나누어 배열을 만듬
@@ -1929,6 +2176,11 @@ menufunc() {
                             NC
                         }
                         case "$cmd_choice" in
+                        # --- View Mode Toggle ---
+                        "V" | "v")
+                            goview_toggle
+                            continue
+                            ;;
                         # --- Basic Navigation & Commands ---
                         "0" | "q" | ".")
                             # CMD 목록 → 한 단계 위 화면(메뉴목록)으로 복귀
@@ -2278,6 +2530,10 @@ menufunc() {
                 ;;
             ... | , | bash) # alias 를 쓸수 있는 bash
                 /bin/bash
+                ;;
+            V | v)
+                goview_toggle
+                continue
                 ;;
             L)
                 # [L] 메뉴 언어 즉시 전환 (한글 <-> English)  // 인코딩 변환이 아니다
