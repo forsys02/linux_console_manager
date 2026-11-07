@@ -1501,6 +1501,7 @@ menufunc() {
                         ####################### choice_list #######################
                         ####################### choice_list #######################
                         choice_list() {
+                            local IFS=$' \t\n'
                             echo
 
                             # scut history 관리 -> flow
@@ -1551,7 +1552,7 @@ menufunc() {
                             local prev_comment=""
 
                             # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리
-                            for item in $(seq 1 ${#chosen_commands[@]}); do
+                            for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
 
@@ -1563,8 +1564,13 @@ menufunc() {
                                     continue
                                 fi
 
+                                # %%% 헤더 줄 소비 (중복 출력 방지)
+                                if [[ "$c_cmd" =~ ^[[:space:]]*%%% ]]; then
+                                    continue
+                                fi
+
                                 # 주석줄인 경우
-                                if [ "$(echo "$c_cmd" | xargs -0 | cut -c1)" = "#" ]; then
+                                if [[ "$c_cmd" =~ ^[[:space:]]*# ]]; then
                                     prev_comment="${c_cmd#*#}"
                                     prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                                     if [ "${GOVIEW:-easy}" != "easy" ]; then
