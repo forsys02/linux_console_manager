@@ -691,6 +691,7 @@ menu_read() {
             break
         fi
         case "$_c" in
+            "") _eol=1 && break ;;                                       # Enter = 빈입력 (read -n1 이 Newline 을 만나 반환한 빈값)
             $'\010' | $'\011' | $'\025' | $'\177') _c="" && continue ;; # 편집키 무시
             $'\012' | $'\015') _c="" && _eol=1 && break ;;               # Enter = 빈입력
             [[:cntrl:]]) _c="" && continue ;;                            # 그외 제어문자 무시
