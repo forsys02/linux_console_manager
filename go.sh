@@ -835,8 +835,139 @@ cmd_desc_peek() {
 ###############################################################
 # [#h] 쉬움 모드(Easy Mode) 항목 렌더링
 #   - 배지: [위험](빨강), [변경](노랑), [조회](초록)
-#   - 설명 제목: 1) #h 첫 줄  2) 직전 # 주석  3) : 라벨 ;  4) 명령어 축약
+#   - 설명 제목: 1) #h 첫 줄  2) 직전 # 주석  3) : 라벨 ;  4) 자동 동작 제목
 ###############################################################
+# [규칙] AGENTS.md § 쉬움 모드 제목 = 모든 실행 항목에 사람이 읽는 제목을 표시
+# go.env 의 오래된 명령에는 #h/#he 쌍이 없을 수 있다. 원문 명령을 그대로 노출하지
+# 않도록, 공통 동작을 읽어 현재 언어의 제목을 만들어 목록/미리보기/확인 카드에 쓴다.
+easy_auto_title() {
+    local easy_cmd="$1"
+    local easy_label=""
+    local easy_name=""
+
+    # : 제목 ; 명령 형태는 이미 사람이 쓴 제목이므로 그대로 쓴다.
+    if [[ "$easy_cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
+        easy_label="${BASH_REMATCH[1]}"
+        easy_label="$(echo "$easy_label" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        [ -n "$easy_label" ] && printf '%s\n' "$easy_label" && return
+    fi
+
+    easy_cmd="${easy_cmd#!!!}"
+    easy_cmd="$(echo "$easy_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+    if [ "$GOLANG" = "kr" ]; then
+        case "$easy_cmd" in
+            *"systemctl status"*) echo "서비스 상태를 확인합니다" ;;
+            *"systemctl restart"*|*"systemctl try-reload-or-restart"*) echo "서비스를 다시 시작합니다" ;;
+            *"systemctl reload"*) echo "서비스 설정을 다시 불러옵니다" ;;
+            *"systemctl enable"*) echo "서비스 자동 시작을 설정합니다" ;;
+            *"systemctl disable"*) echo "서비스 자동 시작을 해제합니다" ;;
+            *"systemctl start"*) echo "서비스를 시작합니다" ;;
+            *"systemctl stop"*) echo "서비스를 중지합니다" ;;
+            *"journalctl"*) echo "시스템 로그를 확인합니다" ;;
+            *"apt "*"install"*|*"apt-get "*"install"*|*"yum "*"install"*|*"dnf "*"install"*|"yyay "*) echo "패키지를 설치합니다" ;;
+            *"apt "*"remove"*|*"yum "*"remove"*|*"dnf "*"remove"*) echo "패키지를 제거합니다" ;;
+            *"apt "*"update"*|*"apt "*"upgrade"*|*"yum "*"update"*|*"dnf "*"update"*) echo "패키지 목록 또는 시스템을 업데이트합니다" ;;
+            *"docker-compose"*" up"*|*"docker compose"*" up"*) echo "Docker Compose 서비스를 시작합니다" ;;
+            *"docker-compose"*" down"*|*"docker compose"*" down"*) echo "Docker Compose 서비스를 중지합니다" ;;
+            *"docker-compose"*" logs"*|*"docker compose"*" logs"*) echo "Docker Compose 로그를 봅니다" ;;
+            *"docker "*" ps"*) echo "Docker 컨테이너 목록을 봅니다" ;;
+            *"docker "*" start"*) echo "Docker 컨테이너를 시작합니다" ;;
+            *"docker "*" stop"*) echo "Docker 컨테이너를 중지합니다" ;;
+            *"docker "*" rm"*) echo "Docker 컨테이너를 삭제합니다" ;;
+            *"git clone"*) echo "Git 저장소를 복제합니다" ;;
+            *"git pull"*) echo "Git 저장소를 최신 상태로 받습니다" ;;
+            *"git push"*) echo "Git 변경 사항을 원격 저장소에 올립니다" ;;
+            *"git status"*) echo "Git 변경 상태를 확인합니다" ;;
+            *"git diff"*) echo "Git 변경 내용을 비교합니다" ;;
+            *"certbot"*) echo "SSL 인증서를 발급하거나 관리합니다" ;;
+            *"firewall-cmd"*) echo "방화벽 규칙을 확인하거나 변경합니다" ;;
+            *"ufw "*) echo "UFW 방화벽을 관리합니다" ;;
+            *"iptables"*) echo "iptables 방화벽 규칙을 확인하거나 변경합니다" ;;
+            *"ssh "*|"ssh"*) echo "원격 서버에 SSH로 연결하거나 명령을 실행합니다" ;;
+            *"scp "*|"rsync "*|"ncp "*|"ncpr "*) echo "파일을 서버 사이에 전송합니다" ;;
+            *"curl "*|"wget "*) echo "웹에서 파일 또는 응답을 가져옵니다" ;;
+            *"mysql"*|"mariadb"*) echo "MariaDB 또는 MySQL을 관리합니다" ;;
+            *"vi "*|"vi2 "*|"vi3 "*|"vim "*|"nano "*) echo "설정 파일을 편집합니다" ;;
+            *"tail -f"*) echo "로그를 실시간으로 봅니다" ;;
+            *"cat "*|"less "*|"head "*) echo "파일 내용을 확인합니다" ;;
+            *"find "*) echo "파일 또는 폴더를 찾습니다" ;;
+            *"grep "*|*"cgrep"*) echo "텍스트에서 조건에 맞는 내용을 찾습니다" ;;
+            *"ls "*|"ls") echo "파일과 폴더 목록을 봅니다" ;;
+            *"mkdir "*) echo "폴더를 만듭니다" ;;
+            *"cp "*) echo "파일을 복사합니다" ;;
+            *"mv "*) echo "파일을 이동하거나 이름을 바꿉니다" ;;
+            *"rm "*) echo "파일 또는 폴더를 삭제합니다" ;;
+            *"chmod "*|*"chown "*|*"setfacl "*) echo "파일 또는 폴더 권한을 설정합니다" ;;
+            *"ip "*|"ifconfig"*|"nmcli"*) echo "네트워크 설정과 상태를 확인합니다" ;;
+            *"ping "*|"traceroute "*|"dig "*|"nslookup "*) echo "네트워크 연결 또는 DNS를 확인합니다" ;;
+            *"nmap "*) echo "호스트의 네트워크 포트를 검사합니다" ;;
+            *"reboot"*|"shutdown "*) echo "시스템 전원을 제어합니다" ;;
+            export\ *|[a-zA-Z_]*=*) echo "변수 값을 설정하거나 준비합니다" ;;
+            *)
+                easy_name="${easy_cmd%%[[:space:];]*}"
+                [ -z "$easy_name" ] && easy_name="명령"
+                printf '%s 실행\n' "$easy_name"
+                ;;
+        esac
+    else
+        case "$easy_cmd" in
+            *"systemctl status"*) echo "Check service status" ;;
+            *"systemctl restart"*|*"systemctl try-reload-or-restart"*) echo "Restart service" ;;
+            *"systemctl reload"*) echo "Reload service configuration" ;;
+            *"systemctl enable"*) echo "Enable service at boot" ;;
+            *"systemctl disable"*) echo "Disable service at boot" ;;
+            *"systemctl start"*) echo "Start service" ;;
+            *"systemctl stop"*) echo "Stop service" ;;
+            *"journalctl"*) echo "Check system logs" ;;
+            *"apt "*"install"*|*"apt-get "*"install"*|*"yum "*"install"*|*"dnf "*"install"*|"yyay "*) echo "Install packages" ;;
+            *"apt "*"remove"*|*"yum "*"remove"*|*"dnf "*"remove"*) echo "Remove packages" ;;
+            *"apt "*"update"*|*"apt "*"upgrade"*|*"yum "*"update"*|*"dnf "*"update"*) echo "Update packages or system" ;;
+            *"docker-compose"*" up"*|*"docker compose"*" up"*) echo "Start Docker Compose services" ;;
+            *"docker-compose"*" down"*|*"docker compose"*" down"*) echo "Stop Docker Compose services" ;;
+            *"docker-compose"*" logs"*|*"docker compose"*" logs"*) echo "View Docker Compose logs" ;;
+            *"docker "*" ps"*) echo "List Docker containers" ;;
+            *"docker "*" start"*) echo "Start Docker container" ;;
+            *"docker "*" stop"*) echo "Stop Docker container" ;;
+            *"docker "*" rm"*) echo "Remove Docker container" ;;
+            *"git clone"*) echo "Clone Git repository" ;;
+            *"git pull"*) echo "Pull latest Git changes" ;;
+            *"git push"*) echo "Push Git changes" ;;
+            *"git status"*) echo "Check Git status" ;;
+            *"git diff"*) echo "View Git changes" ;;
+            *"certbot"*) echo "Issue or manage SSL certificate" ;;
+            *"firewall-cmd"*) echo "Manage firewall rules" ;;
+            *"ufw "*) echo "Manage UFW firewall" ;;
+            *"iptables"*) echo "Manage iptables firewall rules" ;;
+            *"ssh "*|"ssh"*) echo "Connect to or run a command on a remote server" ;;
+            *"scp "*|"rsync "*|"ncp "*|"ncpr "*) echo "Transfer files between servers" ;;
+            *"curl "*|"wget "*) echo "Download a file or web response" ;;
+            *"mysql"*|"mariadb"*) echo "Manage MariaDB or MySQL" ;;
+            *"vi "*|"vi2 "*|"vi3 "*|"vim "*|"nano "*) echo "Edit configuration file" ;;
+            *"tail -f"*) echo "Follow log output" ;;
+            *"cat "*|"less "*|"head "*) echo "View file contents" ;;
+            *"find "*) echo "Find files or folders" ;;
+            *"grep "*|*"cgrep"*) echo "Search matching text" ;;
+            *"ls "*|"ls") echo "List files and folders" ;;
+            *"mkdir "*) echo "Create directory" ;;
+            *"cp "*) echo "Copy files" ;;
+            *"mv "*) echo "Move or rename files" ;;
+            *"rm "*) echo "Remove files or folders" ;;
+            *"chmod "*|*"chown "*|*"setfacl "*) echo "Set file or folder permissions" ;;
+            *"ip "*|"ifconfig"*|"nmcli"*) echo "Check network settings and status" ;;
+            *"ping "*|"traceroute "*|"dig "*|"nslookup "*) echo "Check network connection or DNS" ;;
+            *"nmap "*) echo "Scan host network ports" ;;
+            *"reboot"*|"shutdown "*) echo "Control system power" ;;
+            export\ *|[a-zA-Z_]*=*) echo "Set or prepare variable values" ;;
+            *)
+                easy_name="${easy_cmd%%[[:space:];]*}"
+                [ -z "$easy_name" ] && easy_name="Command"
+                printf 'Run %s\n' "$easy_name"
+                ;;
+        esac
+    fi
+}
+
 render_item_easy() {
     local pi="$1"
     local c_cmd="$2"
@@ -863,14 +994,7 @@ render_item_easy() {
         title="${BASH_REMATCH[1]}"
         title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     else
-        local raw_cmd="$c_cmd"
-        raw_cmd="${raw_cmd#!!!}"
-        raw_cmd="$(echo "$raw_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-        if ((${#raw_cmd} > 60)); then
-            title="${raw_cmd:0:57}..."
-        else
-            title="$raw_cmd"
-        fi
+        title="$(easy_auto_title "$c_cmd")"
     fi
 
     printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
@@ -918,7 +1042,7 @@ show_cmd_card() {
         title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         body=""
     else
-        title="${cmd:0:60}"
+        title="$(easy_auto_title "$cmd")"
         body=""
     fi
 
@@ -1457,7 +1581,13 @@ menufunc() {
                         # (#h 와 명령줄 사이에 참고주석이 있어도 설명은 명령줄에 붙는다)
                         chosen_desc+=("")
                     else
-                        chosen_desc+=("$_cd_pending") # 이 명령줄에 붙을 설명
+                        # 설명 태그가 없는 기존 명령도 쉬움 모드 제목을 자동으로 보충한다.
+                        # 목록뿐 아니라 ?번호 미리보기와 실행 확인 카드도 같은 제목을 사용한다.
+                        if [ -n "$_cd_pending" ]; then
+                            chosen_desc+=("$_cd_pending")
+                        else
+                            chosen_desc+=("$(easy_auto_title "$_cd_line")")
+                        fi
                         _cd_pending=""
                     fi
                 done
