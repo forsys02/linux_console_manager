@@ -881,7 +881,20 @@ easy_auto_title() {
             *"git status"*) echo "Git 변경 상태를 확인합니다" ;;
             *"git diff"*) echo "Git 변경 내용을 비교합니다" ;;
             *"certbot"*) echo "SSL 인증서를 발급하거나 관리합니다" ;;
+            *"fail2ban-client unban --all"*) echo "모든 감옥 차단 일괄 해제 (초기화)" ;;
+            *"fail2ban-client unban"*) echo "지정한 IP 차단 일괄 해제" ;;
+            *"fail2ban-client set"*" unbanip"*) echo "선택한 감옥에서 지정한 IP 차단 수동 해제" ;;
+            *"fail2ban-client set"*" banip"*) echo "선택한 감옥에 지정한 IP 수동 차단 등록" ;;
+            *"fail2ban-client status"*) echo "Fail2ban 감옥 상태 및 차단 통계 확인" ;;
+            *"firewall-cmd"*"--remove-rich-rule"*) echo "방화벽 리치 룰(Rich Rule) 차단 수동 삭제" ;;
+            *"firewall-cmd"*"--list-rich-rules"*) echo "방화벽 리치 룰(Rich Rule) 차단 목록 조회" ;;
             *"firewall-cmd"*) echo "방화벽 규칙을 확인하거나 변경합니다" ;;
+            *"pkill -kill -t"*|*"pkill"*"pts"*) echo "특정 터미널(pts) 세션 강제 종료 (kick)" ;;
+            *"pkill"*"sshd"*|*"kill"*"sshd"*) echo "특정 IP의 모든 SSH 연결 일괄 강제 퇴출" ;;
+            *"pkill "*|*"kill "*) echo "프로세스를 강제 종료합니다" ;;
+            *"w |"*|"w") echo "현재 서버 접속자 및 활성 터미널 세션 확인" ;;
+            *"explorer /etc/fail2ban"*) echo "Fail2ban 설정 폴더 내부 파일 탐색" ;;
+            *"yyay fail2ban"*) echo "Fail2ban 침입 차단 보안 패키지 설치" ;;
             *"ufw "*) echo "UFW 방화벽을 관리합니다" ;;
             *"iptables"*) echo "iptables 방화벽 규칙을 확인하거나 변경합니다" ;;
             *"ssh "*|"ssh"*) echo "원격 서버에 SSH로 연결하거나 명령을 실행합니다" ;;
@@ -936,7 +949,20 @@ easy_auto_title() {
             *"git status"*) echo "Check Git status" ;;
             *"git diff"*) echo "View Git changes" ;;
             *"certbot"*) echo "Issue or manage SSL certificate" ;;
+            *"fail2ban-client unban --all"*) echo "Unban all IPs across all jails" ;;
+            *"fail2ban-client unban"*) echo "Unban specified IP across all jails" ;;
+            *"fail2ban-client set"*" unbanip"*) echo "Manually unban IP in selected jail" ;;
+            *"fail2ban-client set"*" banip"*) echo "Manually ban IP in selected jail" ;;
+            *"fail2ban-client status"*) echo "Check Fail2ban jail status and statistics" ;;
+            *"firewall-cmd"*"--remove-rich-rule"*) echo "Remove firewalld rich-rule ban" ;;
+            *"firewall-cmd"*"--list-rich-rules"*) echo "List firewalld rich-rules for banned IPs" ;;
             *"firewall-cmd"*) echo "Manage firewall rules" ;;
+            *"pkill -kill -t"*|*"pkill"*"pts"*) echo "Disconnect specified terminal session (kick)" ;;
+            *"pkill"*"sshd"*|*"kill"*"sshd"*) echo "Kill all SSH sessions from specified IP" ;;
+            *"pkill "*|*"kill "*) echo "Kill running process" ;;
+            *"w |"*|"w") echo "View logged-in sessions and connected users" ;;
+            *"explorer /etc/fail2ban"*) echo "Explore Fail2ban configuration directory" ;;
+            *"yyay fail2ban"*) echo "Install Fail2ban intrusion prevention package" ;;
             *"ufw "*) echo "Manage UFW firewall" ;;
             *"iptables"*) echo "Manage iptables firewall rules" ;;
             *"ssh "*|"ssh"*) echo "Connect to or run a command on a remote server" ;;
@@ -977,9 +1003,9 @@ render_item_easy() {
     local title=""
 
     # 1. 배지 결정
-    if [[ "$c_cmd" =~ ^[[:space:]]*!!! ]]; then
+    if [[ "$c_cmd" =~ ^[[:space:]]*!!! ]] || [[ "$c_cmd" =~ (unban[[:space:]]+--all) ]]; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif [[ "$c_cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill) ]]; then
+    elif [[ "$c_cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip) ]]; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
     else
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
@@ -997,7 +1023,22 @@ render_item_easy() {
         title="$(easy_auto_title "$c_cmd")"
     fi
 
-    printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
+    # 3. 명령어 힌트 (쉬움 모드에서 실제 실행될 명령 요약 노출)
+    local raw_hint="$c_cmd"
+    raw_hint="${raw_hint#*!!!}"
+    raw_hint="$(echo "$raw_hint" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    if [[ "$raw_hint" =~ ^:[[:space:]]*([^;]+)\;[[:space:]]*(.*)$ ]]; then
+        raw_hint="${BASH_REMATCH[2]}"
+    fi
+    if [ ${#raw_hint} -gt 55 ]; then
+        raw_hint="${raw_hint:0:52}..."
+    fi
+
+    if [ -n "$raw_hint" ] && [ "$raw_hint" != "$title" ]; then
+        printf "\e[1m%-4s\e[0m %b %s \x1b[1;30m(%s)\x1b[0m\n" "${pi}" "$badge" "$title" "$raw_hint"
+    else
+        printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
+    fi
 }
 
 ###############################################################
