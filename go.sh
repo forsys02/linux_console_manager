@@ -756,15 +756,21 @@ menu_read() {
             printf '\n' >/dev/tty
             _rest="$_line"
         fi
-        IFS=' ' read -ra _w <<<"$_rest"
-        _MENU_V1="${_w[0]-}"
-        [ "${#_w[@]}" -gt 1 ] && _MENU_V2="${_w[*]:1}"
+        # [규칙] Bash 2 호환: <<< / read -a / ${arr[*]:1} 금지 -> 순수 파라미터 확장으로 단어 분리
+        while [ "${_rest# }" != "$_rest" ]; do _rest="${_rest# }"; done # 앞 공백 제거
+        _MENU_V1="${_rest%% *}"
+        if [ "$_rest" != "$_MENU_V1" ]; then
+            _MENU_V2="${_rest#* }"
+            while [ "${_MENU_V2# }" != "$_MENU_V2" ]; do _MENU_V2="${_MENU_V2# }"; done
+            while [ "${_MENU_V2% }" != "$_MENU_V2" ]; do _MENU_V2="${_MENU_V2% }"; done
+        fi
     else
         # Enter(빈입력) / ESC / Ctrl-D : 커서를 다음줄로 내려 기존 표기와 맞춘다
         printf '\n' >/dev/tty
     fi
-    [ -n "$_n1" ] && printf -v "$_n1" '%s' "$_MENU_V1"
-    [ -n "$_n2" ] && printf -v "$_n2" '%s' "$_MENU_V2"
+    # [규칙] Bash 2 호환: printf -v 는 bash 3.1+ -> eval 로 대입 (변수명은 내부 고정값)
+    [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+    [ -n "$_n2" ] && eval "$_n2=\"\$_MENU_V2\""
     return $_rc
 }
 
