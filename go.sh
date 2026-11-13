@@ -663,6 +663,9 @@ menu_read() {
     #   menu_read 는 어디서 호출되든 동일하게 동작해야 하므로
     #   함수 진입 즉시 기본값으로 고정한다 (안전망 1줄).
     local IFS=$' \t\n'
+    # [규칙] 구 bash 호환: read -t 소수(0.35)는 bash 4+ 만 지원 -> 3.x 이하는 정수 1초
+    local _esc_t=1
+    [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && _esc_t=0.35
     _MENU_V1=""
     _MENU_V2=""
     printf '%s' "$_mrp" # readline 프롬프트는 여기서 직접 출력
@@ -673,12 +676,12 @@ menu_read() {
         if [ "$_c" = $'\004' ]; then _rc=1; break; fi # Ctrl-D
         if [ "$_c" = $'\033' ]; then                  # ESC
             _x=""
-            IFS= read -rsn1 -t 0.35 _x </dev/tty 2>/dev/null
+            IFS= read -rsn1 -t $_esc_t _x </dev/tty 2>/dev/null
             # 뒤바이트 없음(또는 ESC 연속) = 단독 ESC -> Ctrl-D 와 동일
             if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then _rc=1; break; fi
             # '[' 'O' = 화살표/기능키 시퀀스 -> 나머지만 삼키고 readline 위임
             if [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
-                IFS= read -rsn1 -t 0.35 _x </dev/tty 2>/dev/null
+                IFS= read -rsn1 -t $_esc_t _x </dev/tty 2>/dev/null
             fi
             _c=""
             break
@@ -2214,7 +2217,9 @@ menufunc() {
 >>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 fi
 
-                                                local -a _sel_opts=("${dvar_value_array[@]}" All Cancel)
+                                                # [규칙] 구 bash 호환: local -a x=(...) 복합대입 금지 (선언/대입 분리)
+                                                local -a _sel_opts
+                                                _sel_opts=("${dvar_value_array[@]}" All Cancel)
                                                 [ "${cmd_is_danger:-0}" -eq 0 ] && _sel_opts=("${_sel_opts[@]}" Interactive)
                                                 IFS='\n'
                                                 select dvar_value in "${_sel_opts[@]}"; do
@@ -6073,6 +6078,9 @@ ncpzipupdate() {
 # 업데이트가 빈번한 파일의 경우 // 모든 백업파일이 오늘 날짜인 경우 // 이전날짜의 백업파일 별도 보관
 # file.1.bak 형태로 백업 조정 (원본설정으로 취급되는것 방지)
 rbackup() {
+    # [규칙] 전역 변수 오염 금지: base/d/cmd/i/t 를 local 로 가둔다
+    #  (local 없으면 전역 $base(=go.sh 디렉터리)가 파일명으로 덮여 이후 'cd $base' 가 깨진다)
+    local t d base cmd i cdate d8 d9
     t=$(date +%Y%m%d)
     while [ $# -gt 0 ]; do
         d="${1%/}"
