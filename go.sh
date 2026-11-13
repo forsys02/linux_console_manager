@@ -1055,13 +1055,16 @@ show_cmd_card() {
     local title=""
     local body=""
 
-    # 위험 판단
+    # 위험 판단 (render_item_easy 와 동일 기준 유지)
     if [[ "$cmd" =~ ^[[:space:]]*!!! ]]; then
         is_danger=1
         cmd="${cmd#*!!!}"
         cmd="${cmd# }"
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif [[ "$cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill) ]]; then
+    elif [[ "$cmd" =~ (unban[[:space:]]+--all) ]]; then
+        is_danger=1
+        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+    elif [[ "$cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip) ]]; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
     else
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
@@ -1441,7 +1444,7 @@ menufunc() {
                     elif [ "$menu_idx" -eq 19 ]; then
                         [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ BYUS 자체제작 앱 & 알림 / 도움말 】─────────────────────" || _ghdr="--- [ BYUS Custom Apps, Alerts & Help ] -----------------------"
                     fi
-                    [ -n "$_ghdr" ] && echo -e " \x1b[1;36m${_ghdr}\x1b[0m"
+                    [ -n "$_ghdr" ] && ko " \033[1;36m%s\033[0m\n" "$_ghdr"
                 fi
 
                 # 서브메뉴(>) 여부 판별 및 메인 메뉴 아이콘 배지 결정
@@ -1472,7 +1475,7 @@ menufunc() {
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
             if [ -z "$title_of_menu_sub" ]; then
-                echo -e " \e[1m0. \e[0m \x1b[1;30m◈\x1b[0m Exit [q]"
+                printf "\e[1m%-3s\e[0m \x1b[1;30m◈\x1b[0m Exit [q]\n" "0."
             else
                 echo "0.  Exit [q]"
             fi
@@ -1777,7 +1780,7 @@ menufunc() {
                                     prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                                     if [ "${GOVIEW:-easy}" != "easy" ]; then
                                         printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m\n" "$prev_comment"
-                                    elif [[ "$prev_comment" =~ ^[─━═-]+【.*】 || "$prev_comment" =~ ^\[.*\] ]]; then
+                                    elif [[ "$prev_comment" =~ ^[─━═-]+【.*】 || "$prev_comment" =~ ^(-+[[:space:]]*)?\[.*\] ]]; then
                                         echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m"
                                     fi
                                     continue
@@ -1816,6 +1819,7 @@ menufunc() {
         }
     }
 }')"
+                                    _cl_ifs="$IFS"
                                     IFS=$' \n'
                                     processed_paths=""
                                     for file_path in $file_paths; do
@@ -1825,7 +1829,8 @@ menufunc() {
                                             processed_paths="${processed_paths}${file_path}"$'\n'
                                         fi
                                     done
-                                    unset IFS
+                                    IFS="$_cl_ifs"
+                                    unset -v _cl_ifs
 
                                     max_len=330
                                     processed_cmd="$c_cmd"
@@ -2533,16 +2538,16 @@ menufunc() {
                             ;;
                         "e")
                             if [ -f "$cmd_choice1" ]; then cmd_choice1=$(dirname "$cmd_choice1"); fi
-                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
+                            { ranger "$cmd_choice1" 2>/dev/null || explorer "$cmd_choice1"; } && { [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)" || true; } && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "ee")
-                            { ranger /etc 2>/dev/null || explorer /etc; } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
+                            { ranger /etc 2>/dev/null || explorer /etc; } && { [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)" || true; } && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "eee")
-                            { ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd); } && cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
+                            { _pwd_t="$( [ -s /dev/shm/pwd ] && cat /dev/shm/pwd || pwd )"; ranger "$_pwd_t" 2>/dev/null || explorer "$_pwd_t"; } && { [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)" || true; } && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && continue
                             ;;
                         "cdr")
-                            cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm && continue
+                            { [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)" || true; } && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm && continue
                             ;;
                         "ll")
                             { journalctl -n10000 -e; } && continue
@@ -2716,19 +2721,24 @@ menufunc() {
             "e")
                 if [ -f "$choice1" ]; then choice1=$(dirname "$choice1"); fi
                 { ranger $choice1 2>/dev/null || explorer; }
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
+                [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)"
+                dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "ee")
                 { ranger /etc 2>/dev/null || explorer /etc; }
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
+                [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)"
+                dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "eee")
                 #{ ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd) ; }
-                ranger $(</dev/shm/pwd) 2>/dev/null || explorer $(</dev/shm/pwd)
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline
+                _pwd_t="$( [ -s /dev/shm/pwd ] && cat /dev/shm/pwd || pwd )"
+                ranger "$_pwd_t" 2>/dev/null || explorer "$_pwd_t"
+                [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)"
+                dline && RED1 && echo "pwd: $(pwd)" && NC && dline
                 ;;
             "cdr")
-                cd $(</dev/shm/pwd) && dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm
+                [ -s /dev/shm/pwd ] && cd "$(</dev/shm/pwd)"
+                dline && RED1 && echo "pwd: $(pwd)" && NC && dline && ls -ltr | tail && bashcomm
                 ;;
             ll)
                 { journalctl -n10000 -e; }
