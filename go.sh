@@ -591,7 +591,7 @@ print_menulist() {
     else
         # mainmenu list
         # 메인 메뉴는 따로 테그가 없어서 바로 출력
-        cat "$env" | grep -E '^%%%' | grep -vE '\{submenu' | sed -r 's/%%% //'
+        cat "$env" | grep -E '^%%%' | grep -vE '\{submenu' | sed 's/%%% //'
     fi
 }
 
@@ -1194,9 +1194,9 @@ show_cmd_card() {
         printf "   %s\n\n" "$title"
     fi
 
-    # 실행 시 물어보는 값 (변수 안내)
+    # 실행 시 물어보는 값 (변수 안내) — Bash 2 / 구 grep(2.4.x) 호환: grep -o 대신 awk match 루프 사용
     local vars=""
-    vars="$(echo "$cmd" | grep -oE 'var[A-Z][a-zA-Z0-9_@-]*' | sort -u)"
+    vars="$(echo "$cmd" | awk '{ s=$0; while (match(s, /var[A-Z][a-zA-Z0-9_@-]*/)) { print substr(s, RSTART, RLENGTH); s=substr(s, RSTART+RLENGTH) } }' | sort -u)"
     if [ -n "$vars" ]; then
         if [ "$GOLANG" = "kr" ]; then
             printf "\x1b[1;35m 실행 시 물어보는 값 (변수)\x1b[0m\n"
@@ -1513,7 +1513,7 @@ menufunc() {
             while read line; do
                 #set +x
                 menu_idx=$((menu_idx + 1))
-                items=$(echo "$line" | sed -r -e 's/%%% //' -e 's/%% //')
+                items=$(echo "$line" | sed -e 's/%%% //' -e 's/%% //')
 
                 # shortcut array keysarr make
                 # 노출된 메뉴 shortcut 생성 -> 번호와 연결
@@ -2436,8 +2436,9 @@ menufunc() {
                                         #readxy "regex_safe_var_name $regex_safe_var_name // {tmp_token} ${tmp_token}"
                                         #echo "DEBUG: Trying to replace '$regex_safe_var_name' in '$cmd'"
                                         #cmd=$(printf '%s' "$cmd" | sed -e "s:\(^\|[^a-zA-Z0-9]\)$regex_safe_var_name\([^a-zA-Z0-9]\|$\):\\1${tmp_token}\\2:")
-                                        escaped_regex_safe_var_name=$(printf '%s' "$regex_safe_var_name" | sed -e 's/[]\/$*.^|[]/\\&/g')
-                                        cmd=$(printf '%s' "$cmd" | sed -E "s:$escaped_regex_safe_var_name([^a-zA-Z0-9]|$):${tmp_token}\\1:g")
+                                        # 구 sed(3.x/4.1.x) 호환: sed -E 대신 기본 정규식(sed -e) 사용
+                                        escaped_regex_safe_var_name=$(printf '%s' "$regex_safe_var_name" | sed -e 's/[]\/$*.^:[]/\\&/g')
+                                        cmd=$(printf '%s' "$cmd" | sed -e "s:$escaped_regex_safe_var_name\([^a-zA-Z0-9]\|$\):${tmp_token}\\1:g")
                                         #echo "DEBUG: After : '$cmd'"
                                         cmd="${cmd//$tmp_token/$escaped_value}"
                                     done
@@ -3301,16 +3302,20 @@ cgrep3137() {
 }
 
 cgrepn() {
-    local args=("$@")
-    local search_strs=()
+    # Bash 2 호환: local arr=(...) 금지 -> 선언/대입 분리, 음수 인덱스 금지
+    local args
+    args=("$@")
+    local search_strs
+    search_strs=()
     local num_cols=0
     if [ "${#args[@]}" -eq 0 ]; then
         echo "Usage: cgrepn [search_strings...] [num_cols]"
         return 1
     fi
-    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
-        num_cols="${args[-1]}"
-        search_strs=("${args[@]:0:${#args[@]}-1}")
+    local last_idx=$((${#args[@]} - 1))
+    if echo "${args[$last_idx]}" | grep -qE '^-?[0-9]+$'; then
+        num_cols="${args[$last_idx]}"
+        search_strs=("${args[@]:0:$last_idx}")
     else
         search_strs=("${args[@]}")
         num_cols=""
@@ -3358,16 +3363,20 @@ cgrepn() {
 }
 
 cgrepn1() {
-    local args=("$@")
-    local search_strs=()
+    # Bash 2 호환: local arr=(...) 금지 -> 선언/대입 분리, 음수 인덱스 금지
+    local args
+    args=("$@")
+    local search_strs
+    search_strs=()
     local num_cols=0
     if [ "${#args[@]}" -eq 0 ]; then
         echo "Usage: cgrepn [search_strings...] [num_cols]"
         return 1
     fi
-    if echo "${args[-1]}" | grep -qE '^-?[0-9]+$'; then
-        num_cols="${args[-1]}"
-        search_strs=("${args[@]:0:${#args[@]}-1}")
+    local last_idx=$((${#args[@]} - 1))
+    if echo "${args[$last_idx]}" | grep -qE '^-?[0-9]+$'; then
+        num_cols="${args[$last_idx]}"
+        search_strs=("${args[@]:0:$last_idx}")
     else
         search_strs=("${args[@]}")
         num_cols=""
@@ -5801,7 +5810,9 @@ enter() {
 # assh host [id] pw [port]  (pw 에 특수문자가 있는 경우 'pw' 형태로 이용가능)
 assh() {
     local host id pw port
-    local args=("$@")
+    # Bash 2 호환: local arr=(...) 금지 -> 선언/대입 분리
+    local args
+    args=("$@")
     local arg_count=${#args[@]}
     local client_charmap server_charmap server_charmap_output detect_ssh_cmd
     local use_luit="false"
@@ -6802,7 +6813,7 @@ eprintf() {
             ansi_c_content="$line"
             first_line=0
         else
-            ansi_c_content+="\\n$line" # 줄 사이에 \n 추가
+            ansi_c_content="${ansi_c_content}\\n$line" # 줄 사이에 \n 추가 (Bash 2 호환: += 금지)
         fi
     done </dev/tty
 
@@ -6816,7 +6827,7 @@ eprintf() {
     # 이렇게 하면 생성된 printf 명령 실행 시 마지막 내용 뒤에 줄바꿈이 발생합니다.
     # (입력이 아예 없었던 경우는 제외)
     if [[ $first_line -eq 0 ]]; then # 입력이 한 줄이라도 있었으면
-        ansi_c_content+='\n'         # 내용 끝에 \n 추가
+        ansi_c_content="${ansi_c_content}\n" # 내용 끝에 \n 추가 (Bash 2 호환: += 금지)
     fi
 
     # 최종 printf 명령어 문자열을 '한 줄로' 출력하고, 그 뒤에 줄바꿈을 추가합니다.
@@ -8171,7 +8182,9 @@ dockersvc() {
 
 # 각열의 필드길이를 제한 w|maxl 5 5 5 5 // 한줄폭을 넘어가는 데이터가 많을경우, 적당히 컷 필요없는 필드는 0으로 설정
 maxl() {
-    local args=("$@")
+    # Bash 2 호환: local arr=(...) 금지 -> 선언/대입 분리
+    local args
+    args=("$@")
     awk -v limits="${args[*]}" '{n = split(limits, limit_arr, " "); for (i = 1; i <= n; i++) { if (length($(i)) > limit_arr[i]) { $(i) = substr($(i), 1, limit_arr[i]) } } print $0 }'
 }
 
@@ -8257,11 +8270,11 @@ ifcfgset() {
         # Get ifconfig output for this interface
         OUTPUT=$(ifconfig $INTERFACE)
 
-        # Extract necessary information
-        HWADDR=$(echo "$OUTPUT" | grep -oi -E 'HWaddr [0-9a-f:]{17}' | cut -d ' ' -f 2)
-        [ ! "$HWADDR" ] && HWADDR=$(echo "$OUTPUT" | grep -oi -E 'ether [0-9a-f:]{17}' | cut -d ' ' -f 2)
-        IPADDR=$(echo "$OUTPUT" | grep -oi -E 'inet addr:[0-9\.]+' | cut -d ':' -f 2)
-        [ ! "$IPADDR" ] && IPADDR=$(echo "$OUTPUT" | grep -oi -E 'inet [0-9\.]+' | cut -d ' ' -f 2)
+        # Extract necessary information (구 grep 2.4.x 호환: grep -o 대신 awk 사용)
+        HWADDR=$(echo "$OUTPUT" | awk 'toupper($0) ~ /HWADDR / {for(i=1;i<=NF;i++) if(toupper($i)=="HWADDR"){print $(i+1); exit}}')
+        [ ! "$HWADDR" ] && HWADDR=$(echo "$OUTPUT" | awk 'tolower($0) ~ /ether / {for(i=1;i<=NF;i++) if(tolower($i)=="ether"){print $(i+1); exit}}')
+        IPADDR=$(echo "$OUTPUT" | awk '/inet addr:/ {for(i=1;i<=NF;i++) if($i ~ /^addr:/){sub(/^addr:/,"",$i); print $i; exit}}')
+        [ ! "$IPADDR" ] && IPADDR=$(echo "$OUTPUT" | awk '/inet / {for(i=1;i<=NF;i++) if($i=="inet"){sub(/\/.*/,"",$(i+1)); print $(i+1); exit}}')
         GATEWAY="${IPADDR%.*}.1"
 
         # If IP address is not set, ask for it and set netmask and broadcast address to typical values
