@@ -68,8 +68,9 @@ if [ ! -f "$envorg" ]; then
         #   → go.env 없이 실행되어 메뉴 데이터가 통째로 비어버림.
         #   임시파일에 받고 용량 확인 후 mv 하므로, 실패 시 .go.env 지우지 않고 확실히 중단한다.
         if command -v curl >/dev/null 2>&1; then
-            curl -fsSL --retry 2 --connect-timeout 5 -m 60 http://srt.byus.net/go.env -o "${output_dir}/.go.env.dl" 2>/dev/null || rm -f "${output_dir}/.go.env.dl"
-        else
+            curl -fsSL --connect-timeout 5 -m 60 http://srt.byus.net/go.env -o "${output_dir}/.go.env.dl" 2>/dev/null || rm -f "${output_dir}/.go.env.dl"
+        fi
+        if [ ! -s "${output_dir}/.go.env.dl" ] && command -v wget >/dev/null 2>&1; then
             wget -q -T 10 --tries=2 http://srt.byus.net/go.env -O "${output_dir}/.go.env.dl" 2>/dev/null || rm -f "${output_dir}/.go.env.dl"
         fi
         if [ -s "${output_dir}/.go.env.dl" ]; then
@@ -7162,8 +7163,9 @@ _go_dl() {
     local url="$1" out="$2" min="${3:-1000}" tmp="$2.dl"
     rm -f "$tmp"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 2 --connect-timeout 5 -m 60 "$url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
-    else
+        curl -fsSL --connect-timeout 5 -m 60 "$url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
+    fi
+    if [ ! -s "$tmp" ] && command -v wget >/dev/null 2>&1; then
         wget -q -T 10 --tries=2 "$url" -O "$tmp" 2>/dev/null || rm -f "$tmp"
     fi
     [ -s "$tmp" ] || { echo " ❌ 다운로드 실패: $url" >&2; return 1; }
