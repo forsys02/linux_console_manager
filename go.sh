@@ -1434,15 +1434,55 @@ menufunc() {
                 }
                 # debug printarr keysarr
 
+                # 메인 메뉴일 때 (title_of_menu_sub 가 비어있을 때) 5대 테마 구분선 삽입
+                if [ -z "$title_of_menu_sub" ]; then
+                    local _ghdr=""
+                    if [ "$menu_idx" -eq 1 ]; then
+                        [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ 시스템 & 프로세스 & 로그 】─────────────────────────────" || _ghdr="--- [ System, Process & Logs ] --------------------------------"
+                    elif [ "$menu_idx" -eq 6 ]; then
+                        [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ 네트워크 & 보안 & 기본 설정 】─────────────────────────" || _ghdr="--- [ Network, Security & System Setup ] ----------------------"
+                    elif [ "$menu_idx" -eq 9 ]; then
+                        [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ 스토리지 & 클라우드 & 원격 터미널 】─────────────────────" || _ghdr="--- [ Storage, Cloud & Remote Terminal ] ----------------------"
+                    elif [ "$menu_idx" -eq 13 ]; then
+                        [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ 웹서버 & 가상화 & 컨테이너 (LAMP/Docker) 】─────────────" || _ghdr="--- [ Web, Virtualization & Containers (LAMP/Docker) ] --------"
+                    elif [ "$menu_idx" -eq 19 ]; then
+                        [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ BYUS 자체제작 앱 & 알림 / 도움말 】─────────────────────" || _ghdr="--- [ BYUS Custom Apps, Alerts & Help ] -----------------------"
+                    fi
+                    [ -n "$_ghdr" ] && echo -e " \x1b[1;36m${_ghdr}\x1b[0m"
+                fi
+
+                # 서브메뉴(>) 여부 판별 및 메인 메뉴 아이콘 배지 결정
+                local _badge=""
+                if [ -z "$title_of_menu_sub" ]; then
+                    if [ "$key" = "apps" ]; then
+                        _badge="\x1b[1;33m★\x1b[0m"
+                        items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
+                    elif [[ "$items" =~ ^[[:space:]]*\> ]] || [[ "$line" =~ ^[[:space:]]*%%%[[:space:]]*\> ]]; then
+                        _badge="\x1b[1;31m▶\x1b[0m"
+                        items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
+                    else
+                        _badge="\x1b[1;32m◈\x1b[0m"
+                    fi
+                fi
+
                 # titleansi
                 # items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
                 # > 빨간색 ooldscut 진한흰색
                 items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m>\1\o033[0m/")")
 
-                printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
+                # 메인 메뉴일 때 korea.srt.py 스타일 아이콘 배지 부여
+                if [ -z "$title_of_menu_sub" ]; then
+                    printf "\e[1m%-3s\e[0m ${_badge} ${items}\n" ${menu_idx}.
+                else
+                    printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
+                fi
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
-            echo "0.  Exit [q]"
+            if [ -z "$title_of_menu_sub" ]; then
+                echo -e " \e[1m0. \e[0m \x1b[1;30m◈\x1b[0m Exit [q]"
+            else
+                echo "0.  Exit [q]"
+            fi
             # 하단은 1줄 요약만. 상세는 [?] 로 위 menu_keyhelp 참고.
             # 언어를 L 로 바꾸어도 하단이 따라가도록 $GOLANG 기준.
             menu_keybar
@@ -1746,6 +1786,8 @@ menufunc() {
                                     prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                                     if [ "${GOVIEW:-easy}" != "easy" ]; then
                                         printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m\n" "$prev_comment"
+                                    elif [[ "$prev_comment" =~ ^[─━═-]+【.*】 || "$prev_comment" =~ ^\[.*\] ]]; then
+                                        echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m"
                                     fi
                                     continue
                                 fi
