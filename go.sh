@@ -1086,6 +1086,25 @@ render_item_easy() {
 }
 
 ###############################################################
+# 명령줄에서 미치환 var[A-Z]* 토큰만 안전하게 제거 (인터랙티브 실행용)
+###############################################################
+strip_cmd_vars() {
+    local _s=" $1 " _next=""
+    while :; do
+        _next="$(printf '%s' "$_s" | sed \
+            -e 's/[[:space:]]"var[A-Z][a-zA-Z0-9_.-]*__[a-zA-Z0-9_.@-]*"[[:space:]]/ /g' \
+            -e 's/[[:space:]]"var[A-Z][a-zA-Z0-9_.-]*"[[:space:]]/ /g' \
+            -e 's/[[:space:]]'\''var[A-Z][a-zA-Z0-9_.-]*__[a-zA-Z0-9_.@-]*'\''[[:space:]]/ /g' \
+            -e 's/[[:space:]]'\''var[A-Z][a-zA-Z0-9_.-]*'\''[[:space:]]/ /g' \
+            -e 's/[[:space:]]var[A-Z][a-zA-Z0-9_.-]*__[a-zA-Z0-9_.@-]*[[:space:]]/ /g' \
+            -e 's/[[:space:]]var[A-Z][a-zA-Z0-9_.-]*[[:space:]]/ /g')"
+        [ "$_next" = "$_s" ] && break
+        _s="$_next"
+    done
+    printf '%s' "$_s" | sed -e 's/[[:space:]]\{1,\}/ /g' -e 's/^ //' -e 's/ $//'
+}
+
+###############################################################
 # [#h] 쉬움 모드(Easy Mode) 번호 선택 시 확인 카드 (Card UI)
 #   인수: $1 = 명령줄 원문
 #         $2 = #h 설명 전체
@@ -1094,6 +1113,7 @@ render_item_easy() {
 #   반환: 0 = 실행 승인
 #         1 = 취소 (n 또는 ESC)
 #         2 = 설정 편집 (e)
+#         3 = 인자 없이 바로 실행 (i, var* 보유 일반 명령 한정)
 ###############################################################
 show_cmd_card() {
     local cmd="$1"
@@ -1219,10 +1239,18 @@ show_cmd_card() {
         fi
         return 0
     else
-        if [ "$GOLANG" = "kr" ]; then
-            menu_read " [Enter] 실행    [n] 취소    [e] 편집(conf) : " card_ans card_ans1
+        if [ -n "$vars" ]; then
+            if [ "$GOLANG" = "kr" ]; then
+                menu_read "$(ko " [Enter] 변수입력    [i] 인자없이 실행    [n] 취소    [e] 편집 : ")" card_ans card_ans1
+            else
+                menu_read " [Enter] Set vars    [i] Run w/o args    [n] Cancel    [e] Edit : " card_ans card_ans1
+            fi
         else
-            menu_read " [Enter] Run    [n] Cancel    [e] Edit conf : " card_ans card_ans1
+            if [ "$GOLANG" = "kr" ]; then
+                menu_read " [Enter] 실행    [n] 취소    [e] 편집(conf) : " card_ans card_ans1
+            else
+                menu_read " [Enter] Run    [n] Cancel    [e] Edit conf : " card_ans card_ans1
+            fi
         fi
         local rc=$?
         if [ $rc -eq 1 ]; then
@@ -1232,6 +1260,13 @@ show_cmd_card() {
         case "$card_ans" in
             "" | "y" | "Y")
                 return 0
+                ;;
+            "i" | "I")
+                if [ -n "$vars" ]; then
+                    return 3
+                fi
+                echo " [취소됨]"
+                return 1
                 ;;
             "e" | "E")
                 return 2
@@ -2026,6 +2061,7 @@ menufunc() {
                     ################ 실졍 명령줄이 넘어온경우
                     elif [ "$chosen_command" ] && [ "${chosen_command:0:1}" != "#" ]; then
                         echo
+                        local skip_vars=0 cmd_is_danger=0
                         if [ "${GOVIEW:-easy}" = "easy" ]; then
                             # [V] 쉬움 모드: 번호 선택 시 확인 카드 (Card UI)
                             show_cmd_card "$chosen_command" "${sel_desc:-${chosen_desc-}}" "${display_choice:-1}" "$((display_idx - 1))"
@@ -2041,9 +2077,13 @@ menufunc() {
                                 cmd_choice=""
                                 chosen_command=""
                                 continue
+                            elif [ $card_rc -eq 3 ]; then
+                                # i (인자 없이 인터랙티브 실행)
+                                skip_vars=1
                             fi
-                            # 실행 승인 (0)
+                            # 실행 승인 (0 또는 3)
                             if [[ "$chosen_command" =~ ^[[:space:]]*!!! ]]; then
+                                cmd_is_danger=1
                                 chosen_command=${chosen_command#* }
                                 chosen_command=${chosen_command#!!!}
                             fi
@@ -2058,6 +2098,7 @@ menufunc() {
                             fi
                             # Danger 판단
                             if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
+                                cmd_is_danger=1
                                 chosen_command=${chosen_command#* }
                                 chosen_command=${chosen_command#!!!}
                                 echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
@@ -2081,12 +2122,17 @@ menufunc() {
 
                         local count=1
                         for cmd in "${cmd_array[@]}"; do # 배열을 반복하며 명령어 처리
+                            if [ "${skip_vars:-0}" -eq 1 ]; then
+                                cmd="$(strip_cmd_vars "$cmd")"
+                                [ -z "$cmd" ] && cancel=yes
+                            fi
 
                             echo -e "--> \x1b[1;36;40m$cmd\x1b[0m"
 
                             # 동일한 var 는 제외하고 read // awk '!seen[$0]++'
                             # noDanger
                             if [ "$cfm" == "y" ] || [ "$cfm" == "Y" ] || [ -z "$cfm" ]; then
+                              if [ "${skip_vars:-0}" -eq 0 ]; then
 
                                 # 명령줄에 varVAR 형태 기본값 지정을 위한 loop (ex. varA varB 등 한 명령줄에 여러개의 변수요청)
                                 ################
@@ -2168,8 +2214,10 @@ menufunc() {
 >>> Enter Name or Nums. or all $(tput bold)$(tput setaf 5)$(tput setab 0)[${var_name%%__*}]$(tput sgr0): "
                                                 fi
 
+                                                local -a _sel_opts=("${dvar_value_array[@]}" All Cancel)
+                                                [ "${cmd_is_danger:-0}" -eq 0 ] && _sel_opts=("${_sel_opts[@]}" Interactive)
                                                 IFS='\n'
-                                                select dvar_value in "${dvar_value_array[@]}" All Cancel; do
+                                                select dvar_value in "${_sel_opts[@]}"; do
                                                     reply=$REPLY && break
                                                 done
                                                 unset IFS
@@ -2188,6 +2236,8 @@ menufunc() {
                                                         selected_values="All"
                                                     elif [ "$num" -eq $((${#dvar_value_array[@]} + 2)) ]; then
                                                         selected_values="Cancel"
+                                                    elif [ "${cmd_is_danger:-0}" -eq 0 ] && [ "$num" -eq $((${#dvar_value_array[@]} + 3)) ]; then
+                                                        selected_values="Interactive"
                                                     fi
 
                                                 done
@@ -2199,6 +2249,13 @@ menufunc() {
                                             # 시작공백제거
                                             dvar_value=$(echo "$dvar_value" | sed 's/^ *//')
 
+                                            if [ "${cmd_is_danger:-0}" -eq 0 ] && { [ "$dvar_value" = "Interactive" ] || [ "$dvar_value" = "i" ] || [ "$dvar_value" = "I" ]; }; then
+                                                cmd="$(strip_cmd_vars "$cmd")"
+                                                [ -z "$cmd" ] && { cancel=yes && echo "Canceled..."; } || echo "--> Interactive: $cmd"
+                                                eval flagof_"${var_name%%__*}"=set
+                                                break
+                                            fi
+
                                             # "all"을 입력했을 경우 "All Cancel"을 제외하고 모든 값 출력
                                             if echo "$dvar_value" | grep -qi '^all$'; then
                                                 dvar_value=$(printf "%s\n" "${dvar_value_array[@]}" | grep -viE '^all$|^cancel$' | xargs)
@@ -2209,19 +2266,27 @@ menufunc() {
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name%%__*}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && NC
                                             # 이전에 선택했던 값이 있으면 함께 출력
+                                            local _var_hint=""
+                                            [ "${cmd_is_danger:-0}" -eq 0 ] && _var_hint=" / i:NoArgs"
                                             if [ -n "${!org_var_name}" ]; then
                                                 printf "==============================================
 >>> Prev.selected value: $(tput bold)$(tput setaf 5)$(tput setab 0)${!org_var_name//\\/}$(tput sgr0)
-!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
+!!(Cancel:c${_var_hint}) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
                                             else
                                                 printf "==============================================
-!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
+!!(Cancel:c${_var_hint}) Enter value for ${MAG1}[ ${YRE}${var_name%%__*}${NC}${MAG1} Default:$dvar_value] ${NC}:"
                                             fi
 
                                             # printf "!!(Cancel:c) Enter value for \e[1;35;40m[${var_name%%__*} Default:$dvar_value] \e[0m: "
                                             readv var_value </dev/tty
                                             trap - INT
                                             [ "$var_value" == "c" ] && var_value="Cancel"
+                                            if [ "${cmd_is_danger:-0}" -eq 0 ] && { [ "$var_value" == "i" ] || [ "$var_value" == "I" ]; }; then
+                                                cmd="$(strip_cmd_vars "$cmd")"
+                                                [ -z "$cmd" ] && { cancel=yes && echo "Canceled..."; } || echo "--> Interactive: $cmd"
+                                                eval flagof_"${var_name%%__*}"=set
+                                                break
+                                            fi
                                         fi
                                         # 이미 값을 할당한 변수는 재할당 요청을 하지 않도록 flag 설정
                                         # 기본값에 @ 허용하지만 변수이름자체는 @ 허용 안함
@@ -2259,11 +2324,19 @@ menufunc() {
                                                     masked_dvar_value="${dvar_value}"
                                                 fi
                                                 trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
+                                                local _env_hint=""
+                                                [ "${cmd_is_danger:-0}" -eq 0 ] && _env_hint=" / i:NoArgs"
                                                 #printf "!!(Cancel:c) Enter value for \e[1;35;40m[ ${var_name} env Default:$masked_dvar_value ] \e[0m:"
-                                                printf "!!(Cancel:c) Enter value for ${MAG1}[ ${YRE}${var_name}${NC}${MAG1} env Default:$masked_dvar_value ] ${NC}:"
+                                                printf "!!(Cancel:c${_env_hint}) Enter value for ${MAG1}[ ${YRE}${var_name}${NC}${MAG1} env Default:$masked_dvar_value ] ${NC}:"
                                                 readv var_value </dev/tty
                                                 trap - INT
                                                 [ "$var_value" == "c" ] && var_value="Cancel"
+                                                if [ "${cmd_is_danger:-0}" -eq 0 ] && { [ "$var_value" == "i" ] || [ "$var_value" == "I" ]; }; then
+                                                    cmd="$(strip_cmd_vars "$cmd")"
+                                                    [ -z "$cmd" ] && { cancel=yes && echo "Canceled..."; } || echo "--> Interactive: $cmd"
+                                                    eval flagof_"${var_name%%__*}"=set
+                                                    break
+                                                fi
                                                 eval flagof_"${var_name%%__*}"=set
                                                 #eval flagof_"${org_var_name}"=set
                                             fi
@@ -2271,14 +2344,28 @@ menufunc() {
                                         else
                                             trap 'stty sane ; savescut && exec "$gofile" "$scut"' INT
                                             [ "$(echo "${var_name}" | grep -i path)" ] && GRN1 && echo "pwd: $(pwd)" && NC
-                                            printf "Enter value for \e[1;35;40m[$var_name]\e[0m:"
+                                            if [ "${cmd_is_danger:-0}" -eq 0 ]; then
+                                                if [ "$GOLANG" = "kr" ]; then
+                                                    printf "!!(Enter:%s / i:%s) Enter value for \e[1;35;40m[$var_name]\e[0m:" "$(ko "취소")" "$(ko "인자없이 실행")"
+                                                else
+                                                    printf "!!(Enter:Cancel / i:NoArgs) Enter value for \e[1;35;40m[$var_name]\e[0m:"
+                                                fi
+                                            else
+                                                printf "Enter value for \e[1;35;40m[$var_name]\e[0m:"
+                                            fi
                                             readv var_value </dev/tty
+                                            trap - INT
+                                            if [ "${cmd_is_danger:-0}" -eq 0 ] && { [ "$var_value" == "i" ] || [ "$var_value" == "I" ]; }; then
+                                                cmd="$(strip_cmd_vars "$cmd")"
+                                                [ -z "$cmd" ] && { cancel=yes && echo "Canceled..."; } || echo "--> Interactive: $cmd"
+                                                eval flagof_"${var_name%%__*}"=set
+                                                break
+                                            fi
                                             # ' " \ ->quoting
                                             if printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
                                                 var_value="$(printf %q "$var_value")"
                                             fi
                                             #echo "$var_value" && readx
-                                            trap - INT
                                             eval flagof_"${var_name%%__*}"=set
                                             #eval flagof_"${org_var_name}"=set
                                         fi
@@ -2358,6 +2445,7 @@ menufunc() {
                                     # 변수에는 @ 불가 변수값에는 @ 가능 // 구분하여 변수분할
 
                                 done < <(echo "$cmd" | sed 's/\(var[A-Z][a-zA-Z0-9_.-]*\(__[a-zA-Z0-9_.@-]*\)\?\)/\n\1\n/g' | sed -n '/var[A-Z][a-zA-Z0-9_.-]*/p' | awk '!seen[$0]++')
+                              fi
 
                                 ##################
                                 # 끝: 명령줄에 varVAR 형태 기본값 지정을 위한 loop (ex. varA varB 등 한 명령줄에 여러개의 변수요청)
