@@ -692,19 +692,70 @@ menu_read() {
         break
     done
     if [ "$_rc" -eq 0 ] && [ "$_eol" -eq 0 ]; then
-        # 첫글자는 위에서 무음( -s ) 으로 읽었으므로 화면에 되돌려 준다.
-        # (되돌려주지 않으면 "8" 을 눌러도 화면엔 아무것도 안 보인다)
-        [ -n "$_c" ] && printf '%s' "$_c" >/dev/tty
-        IFS= read -re _rest </dev/tty # 나머지는 readline 으로 (기존과 동일)
-        _rc=$?
-        # 첫글자가 이미 있는 상태의 Ctrl-D 는 원래 readline 과 똑같이 정상입력
-        [ "$_rc" -ne 0 ] && [ -n "$_c" ] && _rc=0
-        IFS=' ' read -ra _w <<<"$_c$_rest" # 첫글자+나머지를 먼저 합친 뒤 공백기준 분리
+        if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+            # Bash 4+: read -i 로 첫글자를 readline 버퍼에 직접 넣어
+            # Backspace / Ctrl-U 로 첫글자까지 완전히 지우고 재입력할 수 있게 한다.
+            local _rl_rc=0
+            IFS= read -re -i "$_c" _rest </dev/tty
+            _rl_rc=$?
+            if [ "$_rl_rc" -ne 0 ]; then
+                printf '\n' >/dev/tty
+                [ -z "$_rest" ] && _rc=1
+            fi
+        else
+            # Bash < 4.0 폴백: -i 미지원이므로 1글자 단위 편집 루프로 Backspace 지원
+            local _line="$_c" _ch="" _seq=""
+            [ -n "$_c" ] && printf '%s' "$_c" >/dev/tty
+            while :; do
+                _ch=""
+                IFS= read -rsn1 _ch </dev/tty 2>/dev/null || {
+                    [ -z "$_line" ] && _rc=1
+                    break
+                }
+                case "$_ch" in
+                    $'\004')
+                        if [ -z "$_line" ]; then _rc=1; break; fi
+                        continue
+                        ;;
+                    "" | $'\012' | $'\015')
+                        break
+                        ;;
+                    $'\177' | $'\010')
+                        if [ -n "$_line" ]; then
+                            _line="${_line%?}"
+                            printf '\b \b' >/dev/tty
+                        fi
+                        ;;
+                    $'\025')
+                        while [ -n "$_line" ]; do
+                            _line="${_line%?}"
+                            printf '\b \b' >/dev/tty
+                        done
+                        ;;
+                    $'\033')
+                        _seq=""
+                        IFS= read -rsn1 -t 1 _seq </dev/tty 2>/dev/null
+                        if [ -z "$_seq" ] || [ "$_seq" = $'\033' ]; then
+                            if [ -z "$_line" ]; then _rc=1; break; fi
+                        elif [ "$_seq" = "[" ] || [ "$_seq" = "O" ]; then
+                            IFS= read -rsn1 -t 1 _seq </dev/tty 2>/dev/null
+                        fi
+                        ;;
+                    [[:cntrl:]])
+                        continue
+                        ;;
+                    *)
+                        _line="${_line}${_ch}"
+                        printf '%s' "$_ch" >/dev/tty
+                        ;;
+                esac
+            done
+            printf '\n' >/dev/tty
+            _rest="$_line"
+        fi
+        IFS=' ' read -ra _w <<<"$_rest"
         _MENU_V1="${_w[0]-}"
         [ "${#_w[@]}" -gt 1 ] && _MENU_V2="${_w[*]:1}"
-        # readline 버퍼가 비어있으면(입력이 첫글자 1개뿐) Enter 를 받아도 개행이
-        # 안 나온다 -> 다음 출력 줄이 프롬프트줄에 붙는다. 직접 내려준다.
-        [ -z "$_rest" ] && printf '\n' >/dev/tty
     else
         # Enter(빈입력) / ESC / Ctrl-D : 커서를 다음줄로 내려 기존 표기와 맞춘다
         printf '\n' >/dev/tty
@@ -1258,23 +1309,15 @@ menufunc() {
         choiceloop=$((choiceloop + 1))
 
         # 서브메뉴 타이틀 변경
-        # 현재 메뉴 언어 배지 (L 토글 후에도 현재 언어가 항상 보인다)
-        golang_badge() {
-            if [ "$GOLANG" = "kr" ]; then
-                ko '\033[1;32m[한글]\033[0m'
-            else
-                ko '\033[1;36m[EN]\033[0m'
-            fi
-        }
         [ "$title_of_menu_sub" ] && {
             # 서브메뉴
             scut=$(echo "$title_of_menu_sub" | awk -F'[][]' '{print $2}')
             readxx $LINENO scutset scut: $scut
-            title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m $(golang_badge)"
+            title="\x1b[1;37;45m $title_of_menu_sub \x1b[0m"
         } || {
             # 메인메뉴
             scut="m"
-            title="\x1b[1;33;44m Main Menu \x1b[0m $(golang_badge) Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
+            title="\x1b[1;33;44m Main Menu \x1b[0m Load: $(loadvar)// $(free -m | awk 'NR==2 { printf("FreeMem: %d/%d\n", $4, $2) }')"
         }
         updatescut() {
             [ "$scut" ] && {
