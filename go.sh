@@ -852,7 +852,7 @@ cmd_desc_peek() {
     echo
     if [ "$_q" = "?" ]; then
         menu_keyhelp
-    elif [[ "$_q" =~ ^[0-9]+$ ]] && [ "$_q" -ge 1 ] && [ "$_q" -lt "${display_idx:-0}" ]; then
+    elif rx_match "$_q" '^[0-9]+$' && [ "$_q" -ge 1 ] && [ "$_q" -lt "${display_idx:-0}" ]; then
         _qi="${original_indices[$((_q - 1))]}"
         _qd="${chosen_desc[$((_qi - 1))]-}"
         _qc="${chosen_commands[$((_qi - 1))]-}"
@@ -899,8 +899,8 @@ easy_auto_title() {
     local easy_name=""
 
     # : 제목 ; 명령 형태는 이미 사람이 쓴 제목이므로 그대로 쓴다.
-    if [[ "$easy_cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
-        easy_label="${BASH_REMATCH[1]}"
+    if rx_match "$easy_cmd" '^:[[:space:]]*([^;]+);'; then
+        easy_label="$(rx_cap "$easy_cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
         easy_label="$(echo "$easy_label" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -n "$easy_label" ] && printf '%s\n' "$easy_label" && return
     fi
@@ -1056,9 +1056,9 @@ render_item_easy() {
     local title=""
 
     # 1. 배지 결정
-    if [[ "$c_cmd" =~ ^[[:space:]]*!!! ]] || [[ "$c_cmd" =~ (unban[[:space:]]+--all) ]]; then
+    if rx_match "$c_cmd" '^[[:space:]]*!!!' || rx_match "$c_cmd" '(unban[[:space:]]+--all)'; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif [[ "$c_cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip) ]]; then
+    elif rx_match "$c_cmd" '(install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip)'; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
     else
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
@@ -1069,8 +1069,8 @@ render_item_easy() {
         title="$(echo "$hdesc" | head -n1)"
     elif [ -n "$prev_comm" ] && [ "${#prev_comm}" -gt 2 ]; then
         title="$prev_comm"
-    elif [[ "$c_cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
-        title="${BASH_REMATCH[1]}"
+    elif rx_match "$c_cmd" '^:[[:space:]]*([^;]+);'; then
+        title="$(rx_cap "$c_cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
         title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     else
         title="$(easy_auto_title "$c_cmd")"
@@ -1080,8 +1080,8 @@ render_item_easy() {
     local raw_hint="$c_cmd"
     raw_hint="${raw_hint#*!!!}"
     raw_hint="$(echo "$raw_hint" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    if [[ "$raw_hint" =~ ^:[[:space:]]*([^;]+)\;[[:space:]]*(.*)$ ]]; then
-        raw_hint="${BASH_REMATCH[2]}"
+    if rx_match "$raw_hint" '^:[[:space:]]*([^;]+);[[:space:]]*(.*)$'; then
+        raw_hint="$(rx_cap "$raw_hint" '^:[[:space:]]*\([^;][^;]*\);[[:space:]]*\(.*\)$' 2)"
     fi
     if [ ${#raw_hint} -gt 55 ]; then
         raw_hint="${raw_hint:0:52}..."
@@ -1093,6 +1093,14 @@ render_item_easy() {
         printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
     fi
 }
+
+###############################################################
+# [규칙] Bash 2 호환: [[ x =~ re ]] 는 Bash 3.0+ 전용 -> 파싱 단계에서 구문오류로 기동 불가
+#   rx_match "문자열" "ERE"            : 일치하면 0 (grep -E)
+#   rx_cap   "문자열" "BRE" 그룹번호    : sed 로 캡처 그룹 추출 (-E/-r 미사용: 구 sed 호환)
+###############################################################
+rx_match() { printf '%s\n' "$1" | grep -E -e "$2" >/dev/null 2>&1; }
+rx_cap() { printf '%s\n' "$1" | sed -n "s@$2@\\$3@p" | sed -n '1p'; }
 
 ###############################################################
 # 명령줄에서 미치환 var[A-Z]* 토큰만 안전하게 제거 (인터랙티브 실행용)
@@ -1136,15 +1144,15 @@ show_cmd_card() {
     local body=""
 
     # 위험 판단 (render_item_easy 와 동일 기준 유지)
-    if [[ "$cmd" =~ ^[[:space:]]*!!! ]]; then
+    if rx_match "$cmd" '^[[:space:]]*!!!'; then
         is_danger=1
         cmd="${cmd#*!!!}"
         cmd="${cmd# }"
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif [[ "$cmd" =~ (unban[[:space:]]+--all) ]]; then
+    elif rx_match "$cmd" '(unban[[:space:]]+--all)'; then
         is_danger=1
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif [[ "$cmd" =~ (install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip) ]]; then
+    elif rx_match "$cmd" '(install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip)'; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
     else
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
@@ -1154,8 +1162,8 @@ show_cmd_card() {
     if [ -n "$desc" ]; then
         title="$(echo "$desc" | head -n1)"
         body="$(echo "$desc" | sed '1d')"
-    elif [[ "$cmd" =~ ^:[[:space:]]*([^;]+)\; ]]; then
-        title="${BASH_REMATCH[1]}"
+    elif rx_match "$cmd" '^:[[:space:]]*([^;]+);'; then
+        title="$(rx_cap "$cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
         title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         body=""
     else
@@ -1540,7 +1548,7 @@ menufunc() {
                     if [ "$key" = "apps" ]; then
                         _badge="\x1b[1;33m★\x1b[0m"
                         items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
-                    elif [[ "$items" =~ ^[[:space:]]*\> ]] || [[ "$line" =~ ^[[:space:]]*%%%[[:space:]]*\> ]]; then
+                    elif rx_match "$items" '^[[:space:]]*>' || rx_match "$line" '^[[:space:]]*%%%[[:space:]]*>'; then
                         _badge="\x1b[1;31m▶\x1b[0m"
                         items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
                     else
@@ -1728,27 +1736,28 @@ menufunc() {
                 _cd_ifs="$IFS"
                 IFS=$'\n'
                 for _cd_line in $(echo "${allof_chosen_commands}" | grep -v "^%% "); do
-                    if [[ "$_cd_line" =~ ^[[:space:]]*#h(e)?[[:space:]]+(.*)$ ]]; then
+                    if rx_match "$_cd_line" '^[[:space:]]*#h(e)?[[:space:]]+(.*)$'; then
                         # 태그 줄 자체에는 설명을 붙이지 않는다 (바로 다음 명령줄의 짝)
-                        _cd_text="${BASH_REMATCH[2]}"
+                        _cd_text="$(rx_cap "$_cd_line" '^[[:space:]]*#h[e]*[[:space:]][[:space:]]*\(.*\)$' 1)"
                         _cd_text="${_cd_text%$'\r'}"
                         if [ -n "$_cd_pending" ]; then
                             _cd_pending="$_cd_pending"$'\n'"$_cd_text" # 여러줄 설명 누적
                         else
                             _cd_pending="$_cd_text"
                         fi
-                        chosen_desc+=("")
-                    elif [[ "$_cd_line" =~ ^[[:space:]]*# ]]; then
+                        # [규칙] Bash 2 호환: arr+=() 금지 -> 인덱스 대입
+                        chosen_desc[${#chosen_desc[@]}]=""
+                    elif rx_match "$_cd_line" '^[[:space:]]*#'; then
                         # 일반 주석줄은 설명을 소비하지 않는다.
                         # (#h 와 명령줄 사이에 참고주석이 있어도 설명은 명령줄에 붙는다)
-                        chosen_desc+=("")
+                        chosen_desc[${#chosen_desc[@]}]=""
                     else
                         # 설명 태그가 없는 기존 명령도 쉬움 모드 제목을 자동으로 보충한다.
                         # 목록뿐 아니라 ?번호 미리보기와 실행 확인 카드도 같은 제목을 사용한다.
                         if [ -n "$_cd_pending" ]; then
-                            chosen_desc+=("$_cd_pending")
+                            chosen_desc[${#chosen_desc[@]}]="$_cd_pending"
                         else
-                            chosen_desc+=("$(easy_auto_title "$_cd_line")")
+                            chosen_desc[${#chosen_desc[@]}]="$(easy_auto_title "$_cd_line")"
                         fi
                         _cd_pending=""
                     fi
@@ -1852,22 +1861,22 @@ menufunc() {
                                 _hdesc="${chosen_desc[$((item - 1))]-}"
 
                                 # [#h] 태그 줄 자체는 여기서 소비한다.
-                                if [[ "$c_cmd" =~ ^[[:space:]]*#h(e)?[[:space:]]+ ]]; then
+                                if rx_match "$c_cmd" '^[[:space:]]*#h(e)?[[:space:]]+'; then
                                     continue
                                 fi
 
                                 # %%% 헤더 줄 소비 (중복 출력 방지)
-                                if [[ "$c_cmd" =~ ^[[:space:]]*%%% ]]; then
+                                if rx_match "$c_cmd" '^[[:space:]]*%%%'; then
                                     continue
                                 fi
 
                                 # 주석줄인 경우
-                                if [[ "$c_cmd" =~ ^[[:space:]]*# ]]; then
+                                if rx_match "$c_cmd" '^[[:space:]]*#'; then
                                     prev_comment="${c_cmd#*#}"
                                     prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                                     if [ "${GOVIEW:-easy}" != "easy" ]; then
                                         printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m\n" "$prev_comment"
-                                    elif [[ "$prev_comment" =~ ^[─━═-]+【.*】 || "$prev_comment" =~ ^(-+[[:space:]]*)?\[.*\] ]]; then
+                                    elif rx_match "$prev_comment" '^[─━═-]+【.*】' || rx_match "$prev_comment" '^(-+[[:space:]]*)?\[.*\]'; then
                                         echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m"
                                     fi
                                     continue
@@ -2091,7 +2100,7 @@ menufunc() {
                                 skip_vars=1
                             fi
                             # 실행 승인 (0 또는 3)
-                            if [[ "$chosen_command" =~ ^[[:space:]]*!!! ]]; then
+                            if rx_match "$chosen_command" '^[[:space:]]*!!!'; then
                                 cmd_is_danger=1
                                 chosen_command=${chosen_command#* }
                                 chosen_command=${chosen_command#!!!}
@@ -7661,7 +7670,7 @@ vm() {
 
     # Extract node name and VM type (qemu or lxc)
     node=$(echo "$conf" | awk -F/ '{print $5}')
-    type=$(grep -q qemu <<<"$conf" && echo qemu || echo lxc)
+    type=$(echo "$conf" | grep -q qemu && echo qemu || echo lxc) # Bash 2 호환: <<< 금지
     path="/nodes/$node/$type/$vmid"
 
     case "$action" in
