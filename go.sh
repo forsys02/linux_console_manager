@@ -597,40 +597,33 @@ print_menulist() {
 
 ###############################################################
 # 하단 단축키 안내 (언어 인식 + 터미널 폭 대응)
-#   $1 = compact(기본 1줄) | detail([?] 입력시 몇줄)
-#   $2 = 최대 표시번호 (0-N)
-#
-#  [왜 이렇게 했나]
-#   - 예전 하단 3줄은 한글 하드코딩이라, [L] 로 English 로 바꿔도
-#     메뉴만 영어고 하단은 계속 한글이었다.
-#   - 설명이 길어 메뉴 본문보다 폭이 넓어져 정돈이 깨졌다.
-#   => 기본은 폭 안에 들어가는 1줄 요약, 상세는 [?] 로 언제든 꺼내 본다.
-#     (help 는 '매뉴얼/업데이트' 메뉴로 이미 쓰고 있어 별도 키로 분리했다)
+#   - 메뉴 하단에는 [?] help 만 노출하고, [b] 등 단축키 안내(menu_keyhelp)는
+#     [?] 입력 시에만 출력한다.
 ###############################################################
-menu_keybar() { # compact 한줄 (폭 65~68칸. 메뉴 최장줄(약 70칸) 안에 들어간다)
+menu_keybar() { # compact 한줄 (호환/테스트용 유지, 폭 65~66칸)
     # ko 는 printf "$1" 이므로 줄바꿈은 문자열에 \n 을 넣어야 한다.
     if [ "$GOLANG" = "kr" ]; then
-        ko "  [b]뒤로 [bb]2 [m]메인 [e]파일 [h]이력 [conf]설정 [L]언어 [?]도움말\n"
+        ko "  [b]뒤로 [bb]2 [m]메인 [e]파일 [h]이력 [conf]설정 [L]언어 [?]help\n"
     else
-        ko "  [b]back [bb]2 [m]menu [e]file [h]hist [conf]set [L]lang [?]keys\n"
+        ko "  [b]back [bb]2 [m]menu [e]file [h]hist [conf]set [L]lang [?]help\n"
     fi
 }
 
-menu_keyhelp() { # detail 몇줄
+menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
-        ko "  이동  [b]이전  [bb]2단계전  [bbb]3단계전  [m]메인  [ESC]위  < >  앞/다음\n"
-        ko "  보기  [V]쉬움/명령어전환  [e]파일  [h]이력  [conf]설정  [sh]내장쉘\n"
-        ko "  언어  [L]한글(L k) / English(L e)   [kr]인코딩변환(글자깨질때)\n"
+        ko "  이동  [b]뒤로 [bb]2 [bbb]3 [m]메인 [ESC]위 < > 앞/다음\n"
+        ko "  기능  [V]보기전환 [e]파일 [h]이력 [conf]설정 [sh]쉘 [?번호]설명\n"
+        ko "  언어  [L]한글(L k)/English(L e)  [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
-        ko "  move  [b]back  [bb]x2  [bbb]x3  [m]main  [ESC]back  < >  prev/next\n"
-        ko "  view  [V]easy/cmd toggle  [e]file  [h]hist  [conf]config  [sh]shell\n"
-        ko "  lang  [L] Korean (L k) / English (L e)   [kr] encoding (fix garbled)\n"
+        ko "  move  [b]back [bb]x2 [bbb]x3 [m]main [ESC]back < > prev/next\n"
+        ko "  tool  [V]view-mode [e]file [h]hist [conf]set [sh]shell [?N]info\n"
+        ko "  lang  [L]Korean(L k)/English(L e) [kr]encoding(fix garbled)\n"
     fi
 }
 
-menu_prompt() { # $1=최대번호
+menu_prompt() { # $1=최대번호 (? 는 항상 help 로 표시)
     local _vtxt=""
     if [ "${GOVIEW:-easy}" = "easy" ]; then
         [ "$GOLANG" = "kr" ] && _vtxt="[V]명령어모드" || _vtxt="[V]cmd-mode"
@@ -638,9 +631,9 @@ menu_prompt() { # $1=최대번호
         [ "$GOLANG" = "kr" ] && _vtxt="[V]쉬움모드" || _vtxt="[V]easy-mode"
     fi
     if [ "$GOLANG" = "kr" ]; then
-        ko ">>> 선택 [0-%s]   %s   [?] 도움말 : " "$1" "$_vtxt"
+        ko ">>> 선택 [0-%s]   %s   [?] help : " "$1" "$_vtxt"
     else
-        printf '>>> Select [0-%s]   %s   [?] keys : ' "$1" "$_vtxt"
+        printf '>>> Select [0-%s]   %s   [?] help : ' "$1" "$_vtxt"
     fi
 }
 
@@ -1483,9 +1476,7 @@ menufunc() {
             else
                 echo "0.  Exit [q]"
             fi
-            # 하단은 1줄 요약만. 상세는 [?] 로 위 menu_keyhelp 참고.
-            # 언어를 L 로 바꾸어도 하단이 따라가도록 $GOLANG 기준.
-            menu_keybar
+            # 하단 단축키 안내는 [?] help 입력 시(menu_keyhelp)에만 출력한다.
             echo "=============================================="
         fi
         ############## 메뉴 출력 끝 ###############
