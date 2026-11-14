@@ -7187,15 +7187,22 @@ fi; }
 # _go_dl <url> <출력경로> <최소크기>
 _go_dl() {
     local url="$1" out="$2" min="${3:-1000}" tmp="$2.dl"
+    local dl_url="$url" sz=""
+    case "$dl_url" in
+        *\?*) dl_url="${dl_url}&_t=$(date +%s)" ;;
+        *)    dl_url="${dl_url}?_t=$(date +%s)" ;;
+    esac
     rm -f "$tmp"
+    echo "  ↓ 다운로드: $url"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 5 -m 60 "$url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
+        curl -fsSL --connect-timeout 5 -m 20 "$dl_url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
     fi
     if [ ! -s "$tmp" ] && command -v wget >/dev/null 2>&1; then
-        wget -q -T 10 --tries=2 "$url" -O "$tmp" 2>/dev/null || rm -f "$tmp"
+        wget -q -T 10 -t 2 --cache=off "$dl_url" -O "$tmp" 2>/dev/null || rm -f "$tmp"
     fi
     [ -s "$tmp" ] || { echo " ❌ 다운로드 실패: $url" >&2; return 1; }
-    [ "$(wc -c <"$tmp")" -ge "$min" ] || { echo " ❌ 용량 비정상(정상 아님): $url" >&2; rm -f "$tmp"; return 1; }
+    sz=$(wc -c <"$tmp" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$sz" ] && [ "$sz" -ge "$min" ] || { echo " ❌ 용량 비정상(${sz:-0}B < ${min}B): $url" >&2; rm -f "$tmp"; return 1; }
     mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
     return 0
 }
@@ -7204,7 +7211,6 @@ _go_dl() {
 update() {
     rbackup "$gofile" "$envorg"
     echo "update file: $gofile $envorg"
-    sleep 1
     [ -f "$gofile" ] || { echo " ❌ $gofile 없음 - 갱신 중단" >&2; return 1; }
     if ! _go_dl http://srt.byus.net/go.sh "$gofile" 100000; then
         echo " ❌ go.sh 갱신 실패 - 기존 파일 그대로 보존됨" >&2
@@ -7224,7 +7230,8 @@ update() {
             return 1
         fi
     fi
-    savescut && exec "$gofile" "$scut"
+    echo " ✅ 업데이트 완료! 재시작합니다..."
+    savescut && GO_ALLOW_REEXEC=1 exec bash "$gofile" ${scut:+"$scut"}
 }
 
 # install
