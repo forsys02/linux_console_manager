@@ -6133,24 +6133,22 @@ ncpzipupdate() {
 rbackup() {
     # [규칙] 전역 변수 오염 금지: base/d/cmd/i/t 를 local 로 가둔다
     #  (local 없으면 전역 $base(=go.sh 디렉터리)가 파일명으로 덮여 이후 'cd $base' 가 깨진다)
-    local t d base cmd i cdate d8 d9
+    local t d base i cdate d8 d9
     t=$(date +%Y%m%d)
     while [ $# -gt 0 ]; do
         d="${1%/}"
         base="$d"
-        if [ -f "$d" ] && [[ "$(diff $d ${base}.1.bak 2>/dev/null)" || ! -f ${base}.1.bak ]]; then
-            d9=$(date -r ${base}.9.bak +%Y%m%d 2>/dev/null)
-            d8=$(date -r ${base}.8.bak +%Y%m%d 2>/dev/null)
-            if [ -f "${base}.9.bak" ] && [[ $t == "$d8" && $t != "$d9" ]]; then
-                cdate=$(date -r ${base}.9.bak +%Y%m%d)
-                mv ${base}.9.bak ${base}.${cdate}.bak
+        if [ -f "$d" ] && { [ ! -f "${base}.1.bak" ] || ! diff -q "$d" "${base}.1.bak" >/dev/null 2>&1; }; then
+            d9=$(date -r "${base}.9.bak" +%Y%m%d 2>/dev/null)
+            d8=$(date -r "${base}.8.bak" +%Y%m%d 2>/dev/null)
+            if [ -f "${base}.9.bak" ] && [ "$t" = "$d8" ] && [ "$t" != "$d9" ]; then
+                cdate=$(date -r "${base}.9.bak" +%Y%m%d)
+                mv -f "${base}.9.bak" "${base}.${cdate}.bak"
             fi
             for i in 8 7 6 5 4 3 2 1; do
-                cmd=${i:+mv}
-                cmd=${cmd:-cp}
-                $cmd ${base}.${i}.bak ${base}.$((${i:-0} + 1)).bak 2>/dev/null
+                [ -f "${base}.${i}.bak" ] && mv -f "${base}.${i}.bak" "${base}.$((i + 1)).bak" 2>/dev/null
             done
-            cp $d ${base}.1.bak
+            cp -p "$d" "${base}.1.bak"
         fi
         shift
     done
