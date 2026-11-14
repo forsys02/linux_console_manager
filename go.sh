@@ -1555,6 +1555,17 @@ menufunc() {
             idx_mapping=()
 
             readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+            # 메인 메뉴 아이콘 배지 사전 변환 (EUC-KR 터미널에서 UTF-8 3바이트 '? ?' 깨짐 방지, 루프당 iconv 0회)
+            local _mb_star _mb_tri _mb_dia
+            if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+                _mb_star="$(ko '★')"
+                _mb_tri="$(ko '▶')"
+                _mb_dia="$(ko '◈')"
+            else
+                _mb_star="★"
+                _mb_tri="▶"
+                _mb_dia="◈"
+            fi
             # 메인 or 서브 메뉴 리스트 구성 loop
             while read line; do
                 #set +x
@@ -1592,13 +1603,20 @@ menufunc() {
                 local _badge=""
                 if [ -z "$title_of_menu_sub" ]; then
                     if [ "$key" = "apps" ]; then
-                        _badge="\x1b[1;33m★\x1b[0m"
-                        items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
-                    elif rx_match "$items" '^[[:space:]]*>' || rx_match "$line" '^[[:space:]]*%%%[[:space:]]*>'; then
-                        _badge="\x1b[1;31m▶\x1b[0m"
+                        _badge="\x1b[1;33m${_mb_star}\x1b[0m"
                         items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
                     else
-                        _badge="\x1b[1;32m◈\x1b[0m"
+                        local _t_it="${items#"${items%%[![:space:]]*}"}"
+                        local _t_ln="${line#"${line%%[![:space:]]*}"}"
+                        if [ "${_t_it:0:1}" = ">" ] || { [ "${_t_ln:0:3}" = "%%%" ] && [[ "${_t_ln#%%%}" == "${_t_ln#%%%[![:space:]]*}>"* || "${_t_ln:3:1}" = ">" ]]; }; then
+                            _badge="\x1b[1;31m${_mb_tri}\x1b[0m"
+                            items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
+                        elif rx_match "$line" '^[[:space:]]*%%%[[:space:]]*>'; then
+                            _badge="\x1b[1;31m${_mb_tri}\x1b[0m"
+                            items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
+                        else
+                            _badge="\x1b[1;32m${_mb_dia}\x1b[0m"
+                        fi
                     fi
                 fi
 
@@ -1616,7 +1634,7 @@ menufunc() {
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
             if [ -z "$title_of_menu_sub" ]; then
-                printf "\e[1m%-3s\e[0m \x1b[1;30m◈\x1b[0m Exit [q]\n" "0."
+                printf "\e[1m%-3s\e[0m \x1b[1;30m${_mb_dia}\x1b[0m Exit [q]\n" "0."
             else
                 echo "0.  Exit [q]"
             fi
