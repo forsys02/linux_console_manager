@@ -1053,6 +1053,21 @@ easy_auto_title() {
     fi
 }
 
+_easy_sync_badges() {
+    local _key="${GOLANG}:${GOTERM_ENC:-utf8}"
+    [ "${_EASY_B_KEY:-}" = "$_key" ] && return
+    _EASY_B_KEY="$_key"
+    if [ "$GOLANG" = "kr" ]; then
+        _EASY_B_WARN="\x1b[1;31m$(ko '[위험]')\x1b[0m"
+        _EASY_B_CHG="\x1b[1;33m$(ko '[변경]')\x1b[0m"
+        _EASY_B_VIEW="\x1b[1;32m$(ko '[조회]')\x1b[0m"
+    else
+        _EASY_B_WARN="\x1b[1;31m[WARN]\x1b[0m"
+        _EASY_B_CHG="\x1b[1;33m[CHG ]\x1b[0m"
+        _EASY_B_VIEW="\x1b[1;32m[VIEW]\x1b[0m"
+    fi
+}
+
 render_item_easy() {
     local pi="$1"
     local c_cmd="$2"
@@ -1061,20 +1076,22 @@ render_item_easy() {
     local badge=""
     local title=""
 
+    _easy_sync_badges
+
     # 1. 배지 결정 (Bash 2 내장 case 로 fork 없이 판별)
     local _trim_cmd="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
     if [ "${_trim_cmd:0:3}" = "!!!" ] || [[ "$c_cmd" == *"unban --all"* ]] || { [[ "$c_cmd" == *"unban"* ]] && rx_match "$c_cmd" '(unban[[:space:]]+--all)'; }; then
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+        badge="$_EASY_B_WARN"
     else
         case "$c_cmd" in
             *install*|*apt*|*yum*|*dnf*|*"rm "*|*"rm	"*|*"systemctl restart"*|*reboot*|*"sed -i"*|*">>"*|*kill*|*pkill*|*unban*|*banip*)
-                [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+                badge="$_EASY_B_CHG"
                 ;;
             *)
                 if [[ "$c_cmd" == *"systemctl"* ]] && rx_match "$c_cmd" 'systemctl[[:space:]]+restart'; then
-                    [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+                    badge="$_EASY_B_CHG"
                 else
-                    [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+                    badge="$_EASY_B_VIEW"
                 fi
                 ;;
         esac
@@ -1170,19 +1187,21 @@ show_cmd_card() {
     local title=""
     local body=""
 
+    _easy_sync_badges
+
     # 위험 판단 (render_item_easy 와 동일 기준 유지)
     if rx_match "$cmd" '^[[:space:]]*!!!'; then
         is_danger=1
         cmd="${cmd#*!!!}"
         cmd="${cmd# }"
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+        badge="$_EASY_B_WARN"
     elif rx_match "$cmd" '(unban[[:space:]]+--all)'; then
         is_danger=1
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
+        badge="$_EASY_B_WARN"
     elif rx_match "$cmd" '(install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip)'; then
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+        badge="$_EASY_B_CHG"
     else
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+        badge="$_EASY_B_VIEW"
     fi
 
     # 제목 및 본문 분리
@@ -1841,9 +1860,9 @@ menufunc() {
                             echo
                             local _vmode_badge=""
                             if [ "${GOVIEW:-easy}" = "easy" ]; then
-                                [ "$GOLANG" = "kr" ] && _vmode_badge="보기: 쉬움 (V 로 전환)" || _vmode_badge="View: Easy (toggle V)"
+                                [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 쉬움 (V 로 전환)')" || _vmode_badge="View: Easy (toggle V)"
                             else
-                                [ "$GOLANG" = "kr" ] && _vmode_badge="보기: 명령어 (V 로 전환)" || _vmode_badge="View: Cmd (toggle V)"
+                                [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 명령어 (V 로 전환)')" || _vmode_badge="View: Cmd (toggle V)"
                             fi
                             echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)")  \x1b[1;36m${_vmode_badge}\x1b[0m\n"
                             echo "=============================================="
@@ -7191,7 +7210,7 @@ _go_dl() {
         *)    dl_url="${dl_url}?_t=$(date +%s)" ;;
     esac
     rm -f "$tmp"
-    echo "  ↓ 다운로드: $url"
+    ko "  >> 다운로드: %s\n" "$url"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --connect-timeout 5 -m 20 "$dl_url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
     fi
@@ -7228,7 +7247,7 @@ update() {
             return 1
         fi
     fi
-    echo " ✅ 업데이트 완료! 재시작합니다..."
+    ko " [OK] 업데이트 완료! 재시작합니다...\n"
     savescut && GO_ALLOW_REEXEC=1 exec bash "$gofile" ${scut:+"$scut"}
 }
 
