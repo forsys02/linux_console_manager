@@ -9,8 +9,8 @@ PARENT_PID=$PPID
 #echo "CURRENT_PID:$CURRENT_PID PARENT_PID:$PARENT_PID"
 # 부모 프로세스가 go.sh인지 확인
 PARENT_CMD=$(ps -o cmd= -p $PARENT_PID)
-# 부모 프로세스가 go.sh일 경우 재귀 실행 방지
-if [[ $PARENT_CMD == *"go.sh"* ]]; then
+# 부모 프로세스가 go.sh일 경우 재귀 실행 방지 (단, 업데이트 재실행 GO_ALLOW_REEXEC=1 은 허용)
+if [ "${GO_ALLOW_REEXEC:-0}" != "1" ] && [[ $PARENT_CMD == *"go.sh"* ]]; then
     echo "go.sh가 이미 실행 중입니다. (재귀 실행 방지)"
     exit 1
 fi
@@ -853,7 +853,7 @@ cmd_desc_peek() {
     echo
     if [ "$_q" = "?" ]; then
         menu_keyhelp
-    elif rx_match "$_q" '^[0-9]+$' && [ "$_q" -ge 1 ] && [ "$_q" -lt "${display_idx:-0}" ]; then
+    elif [ -n "$_q" ] && [ -z "${_q##[0-9]*}" ] && [ -z "${_q//[0-9]/}" ] && [ "$_q" -ge 1 ] && [ "$_q" -lt "${display_idx:-0}" ]; then
         _qi="${original_indices[$((_q - 1))]}"
         _qd="${chosen_desc[$((_qi - 1))]-}"
         _qc="${chosen_commands[$((_qi - 1))]-}"
@@ -900,14 +900,19 @@ easy_auto_title() {
     local easy_name=""
 
     # : 제목 ; 명령 형태는 이미 사람이 쓴 제목이므로 그대로 쓴다.
-    if rx_match "$easy_cmd" '^:[[:space:]]*([^;]+);'; then
-        easy_label="$(rx_cap "$easy_cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
-        easy_label="$(echo "$easy_label" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-        [ -n "$easy_label" ] && printf '%s\n' "$easy_label" && return
-    fi
+    case "$easy_cmd" in
+        :*";"*)
+            easy_label="${easy_cmd#:}"
+            easy_label="${easy_label%%;*}"
+            easy_label="${easy_label#"${easy_label%%[![:space:]]*}"}"
+            easy_label="${easy_label%"${easy_label##*[![:space:]]}"}"
+            [ -n "$easy_label" ] && printf '%s\n' "$easy_label" && return
+            ;;
+    esac
 
     easy_cmd="${easy_cmd#!!!}"
-    easy_cmd="$(echo "$easy_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    easy_cmd="${easy_cmd#"${easy_cmd%%[![:space:]]*}"}"
+    easy_cmd="${easy_cmd%"${easy_cmd##*[![:space:]]}"}"
 
     if [ "$GOLANG" = "kr" ]; then
         case "$easy_cmd" in
@@ -1056,34 +1061,55 @@ render_item_easy() {
     local badge=""
     local title=""
 
-    # 1. 배지 결정
-    if rx_match "$c_cmd" '^[[:space:]]*!!!' || rx_match "$c_cmd" '(unban[[:space:]]+--all)'; then
+    # 1. 배지 결정 (Bash 2 내장 case 로 fork 없이 판별)
+    local _trim_cmd="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
+    if [ "${_trim_cmd:0:3}" = "!!!" ] || [[ "$c_cmd" == *"unban --all"* ]] || { [[ "$c_cmd" == *"unban"* ]] && rx_match "$c_cmd" '(unban[[:space:]]+--all)'; }; then
         [ "$GOLANG" = "kr" ] && badge="\x1b[1;31m[위험]\x1b[0m" || badge="\x1b[1;31m[WARN]\x1b[0m"
-    elif rx_match "$c_cmd" '(install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip)'; then
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
     else
-        [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+        case "$c_cmd" in
+            *install*|*apt*|*yum*|*dnf*|*"rm "*|*"rm	"*|*"systemctl restart"*|*reboot*|*"sed -i"*|*">>"*|*kill*|*pkill*|*unban*|*banip*)
+                [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+                ;;
+            *)
+                if [[ "$c_cmd" == *"systemctl"* ]] && rx_match "$c_cmd" 'systemctl[[:space:]]+restart'; then
+                    [ "$GOLANG" = "kr" ] && badge="\x1b[1;33m[변경]\x1b[0m" || badge="\x1b[1;33m[CHG ]\x1b[0m"
+                else
+                    [ "$GOLANG" = "kr" ] && badge="\x1b[1;32m[조회]\x1b[0m" || badge="\x1b[1;32m[VIEW]\x1b[0m"
+                fi
+                ;;
+        esac
     fi
 
     # 2. 제목 결정 (4단 폴백 사다리)
     if [ -n "$hdesc" ]; then
-        title="$(echo "$hdesc" | head -n1)"
+        title="${hdesc%%$'\n'*}"
     elif [ -n "$prev_comm" ] && [ "${#prev_comm}" -gt 2 ]; then
         title="$prev_comm"
-    elif rx_match "$c_cmd" '^:[[:space:]]*([^;]+);'; then
-        title="$(rx_cap "$c_cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
-        title="$(echo "$title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     else
-        title="$(easy_auto_title "$c_cmd")"
+        case "$c_cmd" in
+            :*";"*)
+                title="${c_cmd#:}"
+                title="${title%%;*}"
+                title="${title#"${title%%[![:space:]]*}"}"
+                title="${title%"${title##*[![:space:]]}"}"
+                ;;
+            *)
+                title="$(easy_auto_title "$c_cmd")"
+                ;;
+        esac
     fi
 
     # 3. 명령어 힌트 (쉬움 모드에서 실제 실행될 명령 요약 노출)
     local raw_hint="$c_cmd"
     raw_hint="${raw_hint#*!!!}"
-    raw_hint="$(echo "$raw_hint" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    if rx_match "$raw_hint" '^:[[:space:]]*([^;]+);[[:space:]]*(.*)$'; then
-        raw_hint="$(rx_cap "$raw_hint" '^:[[:space:]]*\([^;][^;]*\);[[:space:]]*\(.*\)$' 2)"
-    fi
+    raw_hint="${raw_hint#"${raw_hint%%[![:space:]]*}"}"
+    raw_hint="${raw_hint%"${raw_hint##*[![:space:]]}"}"
+    case "$raw_hint" in
+        :*";"*)
+            raw_hint="${raw_hint#*;}"
+            raw_hint="${raw_hint#"${raw_hint%%[![:space:]]*}"}"
+            ;;
+    esac
     if [ ${#raw_hint} -gt 55 ]; then
         raw_hint="${raw_hint:0:52}..."
     fi
@@ -5309,12 +5335,12 @@ for ((i = 1; i <= 10; i++)); do eval "awknf${i}() { awk '{if (NF >= $i) print su
 sshre() {
     output=$(ssh "$@" 2>&1)
     if echo "$output" | grep -q "no matching host key type found"; then
-        algorithms=$(echo "$output" | grep -oP 'Their offer: \K.*?(?=\r|\n)' | sed 's/ /,/g')
+        algorithms=$(echo "$output" | sed -n 's/.*Their offer: //p' | tr -d '\r' | sed 's/ /,/g' | head -n1)
         printf "Host %s\n    HostKeyAlgorithms +%s\n    PubkeyAcceptedKeyTypes +ssh-rsa\n" "$1" "$algorithms" | tee -a "$HOME/.ssh/config" >/dev/null
         echo "HostKey config saved, reconnecting..."
         ssh "$@"
     elif echo "$output" | grep -q "no matching key exchange method found"; then
-        algorithms=$(echo "$output" | grep -oP 'Their offer: \K.*?(?=\r|\n)' | sed 's/ /,/g')
+        algorithms=$(echo "$output" | sed -n 's/.*Their offer: //p' | tr -d '\r' | sed 's/ /,/g' | head -n1)
         printf "Host %s\n    KexAlgorithms +%s\n" "$1" "$algorithms" | tee -a "$HOME/.ssh/config" >/dev/null
         echo "Kex config saved, reconnecting..."
         ssh "$@"
@@ -6119,7 +6145,7 @@ rbackup() {
                 cdate=$(date -r ${base}.9.bak +%Y%m%d)
                 mv ${base}.9.bak ${base}.${cdate}.bak
             fi
-            for i in 8 7 6 5 4 3 2 1 ""; do
+            for i in 8 7 6 5 4 3 2 1; do
                 cmd=${i:+mv}
                 cmd=${cmd:-cp}
                 $cmd ${base}.${i}.bak ${base}.$((${i:-0} + 1)).bak 2>/dev/null
@@ -7143,7 +7169,7 @@ ssu() { systemctl status ufw; }                                                 
 ssc() { systemctl status cron; }                                                    # Cron
 # 자동 감지형
 ssm() { systemctl status $(systemctl | grep -Eo 'mariadb|mysql' | head -n1); }                                     # MySQL or MariaDB
-ssp() { systemctl status $(systemctl | grep -o 'php[0-9.]*-fpm' | sort -Vr | head -n1); }                          # 최신 PHP-FPM
+ssp() { systemctl status $(systemctl | awk '/php[0-9.]*-fpm/ {for(i=1;i<=NF;i++) if($i ~ /^php[0-9.]*-fpm/) {print $i; break}}' | sort -r | head -n1); }                          # 최신 PHP-FPM
 ssf() { systemctl status $(systemctl list-unit-files --type=service | grep ftp | awk -F'.service' '{print $1}'); } # ftp
 # Proxmox 관련 (사용 중이라면)
 ssv() { systemctl status $(echo pvedaemon pveproxy qmeventd lxc | pipemenu); }
