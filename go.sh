@@ -340,13 +340,28 @@ build_shortcutarr() {
 # 인코딩만 확정된 "두 언어 모두 포함" 원본을 마스터로 보관 (L 토글의 재실행 지점)
 cp -f "$env" "$envlang_master" 2>/dev/null
 
-# 시작시 언어 결정 : 수동지정(go.my.env 의 GOLANG=kr|en) 우선, 없으면 기존 locale 자동감지
+# 시작시 언어/보기모드 결정 : 수동지정(go.my.env / .goview) 우선, 없으면 기존 환경변수/자동감지
 local_myenv=""
 [ -f "$envorg2" ] && local_myenv="$envorg2"
 [ -z "$local_myenv" ] && [ -f "$HOME/go.my.env" ] && local_myenv="$HOME/go.my.env"
 [ -z "$GOLANG" ] && [ -n "$local_myenv" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
-[ -z "$GOVIEW" ] && [ -n "$local_myenv" ] && GOVIEW="$(grep -m1 '^[[:blank:]]*GOVIEW=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
-unset -v local_myenv
+
+# 보기모드(GOVIEW) 영구 저장 파일 경로 결정 및 로드 (.goview > go.my.env > 환경변수 > easy)
+goview_file=""
+if [ -n "$base" ] && [ -w "$base" ]; then
+    goview_file="$base/.goview"
+else
+    goview_file="$HOME/.goview"
+fi
+_saved_goview=""
+[ -f "$goview_file" ] && _saved_goview="$(head -n 1 "$goview_file" 2>/dev/null | tr -d '\r\n ')"
+if [ "$_saved_goview" = "easy" ] || [ "$_saved_goview" = "cmd" ]; then
+    GOVIEW="$_saved_goview"
+elif [ -n "$local_myenv" ]; then
+    _myenv_goview="$(grep -m1 '^[[:blank:]]*GOVIEW=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+    [ -n "$_myenv_goview" ] && GOVIEW="$_myenv_goview"
+fi
+unset -v local_myenv _saved_goview _myenv_goview
 if [ "$GOLANG" != "kr" ] && [ "$GOLANG" != "en" ]; then
     GOLANG=""
     if (($(locale | grep -ci "kr") == 0)); then
@@ -369,26 +384,29 @@ export GOLANG
 # [V] 보기 모드 (easy: 쉬움 모드 ↔ cmd: 기존 명령어 모드)
 #   기본값: easy (초보자 친화적 설명 및 확인 카드 표시)
 # ===============================================================
-GOVIEW="${GOVIEW:-easy}"
+[ "$GOVIEW" != "easy" ] && [ "$GOVIEW" != "cmd" ] && GOVIEW="easy"
 export GOVIEW
 
 goview_toggle() {
     if [ "$GOVIEW" = "easy" ]; then
         GOVIEW="cmd"
         if [ "$GOLANG" = "kr" ]; then
-            ko "보기 모드: 명령어 모드 (기존) [V]\n"
+            ko "보기 모드: 명령어 모드 (기존) [V] - 저장됨\n"
         else
-            echo "View mode: Command mode [V]"
+            echo "View mode: Command mode [V] - saved"
         fi
     else
         GOVIEW="easy"
         if [ "$GOLANG" = "kr" ]; then
-            ko "보기 모드: 쉬움 모드 (설명 및 카드 확인) [V]\n"
+            ko "보기 모드: 쉬움 모드 (설명 및 카드 확인) [V] - 저장됨\n"
         else
-            echo "View mode: Easy mode [V]"
+            echo "View mode: Easy mode [V] - saved"
         fi
     fi
     export GOVIEW
+    if [ -n "$goview_file" ]; then
+        printf '%s\n' "$GOVIEW" >"$goview_file" 2>/dev/null
+    fi
     return 0
 }
 
