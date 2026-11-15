@@ -4642,15 +4642,26 @@ readv() {
     IFS="" read -rep '>>> : ' "$1"
 }
 
-acmesh() {
-    local _p
-    for _p in /script/acme.sh "$HOME/.acme.sh/acme.sh" /root/.acme.sh/acme.sh "$(command -v acme.sh 2>/dev/null)"; do
+# 공통 바이너리 탐색·실행 헬퍼: runbin <명령명> [인자...]
+runbin() {
+    local _name="$1" _p
+    shift
+    [ -z "$_name" ] && return 1
+    for _p in \
+        "/script/$_name" \
+        "/usr/local/bin/$_name" \
+        "/usr/local/sbin/$_name" \
+        "/usr/sbin/$_name" \
+        "$HOME/.$_name/$_name" \
+        "/root/.$_name/$_name" \
+        "$(command -v "$_name" 2>/dev/null)"
+    do
         if [ -n "$_p" ] && [ -x "$_p" ]; then
             "$_p" "$@"
             return $?
         fi
     done
-    echo "acme.sh not found (/script/acme.sh or ~/.acme.sh/acme.sh)" >&2
+    echo "$_name not found" >&2
     return 127
 }
 
