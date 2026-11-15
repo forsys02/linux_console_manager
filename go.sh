@@ -2463,6 +2463,9 @@ menufunc() {
                                                 eval flagof_"${var_name%%__*}"=set
                                                 break
                                             fi
+                                            # 앞뒤 공백 제거 (복붙 시 따라오는 공백으로 도메인/계정/호스트 인자가 깨지는 현상 방지)
+                                            var_value="${var_value#"${var_value%%[![:space:]]*}"}"
+                                            var_value="${var_value%"${var_value##*[![:space:]]}"}"
                                             # ' " \ ->quoting
                                             if printf "%s" "$var_value" | grep -qE "[\\'\"]"; then
                                                 var_value="$(printf %q "$var_value")"
