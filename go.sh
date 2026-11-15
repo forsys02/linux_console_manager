@@ -5780,7 +5780,7 @@ old_qssh() {
     fi
 
     local mac bridge
-    mac=$(echo "$config_line" | grep -oP '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
+    mac=$(echo "$config_line" | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
     bridge=$(echo "$config_line" | sed -n 's/.*bridge=\([^,]\+\).*/\1/p')
 
     if [[ -z $mac || -z $bridge ]]; then
@@ -7562,7 +7562,7 @@ vmipscan() {
         for vmid in $(pvesh get /nodes/$node/qemu --noborder --noheader | awk '/running/ {print $2}'); do
             config=$(pvesh get /nodes/$node/qemu/"$vmid"/config --noborder --noheader)
             vmname=$(echo "$config" | awk '$1 == "name" {print $2}')
-            mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | grep -oP '(?<==)[0-9A-Fa-f:]+(?=,bridge=)')
+            mac=$(echo "$config" | awk '$1 ~ /net0/ {print $2}' | sed -n 's/.*=\([0-9A-Fa-f:]\+\),bridge=.*/\1/p')
             [[ -n $mac ]] && ip="${mac_ip_map[$(echo "$mac" | tr '[:upper:]' '[:lower:]')]}"
             [[ -n $ip ]] && echo "-> $vmid $vmname $ip"
         done
