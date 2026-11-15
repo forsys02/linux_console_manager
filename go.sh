@@ -4637,8 +4637,9 @@ seen() { awk '!seen[$0]++'; }
 lastseen() { awk '{ last[$0] = NR; line[NR] = $0 } END { for (i = 1; i <= NR; i++) if (last[line[i]] == i) print line[i] }'; }
 
 readv() {
-    bashver=${BASH_VERSINFO[0]}
-    ((bashver < 3)) && IFS="" read -rep $'\n>>> : ' $1 || IFS="" read -rep ' ' $1
+    # printf + read -rep ' ' 조합 시 bash readline 이 앞선 ANSI/긴 프롬프트 길이를 몰라 줄 맨 앞을 덮어쓰는 버그 방지
+    printf '\n'
+    IFS="" read -rep '>>> : ' "$1"
 }
 
 # bashcomm .bashrc 의 alias 사용가능 // history 사용가능
