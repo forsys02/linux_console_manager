@@ -4642,26 +4642,32 @@ readv() {
     IFS="" read -rep '>>> : ' "$1"
 }
 
-# 공통 바이너리 탐색·실행 헬퍼: runbin <명령명> [인자...]
-runbin() {
-    local _name="$1" _p
-    shift
-    [ -z "$_name" ] && return 1
-    for _p in \
-        "/script/$_name" \
-        "/usr/local/bin/$_name" \
-        "/usr/local/sbin/$_name" \
-        "/usr/sbin/$_name" \
-        "$HOME/.$_name/$_name" \
-        "/root/.$_name/$_name" \
-        "$(command -v "$_name" 2>/dev/null)"
-    do
-        if [ -n "$_p" ] && [ -x "$_p" ]; then
-            "$_p" "$@"
+# 후보 명령어 중 순서대로 실행 가능한 첫 번째 명령을 실행
+# 사용법: execute 후보1 후보2 ... [-- 인자1 인자2 ...]
+execute() {
+    local _cands=() _args=() _sep=0 _a _bin
+    for _a in "$@"; do
+        if [ $_sep -eq 0 ] && [ "$_a" = "--" ]; then
+            _sep=1
+        elif [ $_sep -eq 0 ]; then
+            _cands[${#_cands[@]}]="$_a"
+        else
+            _args[${#_args[@]}]="$_a"
+        fi
+    done
+    for _a in "${_cands[@]}"; do
+        _bin=""
+        if [ -x "$_a" ]; then
+            _bin="$_a"
+        else
+            _bin="$(command -v "$_a" 2>/dev/null)"
+        fi
+        if [ -n "$_bin" ] && [ -x "$_bin" ]; then
+            "$_bin" "${_args[@]}"
             return $?
         fi
     done
-    echo "$_name not found" >&2
+    echo "execute: not found (${_cands[*]})" >&2
     return 127
 }
 
