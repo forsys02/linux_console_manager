@@ -4642,6 +4642,18 @@ readv() {
     IFS="" read -rep '>>> : ' "$1"
 }
 
+acmesh() {
+    local _p
+    for _p in /script/acme.sh "$HOME/.acme.sh/acme.sh" /root/.acme.sh/acme.sh "$(command -v acme.sh 2>/dev/null)"; do
+        if [ -n "$_p" ] && [ -x "$_p" ]; then
+            "$_p" "$@"
+            return $?
+        fi
+    done
+    echo "acme.sh not found (/script/acme.sh or ~/.acme.sh/acme.sh)" >&2
+    return 127
+}
+
 # bashcomm .bashrc 의 alias 사용가능 // history 사용가능
 bashcomm() {
     IN_BASHCOMM=1
