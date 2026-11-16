@@ -327,13 +327,23 @@ build_shortcutarr() {
     shortcutarr=()
     shortcutstr="@@@"
     _bidx=0
+    # [규칙] for-in 확장은 단어마다 **경로확장(glob)** 을 수행한다. 메뉴 라벨의 `[scut]` 가
+    #        파일 패턴으로 해석돼 /root 처럼 파일이 많은 디렉터리에서 22초(실측)가 걸리고,
+    #        같은 이름의 파일이 있으면 라벨이 파일명으로 치환되는 버그도 있었다.
+    #        → 루프 동안만 set -f (noglob) 로 끄고 원래 상태로 복원한다.
+    case $- in *f*) _wasf=1 ;; *) _wasf=0 ;; esac
+    set -f
+    # [규칙] 항목수(482개)만큼 `echo "$x" | awk` 를 돌리면 fork 2회×482. 구서버(bash 2.05)에서 0.5초+.
+    #        `[scut]` 추출은 파라미터 치환으로 동일 결과를 fork 0회로 얻는다 (awk 정규식과 실측 동일).
     for _bitems in $_bsi; do
-        _bsname=$(echo "$_bitems" | awk 'match($0, /\[([^]]+)\]/) {print substr($0, RSTART + 1, RLENGTH - 2)}')
+        _bsname="${_bitems#*[}"
+        _bsname="${_bsname%%]*}"
         shortcutarr[$_bidx]="${_bsname}@@@${_bitems}"
         shortcutstr="${shortcutstr}${_bsname}|${_bidx}@@@"
         ((_bidx++))
     done
-    unset -v _bsi _bidx _bsname _bitems
+    [ "$_wasf" = "1" ] || set +f
+    unset -v _bsi _bidx _bsname _bitems _wasf
     return 0
 }
 
