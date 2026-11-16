@@ -4918,11 +4918,15 @@ savescut() {
 }
 
 # varVAR 형태의 변수를 파일에 저장해 두었다가 스크립트 재실행시 사용
-viewVAR() { declare -p | grep "^declare -x var[A-Z]"; }
+# [규칙] `declare -p`(인수 없음)는 bash 2.05(구형)에서 내부 malloc 가드를 깨뜨려
+#        종료 시 "*ap++ == 0x55 / Stopping myself..." abort 를 뿜는다 (mini·byus 실측).
+#        `export -p` 는 동일한 `declare -x NAME="value"` 형식을 내면서 크래시가 없고,
+#        bash 2.05 의 declare -p 는 `NAME=value` 형식이라 저장 자체가 0건이었다.
+viewVAR() { export -p | grep "^declare -x var[A-Z]"; }
 saveVAR() {
-    declare -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
+    export -p | grep "^declare -x var[A-Z]" >>~/.go.private.var
     #declare -p | grep "^declare -x" >~/.go.export.var
-    declare -p | grep "^declare -x" | encrypt >~/.go.export.var
+    export -p | grep "^declare -x" | encrypt >~/.go.export.var
     cat ~/.go.private.var | lastseen >~/.go.private.var.tmp && mv ~/.go.private.var.tmp ~/.go.private.var
     chmod 600 ~/.go.private.var
 }
