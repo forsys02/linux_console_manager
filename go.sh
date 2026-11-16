@@ -5171,9 +5171,31 @@ serialup() {
     echo "업데이트 완료: $zonefile (새 시리얼: $new_serial)"
 }
 
-# [정리] 도메인 형식 검증 — 한국 TLD(ne/or/re/pe/go.kr) 누락과 가성 TLD(foo.com.xyz) 통과를 바로잡음.
+# [정리] 도메인 형식 검증 - 한국 TLD(ne/or/re/pe/go.kr) 누락과 임의 접미사(foo.com.zzzz) 통과를 바로잡음.
 #        [ssl] 센터 1단계에서 도메인 변수 검증에 재사용한다.
 isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|org|io|info|xyz|app|dev|co\.kr|or\.kr|ne\.kr|re\.kr|pe\.kr|go\.kr|kr)$' >/dev/null && return 0 || return 1; }
+
+# [규칙] go.env [ssl] 센터 사전점검/진단용 - whois 로 등록기관·네임서버(등록정보)·만료일을 요약한다.
+#        인자 없으면 세션의 $ssldomain 을 쓴다. TLD 별 표기가 달라 한/영 키워드를 모두 훑는다.
+ssl_whois() {
+    local d="${1:-$ssldomain}"
+    [ -z "$d" ] && { echo "[WARN] 대상 도메인 없음 - 먼저 '도메인 설정' 항목을 실행하세요."; return 1; }
+    if ! command -v whois >/dev/null 2>&1; then
+        echo "[WARN] whois 미설치 - 'yyay whois' 로 설치 후 다시 실행하세요."
+        return 1
+    fi
+    local w
+    w="$(whois "$d" 2>/dev/null)"
+    if [ -z "$w" ]; then
+        echo "[WARN] whois 응답 없음: $d (오프라인 또는 미등록 도메인)"
+        return 1
+    fi
+    echo "--- WHOIS 등록정보 요약: $d ---"
+    printf '%s\n' "$w" | grep -iE '(^|[[:space:]])(Registrar|Name Server|DNS|Domain Name|Registry Expiry Date|Registrar Registration Expiration Date|Expiry Date|Expiration Date|Created Date|Creation Date|Updated Date|등록기관|등록대행자|네임서버|만료일|유효기간|등록일)[[:space:]]*:' | head -n 24
+    echo "--- 실제 위임 NS (dig @8.8.8.8) ---"
+    dig +short NS "$d" @8.8.8.8
+    echo "[팁] whois 의 네임서버와 dig NS 가 다르면 등록사 위임이 아직 안 된 상태입니다."
+}
 
 urlencode() { od -t x1 -A n | tr " " %; }
 urldecode() { echo -en "$(sed 's/+/ /g; s/%/\\x/g')"; }
@@ -8597,13 +8619,13 @@ _ssl_template_copy() {
         cat >"$file_path" <<EOF
 #!/bin/bash
 echo "[HOOK] 인증용 TXT 레코드 추가 중"
-export mydomain="\$CERTBOT_DOMAIN"
+export ssldomain="\$CERTBOT_DOMAIN"
 export txt_value="\$CERTBOT_VALIDATION"
 export zone_file="$zone_file"
-export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+export txt_record="_acme-challenge.${ssldomain}. IN TXT \"\$txt_value\""
 
 echo "\$txt_record" >> "\$zone_file"
-rndc reload "$mydomain"
+rndc reload "$ssldomain"
 EOF
 
         ;;
@@ -8611,9 +8633,9 @@ EOF
     hookremote.sh)
         cat >"$file_path" <<EOF
 # 사용자가 사전에 export 해야 하는 값들:
-#mydomain="example.com"
+#ssldomain="example.com"
 #remote_ns_host="byus.net"
-#zone_file="/mnt/byus/var/named/${mydomain}.zone"
+#zone_file="/mnt/byus/var/named/${ssldomain}.zone"
 
 #!/bin/bash
 
@@ -8667,16 +8689,16 @@ EOF
 
 echo "[CLEANUP] 인증용 TXT 레코드 제거 중..."
 
-export mydomain="\$CERTBOT_DOMAIN"
+export ssldomain="\$CERTBOT_DOMAIN"
 export txt_value="\$CERTBOT_VALIDATION"
 export zone_file="$zone_file"
-export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+export txt_record="_acme-challenge.${ssldomain}. IN TXT \"\$txt_value\""
 
 # 레코드 제거 (해당 줄 삭제)
 sed -i "/_acme-challenge.*IN TXT.*\$txt_value/d" "\$zone_file"
 
 # BIND 설정 재적용
-rndc reload "$mydomain"
+rndc reload "$ssldomain"
 
 echo "[CLEANUP] 완료: \$txt_record 삭제됨"
 EOF
@@ -8689,8 +8711,8 @@ EOF
 # [규칙] go.env [sslw] DNS-01 와일드카드 갱신 전용 — CERTBOT_* 는 certbot 이 훅에 주입하므로 여기서 export 하지 않는다.
 
 certbot renew \
-  --manual-auth-hook "/etc/letsencrypt/scripts/hook-${mydomain}.sh" \
-  --manual-cleanup-hook "/etc/letsencrypt/scripts/cleanup-${mydomain}.sh" \
+  --manual-auth-hook "/etc/letsencrypt/scripts/hook-${ssldomain}.sh" \
+  --manual-cleanup-hook "/etc/letsencrypt/scripts/cleanup-${ssldomain}.sh" \
   --preferred-challenges dns \
   --agree-tos \
   --manual \
@@ -8703,7 +8725,7 @@ EOF
     hook-sslwr.sh)
         cat >"$file_path" <<EOF
 #!/bin/bash
-# Certbot DNS-01 인증용 hook for ${yourdomain}
+# Certbot DNS-01 인증용 hook for ${ssldomain}
 ZONEDIR="${zone_path:-/mnt/remote_name}"
 ZONEFILE="$zone_file"
 TMPFILE="\${ZONEFILE}.tmp"
