@@ -5171,7 +5171,9 @@ serialup() {
     echo "업데이트 완료: $zonefile (새 시리얼: $new_serial)"
 }
 
-isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|kr|co.kr|org|io|info|xyz|app|dev)(\.[a-z]{2,})?$' >/dev/null && return 0 || return 1; }
+# [정리] 도메인 형식 검증 — 한국 TLD(ne/or/re/pe/go.kr) 누락과 가성 TLD(foo.com.xyz) 통과를 바로잡음.
+#        [ssl] 센터 1단계에서 도메인 변수 검증에 재사용한다.
+isdomain() { echo "$1" | grep -E '^(www\.)?([a-z0-9]+(-[a-z0-9]+)*\.)+(com|net|org|io|info|xyz|app|dev|co\.kr|or\.kr|ne\.kr|re\.kr|pe\.kr|go\.kr|kr)$' >/dev/null && return 0 || return 1; }
 
 urlencode() { od -t x1 -A n | tr " " %; }
 urldecode() { echo -en "$(sed 's/+/ /g; s/%/\\x/g')"; }
@@ -8456,7 +8458,7 @@ EOF
 
 domchg() {
     local id="$1" olddomain="$2" newdomain="$3"
-    local homedir oldconf newconf userinfo tmp
+    local homedir oldconf newconf userinfo tmp oldre
 
     # 인수 확인
     if [ -z "$id" ] || [ -z "$olddomain" ] || [ -z "$newdomain" ]; then
@@ -8464,6 +8466,9 @@ domchg() {
         echo "예시: domchg myuser oldsite.com newsite.com"
         return 1
     fi
+
+    # [정리] sed 정규식에서 도메인의 '.' 는 메타문자이므로 반드시 이스케이프한다.
+    oldre="$(printf '%s\n' "$olddomain" | sed 's/\./\\./g')"
 
     # 기본 경로 설정
     homedir="$(getent passwd "$id" | cut -d: -f6)"
@@ -8476,7 +8481,7 @@ domchg() {
     ### 1. Apache conf 변경
     if [ -f "$oldconf" ]; then
         tmp="$(mktemp)"
-        sed "s/$olddomain/$newdomain/g" "$oldconf" >"$tmp"
+        sed "s/$oldre/$newdomain/g" "$oldconf" >"$tmp"
 
         echo "--- Apache conf 변경 전후 diff ($oldconf → $newconf) ---"
         cdiff "$oldconf" "$tmp"
@@ -8499,7 +8504,8 @@ domchg() {
     fi
 
     ### 3. certbot 재발급 명령 미리보기
-    echo "--- Certbot SSL 재발급 명령 미리보기 ---"
+    # [규칙] 일반 도메인만 이 경로로 처리한다. 와일드카드/acme.sh/프록시/유료 ZIP 은 go.env [ssl] 센터 사용.
+    echo "--- Certbot SSL 재발급 명령 미리보기 (일반 도메인 / DNS-01·와일드카드는 [ssl] 센터) ---"
     echo "certbot --apache -d $newdomain -d www.$newdomain"
     readxy "[Certbot을 실행할까요?]" && {
         certbot --apache -d "$newdomain" -d "www.$newdomain"
@@ -8509,7 +8515,7 @@ domchg() {
     local wpconfig="$homedir/public_html/wp-config.php"
     if [ -f "$wpconfig" ]; then
         tmp="$(mktemp)"
-        sed "s|http://$olddomain|http://$newdomain|g" "$wpconfig" >"$tmp"
+        sed "s|http://$oldre|http://$newdomain|g" "$wpconfig" >"$tmp"
         echo "--- wp-config.php 변경 전후 diff ---"
         cdiff "$wpconfig" "$tmp"
         readxy "[wp-config.php를 업데이트할까요?]" && {
@@ -8524,7 +8530,7 @@ domchg() {
         echo "--- 리디렉션 conf 존재: $redirconf ---"
         readxy "[기존 리디렉션 conf를 $newdomain용으로 복사할까요?]" && {
             cp "$redirconf" "/etc/httpd/conf.d/${newdomain}_redirect.conf"
-            sed -i "s/$olddomain/$newdomain/g" "/etc/httpd/conf.d/${newdomain}_redirect.conf"
+            sed -i "s/$oldre/$newdomain/g" "/etc/httpd/conf.d/${newdomain}_redirect.conf"
             echo "✓ 리디렉션 conf 복사 완료"
         }
     fi
@@ -8578,6 +8584,203 @@ template_view() {
 
 template_view_source() { template_copy "$1" /dev/stdout; }
 template_insert() { template_view_source "$1" | tee -a "$2" >/dev/null; }
+
+# [정리] SSL 인증서 템플릿 전용 함수 — go.env [ssl]/[sslw]/[sslwr] 센터가 쓰는 DNS-01 hook/cleanup/renew 스크립트 생성.
+#        기존 template_copy() 의 거대 case 에서 SSL 5종만 분리해 독립 관리한다 (동작 동일).
+#        호출 규약: template_copy <템플릿명> <출력파일> 경로를 그대로 유지한다.
+_ssl_template_copy() {
+    local template=$1 file_path=$2
+
+    case $template in
+
+    hook.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+echo "[HOOK] 인증용 TXT 레코드 추가 중"
+export mydomain="\$CERTBOT_DOMAIN"
+export txt_value="\$CERTBOT_VALIDATION"
+export zone_file="$zone_file"
+export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+
+echo "\$txt_record" >> "\$zone_file"
+rndc reload "$mydomain"
+EOF
+
+        ;;
+
+    hookremote.sh)
+        cat >"$file_path" <<EOF
+# 사용자가 사전에 export 해야 하는 값들:
+#mydomain="example.com"
+#remote_ns_host="byus.net"
+#zone_file="/mnt/byus/var/named/${mydomain}.zone"
+
+#!/bin/bash
+
+# 고정값: Certbot이 채워주는 변수
+DOMAIN="\$CERTBOT_DOMAIN"
+VALUE="\$CERTBOT_VALIDATION"
+FQDN="_acme-challenge.\$DOMAIN."
+RECORD="\$FQDN IN TXT \"\$VALUE\""
+EXPECTED="\"\$VALUE\""
+
+# 하드코딩된 설정
+REMOTE_NS_HOST="${remote_ns_host}"
+ZONE_FILE="${zone_file}"
+
+echo "[HOOK] 인증 도메인: \$DOMAIN"
+echo "[HOOK] 추가할 TXT 레코드: \$RECORD"
+echo "[HOOK] 존 파일: \$ZONE_FILE"
+
+echo "\$RECORD" >> "\$ZONE_FILE" || {
+  echo "[ERROR] ❌ 레코드 추가 실패!"; exit 1;
+}
+echo "[OK] ✅ 존 파일에 레코드 추가됨."
+
+ssh "\$REMOTE_NS_HOST" "rndc reload \$DOMAIN" || {
+  echo "[WARN] ⚠️ 원격 리로드 실패 (진행은 계속)";
+}
+
+echo "[INFO] DNS 전파 확인 중..."
+
+ns=\$(dig NS "\$DOMAIN." +short | head -n1)
+[ -z "\$ns" ] && dig_target="" || dig_target="@\$ns"
+
+for i in \$(seq 1 12); do
+  result=\$(dig \$dig_target TXT "\$FQDN" +short)
+  echo "\$result" | grep -Fxq "\$EXPECTED" && {
+    echo "[OK] ✅ DNS 전파 완료됨"; exit 0;
+  }
+  echo "[WAIT] ⏳ 전파 대기 중 (\$i/12)"
+  sleep 10
+done
+
+echo "[FAIL] ❌ 최대 대기 시간 초과 - Certbot 검증 실패 가능"
+exit 1
+EOF
+
+        ;;
+
+    cleanup.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+
+echo "[CLEANUP] 인증용 TXT 레코드 제거 중..."
+
+export mydomain="\$CERTBOT_DOMAIN"
+export txt_value="\$CERTBOT_VALIDATION"
+export zone_file="$zone_file"
+export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
+
+# 레코드 제거 (해당 줄 삭제)
+sed -i "/_acme-challenge.*IN TXT.*\$txt_value/d" "\$zone_file"
+
+# BIND 설정 재적용
+rndc reload "$mydomain"
+
+echo "[CLEANUP] 완료: \$txt_record 삭제됨"
+EOF
+
+        ;;
+
+    renew.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+# [규칙] go.env [sslw] DNS-01 와일드카드 갱신 전용 — CERTBOT_* 는 certbot 이 훅에 주입하므로 여기서 export 하지 않는다.
+
+certbot renew \
+  --manual-auth-hook "/etc/letsencrypt/scripts/hook-${mydomain}.sh" \
+  --manual-cleanup-hook "/etc/letsencrypt/scripts/cleanup-${mydomain}.sh" \
+  --preferred-challenges dns \
+  --agree-tos \
+  --manual \
+  --deploy-hook "systemctl reload httpd 2>/dev/null || systemctl reload apache2" \
+  --cert-name $certpath
+EOF
+
+        ;;
+
+    hook-sslwr.sh)
+        cat >"$file_path" <<EOF
+#!/bin/bash
+# Certbot DNS-01 인증용 hook for ${yourdomain}
+ZONEDIR="${zone_path:-/mnt/remote_name}"
+ZONEFILE="$zone_file"
+TMPFILE="\${ZONEFILE}.tmp"
+TMPFLAG="\$ZONEDIR/reload.flag"
+PROPAGATION_WAIT_TIME=5
+MAX_RETRIES=20
+
+check_mount() {
+  if ! mountpoint -q "\$ZONEDIR"; then
+    echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 마운트 안됨! " >&2
+    exit 1
+  fi
+  # 간단 쓰기 테스트
+  if ! touch "\$ZONEDIR/.tmp_write_test.\$\$" 2>/dev/null; then
+      echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 쓰기 권한 없음! ✋" >&2
+      exit 1
+  else
+      rm -f "\$ZONEDIR/.tmp_write_test.\$\$"
+  fi
+  # echo "[✔] 마운트/쓰기 권한 확인 완료." # 필요하면 주석 해제
+}
+add_record() {
+  check_mount
+  # 미삭제분 삭제
+   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
+   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
+   n=\$((s+1)) &&
+   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.\(\s\+[0-9]\+\)\?\s\+IN\s\+TXT/d" \
+       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
+   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
+   mv "\$TMPFILE" "\$ZONEFILE"
+
+  # 추가 TTL 300 강제조정
+  echo "_acme-challenge.\${CERTBOT_DOMAIN}. 300 IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
+  # SOA serial 자동 갱신 (YYYYMMDDHH)
+  # sed -i '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE"
+  # sed '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE" > "\$TMPFILE" && mv "\$TMPFILE" "\$ZONEFILE"
+  echo "trigger" > "\$TMPFLAG"
+  echo "[✔] TXT 레코드 추가됨: _acme-challenge.\${CERTBOT_DOMAIN}"
+}
+
+remove_record() {
+  check_mount
+   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
+   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
+   n=\$((s+1)) &&
+   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.\(\s\+[0-9]\+\)\?\s\+IN\s\+TXT/d" \
+       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
+   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
+   mv "\$TMPFILE" "\$ZONEFILE"
+  echo "[✔] TXT 레코드 제거됨"
+}
+
+wait_propagation() {
+  for i in \$(seq 1 "\$MAX_RETRIES"); do
+    dig +short TXT _acme-challenge."\$CERTBOT_DOMAIN" @\$sshrhost | grep -q "\$CERTBOT_VALIDATION" && {
+      echo "[✔] DNS 전파 확인됨"; return 0;
+    }
+    echo "[\$i/\$MAX_RETRIES] DNS 전파 대기 중... (\${PROPAGATION_WAIT_TIME}초 후 재시도)"
+    sleep "\$PROPAGATION_WAIT_TIME"
+  done
+  echo "[✖] 전파 실패 – 수동 확인 필요"; return 1
+}
+
+case "\$1" in
+  auth-hook)
+    add_record && wait_propagation ;;
+  cleanup-hook)
+    remove_record ;;
+esac
+EOF
+
+        ;;
+
+    esac
+}
+
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
@@ -11138,191 +11341,9 @@ EOF
 
         ;;
 
-    hook.sh)
-        cat >"$file_path" <<EOF
-#!/bin/bash
-echo "[HOOK] 인증용 TXT 레코드 추가 중"
-export mydomain="\$CERTBOT_DOMAIN"
-export txt_value="\$CERTBOT_VALIDATION"
-export zone_file="$zone_file"
-export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
-
-echo "\$txt_record" >> "\$zone_file"
-rndc reload "$mydomain"
-EOF
-
-        ;;
-
-    hookremote.sh)
-        cat >"$file_path" <<EOF
-# 사용자가 사전에 export 해야 하는 값들:
-#mydomain="example.com"
-#remote_ns_host="byus.net"
-#zone_file="/mnt/byus/var/named/${mydomain}.zone"
-
-#!/bin/bash
-
-# 고정값: Certbot이 채워주는 변수
-DOMAIN="\$CERTBOT_DOMAIN"
-VALUE="\$CERTBOT_VALIDATION"
-FQDN="_acme-challenge.\$DOMAIN."
-RECORD="\$FQDN IN TXT \"\$VALUE\""
-EXPECTED="\"\$VALUE\""
-
-# 하드코딩된 설정
-REMOTE_NS_HOST="${remote_ns_host}"
-ZONE_FILE="${zone_file}"
-
-echo "[HOOK] 인증 도메인: \$DOMAIN"
-echo "[HOOK] 추가할 TXT 레코드: \$RECORD"
-echo "[HOOK] 존 파일: \$ZONE_FILE"
-
-echo "\$RECORD" >> "\$ZONE_FILE" || {
-  echo "[ERROR] ❌ 레코드 추가 실패!"; exit 1;
-}
-echo "[OK] ✅ 존 파일에 레코드 추가됨."
-
-ssh "\$REMOTE_NS_HOST" "rndc reload \$DOMAIN" || {
-  echo "[WARN] ⚠️ 원격 리로드 실패 (진행은 계속)";
-}
-
-echo "[INFO] DNS 전파 확인 중..."
-
-ns=\$(dig NS "\$DOMAIN." +short | head -n1)
-[ -z "\$ns" ] && dig_target="" || dig_target="@\$ns"
-
-for i in \$(seq 1 12); do
-  result=\$(dig \$dig_target TXT "\$FQDN" +short)
-  echo "\$result" | grep -Fxq "\$EXPECTED" && {
-    echo "[OK] ✅ DNS 전파 완료됨"; exit 0;
-  }
-  echo "[WAIT] ⏳ 전파 대기 중 (\$i/12)"
-  sleep 10
-done
-
-echo "[FAIL] ❌ 최대 대기 시간 초과 - Certbot 검증 실패 가능"
-exit 0
-EOF
-
-        ;;
-
-    cleanup.sh)
-        cat >"$file_path" <<EOF
-#!/bin/bash
-
-echo "[CLEANUP] 인증용 TXT 레코드 제거 중..."
-
-export mydomain="\$CERTBOT_DOMAIN"
-export txt_value="\$CERTBOT_VALIDATION"
-export zone_file="$zone_file"
-export txt_record="_acme-challenge.${mydomain}. IN TXT \"\$txt_value\""
-
-# 레코드 제거 (해당 줄 삭제)
-sed -i "/_acme-challenge.*IN TXT.*\$txt_value/d" "\$zone_file"
-
-# BIND 설정 재적용
-rndc reload "$mydomain"
-
-echo "[CLEANUP] 완료: $txt_record 삭제됨"
-EOF
-
-        ;;
-
-    renew.sh)
-        cat >"$file_path" <<EOF
-#!/bin/bash
-
-export CERTBOT_DOMAIN="$mydomain"
-export CERTBOT_EMAIL="$myemail"
-
-certbot renew \
-  --manual-auth-hook "/etc/letsencrypt/scripts/hook-${mydomain}.sh" \
-  --manual-cleanup-hook "/etc/letsencrypt/scripts/cleanup-${mydomain}.sh" \
-  --preferred-challenges dns \
-  --agree-tos \
-  --manual \
-  --deploy-hook "systemctl reload apache2" \
-  --cert-name $certpath
-EOF
-
-        ;;
-
-    hook-sslwr.sh)
-        cat >"$file_path" <<EOF
-#!/bin/bash
-# Certbot DNS-01 인증용 hook for $yourdoamin
-ZONEDIR="${zone_path:-/mnt/remote_name}"
-ZONEFILE="$zone_file"
-TMPFILE="\${ZONEFILE}.tmp"
-TMPFLAG="\$ZONEDIR/reload.flag"
-PROPAGATION_WAIT_TIME=5
-MAX_RETRIES=20
-
-check_mount() {
-  if ! mountpoint -q "\$ZONEDIR"; then
-    echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 마운트 안됨! " >&2
-    exit 1
-  fi
-  # 간단 쓰기 테스트
-  if ! touch "\$ZONEDIR/.tmp_write_test.\$\$" 2>/dev/null; then
-      echo "[✖] 오류: Zone 디렉토리(\$ZONEDIR) 쓰기 권한 없음! ✋" >&2
-      exit 1
-  else
-      rm -f "\$ZONEDIR/.tmp_write_test.\$\$"
-  fi
-  # echo "[✔] 마운트/쓰기 권한 확인 완료." # 필요하면 주석 해제
-}
-add_record() {
-  check_mount
-  # 미삭제분 삭제
-   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
-   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
-   n=\$((s+1)) &&
-   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.(\s+[0-9]+)?\s\+IN\s\+TXT/d" \
-       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
-   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
-   mv "\$TMPFILE" "\$ZONEFILE"
-
-  # 추가 TTL 300 강제조정
-  echo "_acme-challenge.\${CERTBOT_DOMAIN}. 300 IN TXT \"\${CERTBOT_VALIDATION}\"" >> "\$ZONEFILE"
-  # SOA serial 자동 갱신 (YYYYMMDDHH)
-  # sed -i '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE"
-  # sed '/SOA/,/)/ s/[0-9]\{10\}/'"\$(date +%Y%m%d%H)"'/' "\$ZONEFILE" > "\$TMPFILE" && mv "\$TMPFILE" "\$ZONEFILE"
-  echo "trigger" > "\$TMPFLAG"
-  echo "[✔] TXT 레코드 추가됨: _acme-challenge.\${CERTBOT_DOMAIN}"
-}
-
-remove_record() {
-  check_mount
-   s=\$(awk '/SOA/{found=1} found && /[0-9]{10}/ {match(\$0, /[0-9]{10}/, m); print m[0]; exit}' "\$ZONEFILE") &&
-   [ -n "\$s" ] || { echo "❌ 시리얼을 찾지 못했습니다."; false; } &&
-   n=\$((s+1)) &&
-   sed -e "/_acme-challenge\.\${CERTBOT_DOMAIN//./\\.}\.(\s+[0-9]+)?\s\+IN\s\+TXT/d" \
-       -e "s/\b\$s\b/\$n/" "\$ZONEFILE" > "\$TMPFILE" &&
-   mv "\$ZONEFILE" "\$ZONEFILE.org" &&
-   mv "\$TMPFILE" "\$ZONEFILE"
-  echo "[✔] TXT 레코드 제거됨"
-}
-
-wait_propagation() {
-  for i in \$(seq 1 "\$MAX_RETRIES"); do
-    dig +short TXT _acme-challenge."\$CERTBOT_DOMAIN" @\$sshrhost | grep -q "\$CERTBOT_VALIDATION" && {
-      echo "[✔] DNS 전파 확인됨"; return 0;
-    }
-    echo "[\$i/\$MAX_RETRIES] DNS 전파 대기 중... (\${PROPAGATION_WAIT_TIME}초 후 재시도)"
-    sleep "\$PROPAGATION_WAIT_TIME"
-  done
-  echo "[✖] 전파 실패 – 수동 확인 필요"; return 1
-}
-
-case "\$1" in
-  auth-hook)
-    add_record && wait_propagation ;;
-  cleanup-hook)
-    remove_record ;;
-esac
-EOF
-
+    # [정리] SSL 5종은 _ssl_template_copy() 로 분리 (생성 결과 동일)
+    hook.sh|hookremote.sh|cleanup.sh|renew.sh|hook-sslwr.sh)
+        _ssl_template_copy "$template" "$file_path"
         ;;
 
     smtp.relay.cf)
