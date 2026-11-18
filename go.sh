@@ -546,7 +546,7 @@ process_commands() {
                 # Cancel 같은 특수값을 select 에 추가하여 반회피 한다
                 # pipemenu 는 파일 리스트 등에 한정하여 쓴다
                 readxx $LINENO "> command: $command"
-                safe_eval "$command"
+                [ "$command" = "Cancel" ] || safe_eval "$command"
                 #eval "$command"
             )
             trap - SIGINT
@@ -556,7 +556,7 @@ process_commands() {
             readxx $LINENO ">> command: $command"
             #readxy $LINENO ">> command: $command"
             #command=$(command)
-            echo "$command" | grep -Eq 'Cancel' || safe_eval "$command"
+            [ "$command" = "Cancel" ] || safe_eval "$command"
             #echo "$command" | grep -Eq 'Cancel' || eval "$command"
         fi
         # log
@@ -4121,6 +4121,8 @@ pipemenu() {
     #[ $pipeitem == "Cancel" ] && echo && echo "Pressing 0 is treated as Cancel." > /dev/tty
     unset IFS
     unset PS3
+    [ "$pipeitem" = "Cancel" ] && return 1
+    return 0
 }
 # pipemenu alias
 pm() { pipemenu "$@"; }
@@ -4139,6 +4141,8 @@ pipemenu1() {
     #{ [ "$items" ] && select item in $items; do [[ "$REPLY" == 0 ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     { [ "$items" ] && select item in $items; do [[ $REPLY == 0 || $REPLY == [Qq] || -z $item ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset PS3
+    [ "$pipeitem" = "Cancel" ] && return 1
+    return 0
 }
 _pipemenu1() {
     local prompt_message="$@"
@@ -4168,6 +4172,8 @@ pipemenulist() {
     { [ "$items" ] && select item in $items; do [[ $REPLY == 0 || $REPLY == [Qq] || -z $item ]] && export pipeitem="Cancel" && echo "Cancel" && break || { [ -n "$item" ] && export pipeitem="$item" && echo "$item" && break; }; done </dev/tty; }
     unset IFS
     unset PS3
+    [ "$pipeitem" = "Cancel" ] && return 1
+    return 0
 }
 _pipemenulist() {
     local prompt_message="$@"
