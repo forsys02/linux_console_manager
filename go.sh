@@ -3592,6 +3592,18 @@ cgrepf5() { cgrepfN 5 "$@"; }
 
 safe_eval() {
     local cmd="$1" re='(^|[[:space:]])(rm[[:space:]]+-rf[[:space:]]+/[[:space:]]*($|[[:space:]]+|#)|reboot|shutdown|mkfs)([[:space:]]|$)|\>\s*/etc/(passwd|shadow|group)\b|\>\s*/dev/sd[a-z]+\b'
+    # ': 라벨 ; 실제명령' 에서 라벨 안의 ( ) < > | & 등으로 eval 문법 오류가 나지 않게 라벨을 제거 (bash2 호환)
+    case "$cmd" in
+        :[[:space:]]*|' ':[[:space:]]*)
+            case "$cmd" in
+                *\;*)
+                    cmd="${cmd#*;}"
+                    case "$cmd" in \;*) cmd="${cmd#;}" ;; esac
+                    ;;
+                *) return 0 ;;
+            esac
+            ;;
+    esac
     echo "$cmd" | grep -qE "$re" && {
         echo
         RED1
