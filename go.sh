@@ -8352,6 +8352,24 @@ dockersvc() {
     echo -e "$result" | cip | chost | column -t
 }
 
+# podman 은 daemon 이 없어 docker 와 조회 명령이 다르다 (컨테이너 포트 -> 공인IP:포트 목록)
+podmansvcorg() { able podman && podmanps=$(podman ps | awknr2 2>/dev/null) && [ "${podmanps}" ] && echo "$podmanps" | grep "0.0.0.0" | awk '{split($2, arr, "/"); printf arr[1] " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; {print ""} ;  }'; }
+
+podmansvc() {
+    local output result
+    result=""
+    output="$(podmansvcorg)"
+    [ "$output" ] && while read -r line; do
+        name=$(echo $line | awk '{print $1}')
+        ip_port=$(echo $line | awk '{print $2}')
+        ip_port2=$(echo $line | awk '{print $3}')
+        updated_line="$name -> ${localip1}:${ip_port##*:} ${publicip}:${ip_port##*:} $([ "$publicip" == "$(hostname -i)" ] && echo "$(hostname):${ip_port##*:}")"
+        [ -n "$ip_port2" ] && updated_line="$updated_line\n$name -> ${localip1}:${ip_port2##*:} ${publicip}:${ip_port2##*:} $([ "$publicip" == "$(hostname -i)" ] && echo "$(hostname):${ip_port2##*:}")"
+        result="${result}${updated_line}\n"
+    done < <(echo "$output")
+    echo -e "$result" | cip | chost | column -t
+}
+
 # 각열의 필드길이를 제한 w|maxl 5 5 5 5 // 한줄폭을 넘어가는 데이터가 많을경우, 적당히 컷 필요없는 필드는 0으로 설정
 maxl() {
     # Bash 2 호환: local arr=(...) 금지 -> 선언/대입 분리
