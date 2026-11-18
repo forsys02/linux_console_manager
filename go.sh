@@ -8352,8 +8352,8 @@ dockersvc() {
     echo -e "$result" | cip | chost | column -t
 }
 
-# podman 은 daemon 이 없어 docker 와 조회 명령이 다르다 (컨테이너 포트 -> 공인IP:포트 목록)
-podmansvcorg() { able podman && podmanps=$(podman ps | awknr2 2>/dev/null) && [ "${podmanps}" ] && echo "$podmanps" | grep "0.0.0.0" | awk '{split($2, arr, "/"); printf arr[1] " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {ip_port = substr($0, RSTART, RLENGTH); printf ip_port " "; $0 = substr($0, RSTART+RLENGTH)}; {print ""} ;  }'; }
+# podman 은 daemon 이 없어 docker 와 조회 명령이 다르다 (컨테이너 이름 + 공개 포트 -> 공인IP:포트 목록)
+podmansvcorg() { able podman && podman ps --format "{{.Names}} {{.Ports}}" 2>/dev/null | awk '{ n=$1 ; $1="" ; if ($0 ~ /0\.0\.0\.0/) { printf "%s ", n ; while (match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) { printf "%s ", substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH) } ; print "" } }'; }
 
 podmansvc() {
     local output result
