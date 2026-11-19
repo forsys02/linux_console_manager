@@ -2724,8 +2724,11 @@ menufunc() {
                             "$cmd_choice" $cmd_choice1
                             continue
                             ;;
-                        ff | ffc | fffc)
+                        ff | fff | ffc | fffc)
                             "$cmd_choice" $cmd_choice1
+                            case "$cmd_choice1" in
+                                [0-9]*) printf ">>> [Enter] " ; read -r _ ;;
+                            esac
                             continue
                             ;;
                         format)
@@ -3222,8 +3225,48 @@ menufunc() {
 ##############################################################################################################
 ##############################################################################################################
 
-# 함수의 내용을 출력하는 함수 ex) ff atqq
-fff() { declare -f "$@"; }
+# 메뉴 번호(예: 1)를 현재 메뉴의 첫 실행 토큰(함수명/서브메뉴/명령)으로 해석
+_resolve_menu_tok() {
+    local _n="$1" _ridx _raw _body
+    [ "${#_n}" -gt 0 ] || return 1
+    case "$_n" in *[!0-9]*) return 1 ;; esac
+    [ "$_n" -ge 1 ] 2>/dev/null || return 1
+    _ridx="${original_indices[$((_n - 1))]-}"
+    [ -n "$_ridx" ] || return 1
+    _raw="${chosen_commands[$((_ridx - 1))]-}"
+    _body="${_raw#!!!}"
+    _body="${_body#"${_body%%[![:space:]]*}"}"
+    case "$_body" in
+        :[[:space:]]*\;*)
+            _body="${_body#*;}"
+            _body="${_body#;}"
+            _body="${_body#"${_body%%[![:space:]]*}"}"
+            ;;
+    esac
+    _body="${_body%"${_body##*[![:space:]]}"}"
+    printf '%s\n' "$_body"
+}
+
+# 함수의 내용을 출력하는 함수 ex) fff atqq / fff 1 (메뉴 번호 지원)
+fff() {
+    local _arg="${1-}" _body _tok
+    case "$_arg" in
+        ''|*[!0-9]*) declare -f "$@" ;;
+        *)
+            _body="$(_resolve_menu_tok "$_arg")" || { echo "해당 번호($_arg)를 찾을 수 없습니다."; return 1; }
+            _tok="${_body%%[[:space:]]*}"
+            if declare -F "$_tok" >/dev/null 2>&1; then
+                declare -f "$_tok" | { batcat -l bash 2>/dev/null || cat; }
+            elif [ "$_tok" = "$_body" ] && st "$_tok" >/dev/null 2>&1; then
+                echo "=== [서브메뉴: $_tok] ==="
+                awk -v k="$_tok" '$0 ~ "\\[" k "\\]$"{p=1} p && /^$/{exit} p' "$env"
+            else
+                echo "=== [명령어 원문 (#$_arg)] ==="
+                printf '%s\n' "$_body" | sed -e 's/ *;; */\n;;\n/g' -e 's/ *&& */ \&\&\n    /g' -e 's/ *|| */ ||\n    /g' -e 's/; */;\n/g' | { batcat -l bash 2>/dev/null || cat; }
+            fi
+            ;;
+    esac
+}
 ffe() { conff "^$1()"; }
 
 ff() {
@@ -3232,7 +3275,17 @@ ff() {
         return
     fi
 
-    local target="$1"
+    local target="$1" _body
+    case "$target" in
+        *[!0-9]*) ;;
+        *)
+            _body="$(_resolve_menu_tok "$target")" && target="${_body%%[[:space:]]*}"
+            if ! declare -F "$target" >/dev/null 2>&1; then
+                fff "$1"
+                return
+            fi
+            ;;
+    esac
     _ff_seen_funcs=" $target "
 
     _ff_inner() {
