@@ -205,6 +205,11 @@ fi
 # 어떤 이유로든 $env 가 비면 메뉴가 통째로 사라진다. 마지막 안전망.
 [ -s "$env" ] || cp -a "$envorg" "$env" 2>/dev/null
 export GOTERM_ENC
+# go.env / go.my.env 내 전용 함수 블록(#---[go.env:func]--- ~ #---[/go.env:func]---) 로드 (메뉴 비노출)
+if grep -q '^#---\[go\.env:func\]---' "$env" 2>/dev/null; then
+    awk '/^#---\[go\.env:func\]---/{f=1;next} /^#---\[\/go\.env:func\]---/{f=0;next} f' "$env" > "$env.func.sh"
+    [ -s "$env.func.sh" ] && source "$env.func.sh"
+fi
 
 # console error level print
 [[ $(tty) == /dev/tty* ]] && echo 3 4 1 7 >/proc/sys/kernel/printk 2>/dev/null
