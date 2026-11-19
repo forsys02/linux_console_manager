@@ -1101,6 +1101,28 @@ _easy_sync_badges() {
     fi
 }
 
+_cmd_kind_badge() {
+    local _raw="$1" _body _tok _lbl
+    _body="${_raw#!!!}"
+    _body="${_body#"${_body%%[![:space:]]*}"}"
+    case "$_body" in
+        :[[:space:]]*\;*)
+            _body="${_body#*;}"
+            _body="${_body#;}"
+            _body="${_body#"${_body%%[![:space:]]*}"}"
+            ;;
+    esac
+    _body="${_body%"${_body##*[![:space:]]}"}"
+    _tok="${_body%%[[:space:]]*}"
+    [ -z "$_tok" ] && return 0
+    if [ "$_tok" = "$_body" ] && st "$_tok" >/dev/null 2>&1; then
+        [ "$GOLANG" = "kr" ] && _lbl="$(ko '[→메뉴]')" || _lbl='[→menu]'
+        printf '\x1b[1;35m%s\x1b[0m' "$_lbl"
+    elif declare -F "$_tok" >/dev/null 2>&1; then
+        printf '\x1b[1;33m[fn]\x1b[0m'
+    fi
+}
+
 render_item_easy() {
     local pi="$1"
     local c_cmd="$2"
@@ -1164,10 +1186,12 @@ render_item_easy() {
         raw_hint="${raw_hint:0:52}..."
     fi
 
+    local _kbadge
+    _kbadge="$(_cmd_kind_badge "$c_cmd")"
     if [ -n "$raw_hint" ] && [ "$raw_hint" != "$title" ]; then
-        printf "\e[1m%-4s\e[0m %b %s \x1b[1;30m(%s)\x1b[0m\n" "${pi}" "$badge" "$title" "$raw_hint"
+        printf "\e[1m%-4s\e[0m %b %s \x1b[1;30m(%s)\x1b[0m%b\n" "${pi}" "$badge" "$title" "$raw_hint" "${_kbadge:+ $_kbadge}"
     else
-        printf "\e[1m%-4s\e[0m %b %s\n" "${pi}" "$badge" "$title"
+        printf "\e[1m%-4s\e[0m %b %s%b\n" "${pi}" "$badge" "$title" "${_kbadge:+ $_kbadge}"
     fi
 }
 
@@ -2037,7 +2061,9 @@ menufunc() {
                                     #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
                                     #  (예전엔 라벨 안 var/키워드가 ANSI(\x1b[1;35m 등)를 넣고 그 ';' 가
                                     #   '^: [^;]*' 매칭을 중단시켜 ';35m' 같은 잔여물이 새었다.)
-                                    echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
+                                    local _kbadge _rendered
+                                    _kbadge="$(_cmd_kind_badge "$c_cmd")"
+                                    _rendered="$(echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
                                         -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' \
                                         -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' \
@@ -2056,7 +2082,12 @@ menufunc() {
                                         -e '/^__NULLABEL__/ { x; s/;.*$//; G; s/__NULLABEL__;//; s/\n/;/; s/^\([^;]*\);/\x1b[1;34m\1\x1b[0m;/; }' \
                                         -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' \
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
-                                        -e 's/#$/\x1b[1;36m#\x1b[0m/'
+                                        -e 's/#$/\x1b[1;36m#\x1b[0m/')"
+                                    if [ -n "$_kbadge" ]; then
+                                        printf "%s %b\n" "$_rendered" "$_kbadge"
+                                    else
+                                        printf "%s\n" "$_rendered"
+                                    fi
                                 fi
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
