@@ -902,7 +902,7 @@ cmd_desc_peek() {
         if [ -n "$_qc" ]; then
             _uq="$(cmd_unfold "$_qc")"
             # 문장 첫줄만 "  N) " 패턴이므로 grep -c 로 문장수를 센다 (fold 연속줄 제외)
-            _un=$(printf '%s\n' "$_uq" | grep -c '^  [0-9][0-9]*) ')
+            _un=$(printf '%s\n' "$_uq" | grep -cE '^  [0-9]+[)] ')
             if [ "${_un:-0}" -gt 1 ]; then
                 printf '\x1b[1;36m  -- command unfolded, %s steps --\x1b[0m\n' "$_un"
                 printf '%s\n' "$_uq"
@@ -1326,7 +1326,7 @@ show_cmd_card() {
 
     # 실제로 실행되는 명령 (cmd_unfold)
     local uq="$(cmd_unfold "$cmd")"
-    local un=$(printf '%s\n' "$uq" | grep -c '^  [0-9][0-9]*) ')
+    local un=$(printf '%s\n' "$uq" | grep -cE '^  [0-9]+[)] ')
     if [ "${un:-0}" -gt 1 ]; then
         if [ "$GOLANG" = "kr" ]; then
             printf "\x1b[1;33m 실제로 실행되는 명령 (%s단계)\x1b[0m\n" "$un"
@@ -3280,8 +3280,6 @@ fff() {
             ;;
     esac
 }
-ffe() { conff "^$1()"; }
-
 ff() {
     if [ -z "$1" ]; then
         declare -f
@@ -3398,21 +3396,10 @@ sortip() {
     sort -k1,1 -t. -k1,1n -k2,2n -k3,3n -k4,4n
 }
 
-sortip2() {
-    sort -k2,2 -t. -k2,2n -k3,3n -k4,4n -k5,5n
-}
-
-sortip3() {
-    sort -k3,3 -t. -k3,3n -k4,4n -k5,5n -k6,6n
-}
-
 # colored ip (1 line multi ip apply)
 cip() { awkf '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null; }
 
 # 실시간 출력 tail -f 등에 즉각 반응
-#cipf() { sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/\x1B[1;31m&\x1B[0m/g'; }
-cipf() { sed -e 's/\([0-9]\{1,3\}\.\)\{3\}[0-9]\{1,3\}/\o033[1;31m&\o033[0m/g'; }
-
 ipc() { ip a | cgrep DOWN | cgrep1 UP | cip; }
 ipa() { ip a | cgrep DOWN | cgrep1 UP | cip; }
 ipl() { ip l | cgrep DOWN | cgrep1 UP | cip; }
@@ -3425,6 +3412,7 @@ cip16() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
 
 # 검색문자열들 색칠(red)
 cgrep() {
+    awk_cmd=""
     for word in "$@"; do
         escaped_word=${word//\//\\/}
         awk_cmd="${awk_cmd}{gsub(/$escaped_word/, \"\033[1;31m&\033[0m\")}"
@@ -3441,6 +3429,7 @@ cgrepi() {
 }
 # 검색문자열들 색칠(yellow)
 cgrep1() {
+    awk_cmd=""
     for word in "$@"; do
         escaped_word=${word//\//\\/}
         awk_cmd="${awk_cmd}{gsub(/$escaped_word/, \"\033[1;33m&\033[0m\")}"
@@ -3449,6 +3438,7 @@ cgrep1() {
 }
 # 검색문자열줄을 색칠 (red)
 cgrepl() {
+    awk_cmd=""
     for word in "$@"; do
         escaped_word=${word//\//\\/}
         awk_cmd="${awk_cmd}\$0 ~ /$escaped_word/ {print \"\\033[1;31m\" \$0 \"\\033[0m\"; next} "
@@ -4163,7 +4153,6 @@ cpipe() {
 		gsub(/([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]/, clr_yel "&" clr_rst, $0)
 
 
-
         # 최종 결과 출력 (개행 보장)
         printf "%s\n", $0
     }'
@@ -4199,9 +4188,6 @@ YRE() { echo -en "\033[1;33;41m"; }
 # noansi
 noansised() { sed 's/\\033\[[0-9;]*[MKHJm]//g'; }
 noansi() { perl -p -e 's/\e\[[0-9;]*[MKHJm]//g' 2>/dev/null; } # Escape 문자(ASCII 27) 를 모두 동일하게 인식 \033, \x1b, 및 \e 모두 처리가능
-
-# selectmenu
-selectmenu() { select item in $@; do echo $item; done; }
 
 # pipe 로 넘어온 줄의 모든 필드를 select 구분자-> 빈칸 빈줄 파이프(|}
 pipemenu() {
@@ -4294,7 +4280,11 @@ _pipemenulist() {
 
 # clear
 fclear() {
-    printf '\n%.0s' {1..100}
+    local _i=0
+    while [ "$_i" -lt 100 ]; do
+        printf '\n'
+        _i=$((_i + 1))
+    done
     clear
 }
 
@@ -4371,13 +4361,6 @@ oneline() {
 # dd@@@%%% {submenu_hidden}DDoS 공격 관리 [dd] - cmd-choice
 # lamp@@@%%% {submenu_sys}>Lamp (apache,php,mysql) [lamp]@@@{submenu_lamp} - relay - choice
 # scut2
-old_scutall() {
-    # 밑줄 abc_bcd 같은 단축키 못찾음
-    scut=$1
-    scut_item_idx=$(echo "$shortcutstr" | sed -n "s/.*@@@$scut|\([0-9]*\)@@@.*/\1/p") # 배열번호 0~99 찾기
-    scut_item="$([ -n "$scut_item_idx" ] && echo "${shortcutarr[$scut_item_idx]}")"   # 배열번호에 있는 값 추출
-    echo "$scut_item"
-}
 scutall() {
     scut=$1
     for i in "${!shortcutarr[@]}"; do
@@ -4634,8 +4617,6 @@ eval0() {
 gip() { grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}'; }
 # ip only filter - 1 line multi ip
 gipa() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}'; }
-# gipa0 아이피 끝자리 .0 대체 /24
-gipa0() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+/)) {print substr($0, RSTART, RLENGTH) ".0"; $0 = substr($0, RSTART+RLENGTH)}}'; }
 # ip && port
 gipp() { awk '{while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/)) {print substr($0, RSTART, RLENGTH) ; $0 = substr($0, RSTART+RLENGTH)}}'; }
 # 첫번째 필드와 아이피와 포트 출력  $1 && ip && port
@@ -4647,8 +4628,6 @@ gipp2() { awk '{printf $2 " "}; {while(match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+
 gip0() { awk 'match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($0, RSTART, RLENGTH)}'; }
 gip1() { awk 'match($1, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($1, RSTART, RLENGTH)}'; }
 gip2() { awk 'match($2, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($2, RSTART, RLENGTH)}'; }
-gip3() { awk 'match($3, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($3, RSTART, RLENGTH)}'; }
-gip4() { awk 'match($4, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($4, RSTART, RLENGTH)}'; }
 gip5() { awk 'match($5, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) {print substr($5, RSTART, RLENGTH)}'; }
 
 # 특정필드에 검색어가 있는 줄추출 gfind 1 search
@@ -4665,8 +4644,6 @@ eipf() {
         awk -v field="$field" -v gotmp="$gotmp" 'BEGIN { while (getline < (gotmp "/go_exceptips_grep.txt")) exceptips[$0] = 1 } { ma = 0; for (except in exceptips) { if (index($field, except) == 1) { ma = 1; break } } if (ma == 0) print }' -
     else cat; fi
 }
-eip1() { eipf 1; }
-eip2() { eipf 2; }
 eip3() { eipf 3; }
 eip4() { eipf 4; }
 eip5() { eipf 5; }
@@ -4678,41 +4655,6 @@ nodeip() {
 
 # proxmox vmslist
 
-vmslistold() { pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null | awk '{print $1,$17,$23}' | awk '{if($2=="") print $1,"cluster down"; else print $0}'; }
-vmslistold_() {
-    pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
-        awk '{print $1,$17,$23}' |
-        awk '{if($2=="") print $1,"unknown","cluster down"; else print $0}' |
-        awk -F'[ /]' '{print $2, $1, $3, $4}' |
-        column -t
-}
-vmslistold__() {
-    # Proxmox major version 추출 (빠른 방식)
-    local pve_major
-    pve_major=$(dpkg-query -W -f='${Version}\n' pve-manager | cut -d'.' -f1)
-
-    case "$pve_major" in
-    8)
-        # Proxmox 8.x : name=$17 , status=$23
-        pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
-            awk '{id=$1; name=$17; status=$23;
-                      if (name=="") { name="unknown"; status="cluster_down"; }
-                      print id, name, status}' |
-            column -t
-        ;;
-    9)
-        # Proxmox 9.x : name=$19 , status=$25
-        pvesh get /cluster/resources -type vm --noborder --noheader 2>/dev/null |
-            awk '{id=$1; name=$19; status=$25;
-                      if (name=="") { name="unknown"; status="cluster_down"; }
-                      print id, name, status}' |
-            column -t
-        ;;
-    *)
-        echo "Unsupported Proxmox version: $pve_major"
-        ;;
-    esac
-}
 vmslist() {
     pvesh get /cluster/resources -type vm --output-format json 2>/dev/null |
         jq -r '
@@ -4972,61 +4914,6 @@ st() {
 }
 
 # shortcut view n> b<
-oldst() {
-    # 인수가 없으면 전체 문자열 출력 (Bash 2 호환)
-    if [ $# -eq 0 ]; then
-        echo "$shortcutstr"
-        return 0
-    fi
-
-    # local 변수는 Bash 2에서 사용 가능
-    local shortcut="$1"
-    local mode="$2"
-
-    # 필수 인수가 없거나 모드가 잘못된 경우 간단한 도움말 표시 (Bash 2 호환)
-    # [ ] 구문과 -o (OR), -a (AND) 또는 개별 조건문 사용
-    if [ -z "$shortcut" ] || [ -z "$mode" ]; then
-        echo "사용법: st <shortcut> <n|b>  또는 st" >&2
-        return 1
-    fi
-    # 모드 검사를 별도로 수행 (AND/OR 연산자 복잡성 회피)
-    if [ "$mode" != "n" ] && [ "$mode" != "b" ]; then
-        echo "사용법: st <shortcut> <n|b>  또는 st" >&2
-        return 1
-    fi
-
-    # awk 사용: <<< 대신 echo ... | 사용 (Bash 2 호환)
-    # awk 스크립트 내용은 동일하게 유지
-    echo "$shortcutstr" | awk -v shortcut="$shortcut" -v mode="$mode" -v RS='@@@' -F'|' '
-        # 첫 번째 빈 레코드 건너뛰기 (문자열이 @@@로 시작하므로)
-        NR <= 1 { next }
-
-        # "n" (next) 모드 처리
-        mode == "n" {
-            if (print_next) {
-                print $1
-                exit # awk 종료
-            }
-            if ($1 == shortcut) {
-                print_next = 1
-            }
-        }
-
-        # "b" (before) 모드 처리
-        mode == "b" {
-            if ($1 == shortcut) {
-                # prev_key가 비어있으면(첫 항목) 아무것도 출력되지 않음
-                print prev_key
-                exit # awk 종료
-            }
-            prev_key = $1
-        }
-    '
-    # awk가 결과를 표준 출력으로 직접 보냄
-
-    # 요구사항에 따라 사용법 오류 외에는 항상 성공(0) 반환
-    return 0
-}
 # shortcut array view
 str() {
     if [ "$1" ]; then
@@ -5170,11 +5057,6 @@ scrm() {
 goo() {
     echo "
 디시 인사이드 말투. 나 형인거 알지?  한글로. 쉽게 이해할 수 있는 예를 들면서 설명. 내가 한 질문을 기존 대화와 융합하여 왜 이런 질문을 했는지 심층 분석후 답변. 문제 원인과 해결방법, 해결방법의 키포인트 설명. 참고할 팁이나 주의사항이 있으면함께 안내. 통찰력 있는 해설과 유사한 다른 분야도 소개. 새로운아이디어 제안.마무리에 결론만 내리지 말고, 꼬리를 무는 질문을 던져줘. 질문은 지능의 척도야. 너의 수준높은 질문을 부탁해. 각 섹션에 이모티콘을 충분히 활용하되, 소스는 장황하지 않고 최대한 간결하게 깔끔하게,중요사항!! 소스코드 부분은 내가 복사를 할수 있기 때문에 절대 이모티콘 넣으면 안되. bash script 질문은 bash2 호환 되게. 한줄명령은 한줄명령으로 대응. 소스 변수는 되도록 최소화하여 직관적이게 표현
-
-
-
-
-
 
 
 "
@@ -5720,140 +5602,6 @@ userinfo() {
     )
 }
 
-old_userinfo() {
-    if [ -z "$1" ] || [ "$1" = "--help" ]; then
-        printf "\033[1mUsage:\033[0m userinfo <username> [section]\n"
-        echo "Sections: all (default), basic, activity, resources"
-        return 1
-    fi
-    USERNAME="$1"
-    SECTION="${2:-all}"
-    USERINFO=$(getent passwd "$USERNAME")
-    if [ -z "$USERINFO" ]; then
-        printf "\033[1;31m[!] 사용자 '%s' 정보를 찾을 수 없습니다.\033[0m\n" "$USERNAME"
-        return 1
-    fi
-
-    # <<< 제거 → echo + read 로 대체
-    IFS=':'
-    echo "$USERINFO" | while read NAME PASS USER_UID GID INFO HOME SHELL; do
-        OUTPUT=""
-
-        print_section() {
-            title="$1"
-            content="$2"
-            OUTPUT="${OUTPUT}\033[1;34m\n╔══════════════════════════════════════╗\n║  $title\n╚══════════════════════════════════════╝\033[0m\n"
-            if [ -z "$content" ]; then
-                formatted_content="  (정보 없음)\n"
-            else
-                formatted_content=$(echo "$content" | awk -F':' '
-                    NF == 0 { next }
-                    NF == 1 { printf "  %s\n", $0; next }
-                    NF > 1 {
-                        key = $1
-                        sub(/^[^:]+:[ \t]*/, "")
-                        value = $0
-                        gsub(/^[ \t]+|[ \t]+$/, "", key)
-                        gsub(/^[ \t]+|[ \t]+$/, "", value)
-                        if (value == "") value = "(없음)"
-                        printf "  \033[1;37m%-30s\033[0m: \033[1;36m%s\033[0m\n", key, value
-                    }
-                ')
-                [ -z "$formatted_content" ] && formatted_content="  (정보 없음)\n"
-            fi
-            OUTPUT="${OUTPUT}${formatted_content}\n"
-        }
-
-        if [ "$SECTION" = "all" ] || [ "$SECTION" = "basic" ]; then
-            ACCOUNT_STATUS=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $2}')
-            case "$ACCOUNT_STATUS" in
-            P) ACCOUNT_STATUS_DESC="Password set" ;;
-            L) ACCOUNT_STATUS_DESC="Locked" ;;
-            NP) ACCOUNT_STATUS_DESC="No password" ;;
-            *) ACCOUNT_STATUS_DESC="Unknown" ;;
-            esac
-            LAST_CHANGED_DATE=$(passwd -S "$USERNAME" 2>/dev/null | awk '{print $3}')
-            CHAGE_INFO=$(chage -l "$USERNAME" 2>/dev/null | sed 's/ : /:/g')
-            BASIC_CONTENT="사용자명: $NAME
-UID: $USER_UID
-GID: $GID
-전체 이름: $INFO
-홈 디렉토리: $HOME
-기본 쉘: $SHELL
-
---- 계정 상태 ---
-계정 상태: $ACCOUNT_STATUS_DESC
-최근 변경일: $LAST_CHANGED_DATE
-
---- 비밀번호 정책 ---
-$CHAGE_INFO"
-            print_section "➤ 기본 정보 (Basic)" "$BASIC_CONTENT"
-        fi
-
-        if [ "$SECTION" = "all" ] || [ "$SECTION" = "activity" ]; then
-            WHO_INFO=$(who | grep "$USERNAME" || echo "현재 로그인 정보 없음")
-            LAST_LOG=$(last "$USERNAME" | head -n 5 || echo "로그인 이력 없음")
-            PROCESS_INFO=$(ps -u "$USERNAME" --forest -o pid,tty,stat,time,cmd 2>/dev/null || echo "실행 중인 프로세스 없음")
-            if [ -r /var/log/maillog ]; then
-                MAIL_LOG=$(grep "$USERNAME" /var/log/maillog 2>/dev/null | tail -n 5)
-            elif [ -r /var/log/mail.log ]; then
-                MAIL_LOG=$(grep "$USERNAME" /var/log/mail.log 2>/dev/null | tail -n 5)
-            else
-                MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음 (/var/log/maillog, /var/log/mail.log)"
-            fi
-            [ -z "$MAIL_LOG" ] && MAIL_LOG="메일 관련 로그 기록 없음"
-            ACTIVITY_CONTENT="--- 현재 로그인 세션 ---
-$WHO_INFO
-
---- 최근 로그인 로그 (최대 5회) ---
-$LAST_LOG
-
---- 사용자 프로세스 ---
-$PROCESS_INFO
-
---- 메일 관련 로그 (최대 5줄, sudo 필요) ---
-$MAIL_LOG"
-            print_section "➤ 활동 정보 (Activity)" "$ACTIVITY_CONTENT"
-        fi
-
-        if [ "$SECTION" = "all" ] || [ "$SECTION" = "resources" ]; then
-            ID_INFO=$(id "$USERNAME")
-            GROUPS_INFO=$(groups "$USERNAME")
-            HOME_INFO=$(ls -ld "$HOME")
-            HOME_USAGE=$(du -sh "$HOME" 2>/dev/null || echo "홈 디렉토리 사용량 확인 불가 (권한 또는 존재 여부)")
-            SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
-            RESOURCES_CONTENT="--- ID 및 그룹 정보 ---
-$ID_INFO
-소속 그룹: $GROUPS_INFO
-
---- 홈 디렉토리 상태 ---
-$HOME_INFO
-
---- 홈 디렉토리 사용량 ---
-$HOME_USAGE
-
---- 비밀번호 정보 (/etc/shadow, sudo 필요) ---
-$SHADOW_INFO
-(형식: username:password_hash:last_change:min_days:max_days:warn_days:inactive_days:expire_date)"
-            print_section "➤ 권한 및 리소스 (Resources)" "$RESOURCES_CONTENT"
-        fi
-
-        if [ "$SECTION" != "all" ] && ! echo " basic activity resources " | grep -q " $SECTION "; then
-            printf "\033[1;31m[!] 잘못된 섹션: '%s'\033[0m\n" "$SECTION"
-            echo "사용 가능한 섹션: all, basic, activity, resources"
-            return 1
-        fi
-
-        if [ -n "$OUTPUT" ]; then
-            echo -e "$OUTPUT" # | less -RX
-        else
-            if echo " basic activity resources all " | grep -q " $SECTION "; then
-                printf "\033[1;33m[!] 출력할 내용이 없습니다. 섹션 '%s'을 확인하세요.\033[0m\n" "$SECTION"
-            fi
-        fi
-    done
-    unset IFS
-}
 idinfo() { userinfo $@; }
 qssh() {
     local default_user="root"
@@ -5931,130 +5679,6 @@ qssh() {
     echo "--- SSH session ended with code $code. ---"
     echo "=============================================="
     return $code
-}
-
-old_qssh() {
-    # --- 설정 ---
-    local default_user="root" # 사용자 미지정 시 기본값
-    local arp_scan_timeout=3  # arp-scan 대기 시간 (초)
-    # --- 설정 끝 ---
-
-    # 인수 개수 확인 (최소 1개, 최대 2개)
-    if [[ $# -eq 0 || $# -gt 2 ]]; then
-        echo "Usage: qssh <vmid> [ssh_user]"
-        echo "  Example 1 (default user '$default_user'): qssh 101"
-        echo "  Example 2 (specify user):        qssh 101 myuser"
-        return 1
-    fi
-
-    local vmid="$1" # 첫 번째 인수는 항상 VM ID
-    # 두 번째 인수가 있으면 사용하고, 없으면 기본값 사용
-    local user="${2:-$default_user}"
-
-    # VM ID가 숫자인지 간단히 확인
-    if ! echo "$vmid" | grep -qE '^[0-9]+$'; then
-
-        echo "Error: Invalid VMID format '$vmid'. It should be a number."
-        return 1
-    fi
-
-    # 사용자 이름이 비어있는지 확인 (거의 발생 안 함)
-    if [[ -z $user ]]; then
-        # 이 경우는 "$2"가 비어있는 문자열("")로 들어왔을 때 발생 가능
-        echo "Error: SSH username cannot be empty if provided."
-        return 1
-    fi
-
-    echo "--- Processing qssh for VM $vmid (User: $user) ---"
-
-    # --- 이하 로직은 이전 버전과 동일 ---
-
-    # 1. VM 설정 가져오기 및 MAC/브리지 추출
-    echo "[1] Getting VM configuration..."
-    local config_line
-    config_line=$(qm config "$vmid" 2>/dev/null | grep -E '^net[0-9]+:' | grep 'bridge=' | head -n 1)
-
-    if [[ -z $config_line ]]; then
-        if ! qm status "$vmid" >/dev/null 2>&1; then
-            echo "Error: VM $vmid does not seem to exist."
-        else
-            echo "Error: Could not find a bridged network interface for VM $vmid."
-        fi
-        return 1
-    fi
-
-    local mac bridge
-    mac=$(echo "$config_line" | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}')
-    bridge=$(echo "$config_line" | sed -n 's/.*bridge=\([^,]\+\).*/\1/p')
-
-    if [[ -z $mac || -z $bridge ]]; then
-        echo "Error: Failed to extract MAC or Bridge from: '$config_line'"
-        return 1
-    fi
-
-    local lower_mac
-    lower_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
-    echo "  > Found MAC: $mac (checking as $lower_mac) on Bridge: $bridge"
-
-    # 2a. 로컬 ARP 캐시에서 IP 주소 먼저 확인
-    echo "[2a] Checking local ARP cache for $lower_mac..."
-    local ip=""
-    ip=$(arp -n | grep -i "$lower_mac" | awk '{print $1}' | head -n 1)
-
-    # 2b. ARP 캐시에 없으면 arp-scan 사용 (Fallback)
-    if [[ -z $ip ]]; then
-        echo "  > MAC not found in ARP cache. Proceeding with arp-scan..."
-
-        if ! command -v arp-scan &>/dev/null; then
-            echo "Error: 'arp-scan' command not found. Please install it (e.g., apt install arp-scan)."
-            return 1
-        fi
-
-        echo "[2b] Finding IP address via arp-scan..."
-        echo "  > Scanning on $bridge for MAC: $lower_mac..."
-        local arp_scan_output
-        arp_scan_output=$(arp-scan --interface="$bridge" --localnet --numeric --quiet --timeout=$((arp_scan_timeout * 1000)) 2>/dev/null | grep -i "$lower_mac")
-
-        if [[ -z $arp_scan_output ]]; then
-            echo "Error: arp-scan could not find MAC $lower_mac on interface $bridge."
-            echo "  > Check if VM $vmid is running and has obtained an IP address."
-            echo "  > Double check network/firewall settings."
-            return 1
-        fi
-
-        ip=$(echo "$arp_scan_output" | head -n 1 | awk '{print $1}')
-
-        if [[ -z $ip ]]; then
-            echo "Error: Found MAC via arp-scan, but could not extract IP address from output line:"
-            echo "  '$arp_scan_output'"
-            return 1
-        fi
-        echo "  > Found IP via arp-scan: $ip"
-
-    else
-        echo "  > Found IP in ARP cache: $ip"
-    fi
-
-    if [[ -z $ip ]]; then
-        echo "Error: Failed to determine IP address for MAC $lower_mac."
-        return 1
-    fi
-
-    # 3. SSH 접속
-    echo "[3] Attempting SSH connection..."
-    echo "  > Running: ssh $user@$ip"
-    # SSH 접속 시도 (-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null 옵션은
-    # 보안상 필요에 따라 추가/제거. 여기서는 기본 ssh 명령 사용)
-    ssh "$user@$ip"
-    local ssh_exit_code=$?
-
-    if [[ $ssh_exit_code -ne 0 ]]; then
-        echo "--- SSH session for $user@$ip (VM $vmid) ended with exit code $ssh_exit_code. ---"
-        return $ssh_exit_code
-    else
-        echo "--- SSH session for $user@$ip (VM $vmid) finished successfully. ---"
-        return 0
-    fi
 }
 
 enter() {
@@ -6758,97 +6382,6 @@ hash_add() {
     fi
 }
 
-old_hash_add() {
-    # --- Arguments & Basic Validation ---
-    local fpath="$1" search="$2" num_arg="$3"
-    # Default: Comment 1 line (the matched one)
-    local num_lines=1
-    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff" # Assume cdiff exists
-
-    # Validate number of arguments
-    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
-        echo "Usage: hash_add <filepath> <search> [total_lines]" >&2
-        echo "  - comments matched line (if not already commented)." >&2
-        echo "  - if total_lines >= 1, comments that many lines total," >&2
-        echo "    starting with the matched one. Subsequent lines get '# ' prepended." >&2
-        return 1
-    fi
-
-    # Validate optional total_lines argument
-    if [ $# -eq 3 ]; then
-        # Must be an integer >= 1
-        if ! echo "$num_arg" | grep -qE '^[1-9][0-9]*$'; then
-            echo "Error: total_lines must be an integer >= 1." >&2
-            return 1
-        fi
-        num_lines="$num_arg"
-    fi
-
-    # Validate file exists
-    if [ ! -f "$fpath" ]; then
-        echo "Error: File not found: $fpath" >&2
-        return 1
-    fi
-
-    # --- Setup ---
-    ts=$(date +%Y%m%d_%H%M%S)
-    bk_suffix="_${ts}.bak"
-    bk_fname="${fpath}${bk_suffix}"
-    # Quote search pattern for Perl regex
-    quoted_s=$(perl -e 'print quotemeta shift' "$search")
-    [ -z "$quoted_s" ] && {
-        echo "Error: Failed to quote search pattern (empty?)." >&2
-        return 1
-    }
-
-    # --- Perl Script (concise, uses env vars P and N) ---
-    # $c: counter for lines remaining to force-comment *after* the matched line.
-    # $ENV{P}: Quoted search Pattern.
-    # $ENV{N}: Total number of lines to comment (including matched).
-    # On match, set counter c to N-1 (remaining lines).
-    perl_p='
-        BEGIN { $c = 0 }
-        if (m/$ENV{P}/) {
-            # Matched line: Comment if needed
-            unless (/^\s*#/) { $_ = "# " . $_ }
-            # Set counter for remaining lines (Total N lines - 1 matched line = N-1)
-            $c = $ENV{N} - 1;
-        } elsif ($c-- > 0) {
-            # Subsequent lines to force-comment
-            $_ = "# " . $_;
-        }
-        print;
-    '
-    # One-liner version:
-    # perl_p='BEGIN{$c=0} if(m/$ENV{P}/){unless(/^\s*#/){$_="# ".$_} $c=$ENV{N}-1}elsif($c-->0){$_="# ".$_} print'
-
-    # --- Execution ---
-    export P="$quoted_s" N="$num_lines" # Pass total lines N
-    perl "-i${bk_suffix}" -n -e "$perl_p" "$fpath"
-    ret=$?
-    unset P N # Clean up environment
-
-    # --- Reporting ---
-    if [ $ret -eq 0 ]; then
-        echo "Hash Add potentially done. Backup: $bk_fname"
-        # Check if backup exists and differs before showing diff
-        if [ -f "$bk_fname" ]; then
-            if ! cmp -s "$bk_fname" "$fpath"; then
-                echo "--- Diff (${DIFF_CMD}) ---"
-                "$DIFF_CMD" "$bk_fname" "$fpath"
-                echo "--------------------"
-            else
-                echo "Info: No effective changes made to file content."
-            fi
-        else
-            echo "Info: No changes made (no backup created)."
-        fi
-        return 0
-    else
-        echo "Error during Hash Add (code: $ret). Check backup: $bk_fname" >&2
-        return $ret
-    fi
-}
 hash_restore() {
     local fpath="$1" latest_bak
     if [ -z "$fpath" ]; then
@@ -7008,73 +6541,6 @@ hash_remove() {
     fi
 }
 
-old_hash_remove() {
-    local fpath="$1" search="$2" num_arg="$3"
-    local num_lines=1
-    local bk_suffix ts bk_fname ret perl_p quoted_s DIFF_CMD="cdiff"
-    if [ $# -lt 2 ] || [ $# -gt 3 ]; then
-        echo "Usage: hash_remove <filepath> <search> [total_lines]" 1>&2
-        return 1
-    fi
-    if [ $# -eq 3 ]; then
-        if ! echo "$num_arg" | grep -Eq '^[1-9][0-9]*$'; then
-            echo "Error: total_lines must be an integer >= 1." 1>&2
-            return 1
-        fi
-        num_lines="$num_arg"
-    fi
-    if [ ! -f "$fpath" ]; then
-        echo "Error: File not found: $fpath" 1>&2
-        return 1
-    fi
-    if [ ! -w "$fpath" ]; then
-        echo "Error: File not writable: $fpath" 1>&2
-        return 1
-    fi
-    ts=$(date +%Y%m%d_%H%M%S)
-    bk_suffix="_${ts}.bak"
-    bk_fname="${fpath}${bk_suffix}"
-    quoted_s=$(perl -e 'print quotemeta shift' "$search")
-    [ -z "$quoted_s" ] && {
-        echo "Error: Failed to quote search pattern (empty?)." 1>&2
-        return 1
-    }
-    echo "Debug: Searching for pattern: $quoted_s" 1>&2
-    perl_p='
-        BEGIN { $c = 0 }
-        if (m/^\s*#\s*.*?\Q$ENV{P}\E/) {
-             s/^(\s*)#\s*/$1/;
-             $c = $ENV{N} - 1;
-             print STDERR "Debug: Matched and modified: $_";
-        } elsif ($c-- > 0) {
-             s/^(\s*)#\s*/$1/ if m/^\s*#\s*/;
-        }
-        print;
-    '
-    export P="$quoted_s" N="$num_lines"
-    perl "-i${bk_suffix}" -n -e "$perl_p" "$fpath"
-    ret=$?
-    unset P N
-    if [ $ret -eq 0 ]; then
-        echo "Hash Remove potentially done. Backup: $bk_fname"
-        if [ -f "$bk_fname" ]; then
-            if ! cmp -s "$bk_fname" "$fpath"; then
-                echo "--- Diff (${DIFF_CMD}) ---"
-                "$DIFF_CMD" "$bk_fname" "$fpath"
-                echo "--------------------"
-            else
-                echo "Info: No effective changes made to file content."
-            fi
-        else
-            echo "Info: No changes made (no backup created)."
-        fi
-        return 0
-    else
-        echo "Error during Hash Remove (code: $ret). Check backup: $bk_fname" 1>&2
-        return $ret
-    fi
-}
-
 hash-add() { hash_add $@; }
 hash-remove() { hash_remove $@; }
 
@@ -7225,61 +6691,6 @@ sleepdot() {
     return 0 # 정상 종료
 }
 
-old_sleepdot() {
-    echo -n "sleepdot $1 "
-    bashver=${BASH_VERSINFO[0]}
-    ((bashver < 3)) && real1sec=1 || real1sec=1
-    s=$(date +%s)
-    c=1
-    stopdot=0
-
-    # Ctrl+C 누르면 stopdot=1 설정
-    trap 'stopdot=1' INT
-
-    [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "
-
-    while [ -z "$x" ]; do
-        [ "$stopdot" = 1 ] && echo && echo "Canceled" && break
-        [ "$1" ] && sleep 1
-        echo -n "."
-        [ $((c % 5)) -eq 0 ] && echo -n " "
-        [ $((c % 30)) -eq 0 ] && echo $c
-        t=$(($(date +%s) - s))
-        [ $((c % 300)) -eq 0 ] && echo
-        c=$((c + 1))
-
-        if [ "$1" ] && [ $t -ge $1 ]; then
-            break
-        elif [ -z "$1" ]; then
-            IFS=z read -t$real1sec -n1 x && break
-        fi
-    done
-
-    trap - INT # trap 해제
-    echo
-}
-
-old_sleepdot() {
-    echo -n "sleepdot $1 "
-    bashver=${BASH_VERSINFO[0]}
-    ((bashver < 3)) && real1sec=1 || real1sec=1
-    s=$(date +%s)
-    c=1
-    [ -z "$1" ] && echo -n ">>> Quit -> [Anykey] "
-    #time while [ -z "$x" ]; do
-    while [ -z "$x" ]; do
-        [ "$1" ] && sleep 1
-        echo -n "."
-        [ $((c % 5)) -eq 0 ] && echo -n " "
-        [ $((c % 30)) -eq 0 ] && echo $c
-        t=$(($(date +%s) - s))
-        [ $((c % 300)) -eq 0 ] && echo
-        c=$((c + 1))
-        if [ "$1" ] && [ $t -ge $1 ]; then break; elif [ -z "$1" ]; then IFS=z read -t$real1sec -n1 x && break; fi
-    done
-    echo
-}
-
 # backup & vi
 vi22() {
     [ ! -f "$1" ] && return 1
@@ -7365,23 +6776,8 @@ logview() {
     fi
 }
 
-webloga() { logview /var/log/apache2/access.log; }
-weblogaf() { logview /var/log/apache2/access.log f; }
-webloge() { logview /var/log/apache2/error.log; }
-weblogef() { logview /var/log/apache2/error.log f; }
-weblogff() { $(declare -F | awk '{print $3}' | grep weblog | sort | pipemenu); }
 ftplog() { logview /var/log/xferlog; }
 ftplogf() { logview /var/log/xferlog f; }
-maillog() { logview /var/log/mail.log; }
-maillogf() { logview /var/log/mail.log f; }
-syslog() { logview /var/log/syslog; }
-syslogf() { logview /var/log/syslog f; }
-authlog() { logview /var/log/auth.log; }
-authlogf() { logview /var/log/auth.log f; }
-dpkglog() { logview /var/log/dpkg.log; }
-dpkglogf() { logview /var/log/dpkg.log f; }
-kernlog() { logview /var/log/kern.log; }
-kernlogf() { logview /var/log/kern.log f; }
 bootlog() { dmesg | cpipe | less -RX; }
 
 # journalctl
@@ -7398,15 +6794,11 @@ logf() {
     journalctl -f
     trap - SIGINT
 }
-logu() { journalctl -r -u $(systemctl list-unit-files --type=service | grep enable | awk -F'.service' '{print $1}' | pipemenu); }
-
 # select function
 logsff() { $(declare -F | awk '{print $3}' | grep log | grep -v dialog | sort | pipemenu); }
 logsfff() { for i in $(declare -F | awk '{print $3}' | grep log | grep -v dialog | sort); do fff $i; done | cpipe | less -RX; }
 
 # select & logview
-weblogs() { log=$(find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu) && [ -f $log ] && logview $log; }
-weblogsf() { log=$(find /var/log/apache2/ -type f ! -name '*.gz' -size +0 | pipemenu) && [ -f $log ] && logview $log f; }
 logs() { log=$(find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu) && logview $log; }
 logsf() { log=$(find /var/log/ -maxdepth 1 -mtime -1 -type f -name '*.log' | sort | pipemenu) && logview $log f; }
 
@@ -7585,14 +6977,6 @@ ipban16() {
             break
         fi
     done
-    $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
-}
-old_ipallow() {
-    valid_ips=true
-    for ip in "$@"; do ipcheck ${ip%/*} && iptables -D INPUT -s ${ip%/*} -j DROP || {
-        valid_ips=false
-        break
-    }; done
     $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipbanlist() {
@@ -8359,20 +7743,6 @@ explorer() {
     done
 }
 
-old_explorer() {
-
-    command -v ranger &>/dev/null && {
-        ranger "$1"
-        return
-    }
-    explorer="$HOME/explorer.sh"
-    [ -f "$explorer" ] && "$explorer" "$1" || {
-        curl -fsSL -m 10 http://srt.byus.net/explorer.sh -o "$explorer" 2>/dev/null \
-            || curl -fsSL -m 10 http://byus.net/explorer.sh -o "$explorer" 2>/dev/null \
-            || rm -f "$explorer"
-        [ -s "$explorer" ] && chmod 755 "$explorer" && "$explorer" "$1"
-    }
-}
 exp() { explorer "$@"; }
 
 pingcheck() { ping -c1 168.126.63.1 &>/dev/null && echo "y" || echo "n"; }
@@ -8734,7 +8104,6 @@ domchg() {
 ##############################################################################################################
 ##############################################################################################################
 
-old_template_edit() { conff $1; }
 template_edit() {
     [ $# -eq 0 ] && echo "Usage: template_edit file1 [file2 ...]" && return 1
 
@@ -10058,7 +9427,6 @@ EOF
  COPY ./conf/www.conf /usr/local/etc/php-fpm.d/www.conf
 
  EXPOSE 9000
-
 
 
 EOF
