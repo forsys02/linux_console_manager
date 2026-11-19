@@ -665,9 +665,9 @@ menu_prompt() { # $1=최대번호 (? 는 항상 help 로 표시)
         [ "$GOLANG" = "kr" ] && _vtxt="[V]쉬움모드" || _vtxt="[V]easy-mode"
     fi
     if [ "$GOLANG" = "kr" ]; then
-        ko ">>> 선택 [0-%s]   %s   [?] help : " "$1" "$_vtxt"
+        ko ">>> 선택 [0-%s]   %s  [F]상세  [?] help : " "$1" "$_vtxt"
     else
-        printf '>>> Select [0-%s]   %s   [?] help : ' "$1" "$_vtxt"
+        printf '>>> Select [0-%s]   %s  [F]detail  [?] help : ' "$1" "$_vtxt"
     fi
 }
 
@@ -2724,11 +2724,24 @@ menufunc() {
                             "$cmd_choice" $cmd_choice1
                             continue
                             ;;
-                        ff | fff | ffc | fffc)
-                            "$cmd_choice" $cmd_choice1
-                            case "$cmd_choice1" in
-                                [0-9]*) printf ">>> [Enter] " ; read -r _ ;;
-                            esac
+                        ff | fff | ffc | fffc | F)
+                            if [ "$cmd_choice" = "F" ]; then
+                                if [ -z "$cmd_choice1" ]; then
+                                    [ "$GOLANG" = "kr" ] && printf ">>> 상세 볼 번호 (예: 2) : " || printf ">>> Item No. to inspect : "
+                                    read -r cmd_choice1
+                                fi
+                                [ -n "$cmd_choice1" ] && { fff "$cmd_choice1"; printf ">>> [Enter] "; read -r _; }
+                            else
+                                "$cmd_choice" $cmd_choice1
+                                case "$cmd_choice1" in
+                                    [0-9]*) printf ">>> [Enter] " ; read -r _ ;;
+                                esac
+                            fi
+                            continue
+                            ;;
+                        F[0-9]*)
+                            fff "${cmd_choice#F}"
+                            printf ">>> [Enter] " ; read -r _
                             continue
                             ;;
                         format)
