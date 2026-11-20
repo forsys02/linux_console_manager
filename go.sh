@@ -1973,47 +1973,98 @@ menufunc() {
                             unset original_indices
                             original_indices=()
                             local prev_comment=""
-                            local _page_blocks=() _page_blines=()
-                            local _pending_hdr="" _blk_txt="" _blk_out="" _lcnt=0
 
-                            # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리 (페이지네이션을 위해 블록 단위 버퍼링)
+                            # [Pass 1] 순수 Bash 내장 연산으로 인덱스 및 페이지 배정 (Zero-fork)
+                            local _term_lines _max_body_lines _cur_pg=1 _cur_lines=0 _hdr_cnt=0 _est_l=1
+                            local _item_page=() _tc="" _pc=""
+                            _term_lines="${LINES:-}"
+                            [ -n "$_term_lines" ] || _term_lines="$(tput lines 2>/dev/null)"
+                            [ -n "$_term_lines" ] || _term_lines=24
+                            _max_body_lines=$((_term_lines - 11))
+                            [ "$_max_body_lines" -lt 8 ] && _max_body_lines=8
+
+                            for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
+                                c_cmd="${chosen_commands[$((item - 1))]}"
+                                _tc="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
+                                case "$_tc" in
+                                    "#h "*|"#he "*|"%%%"*) continue ;;
+                                    "#"*)
+                                        _pc="${_tc#\#}"
+                                        _pc="${_pc#"${_pc%%[![:space:]]*}"}"
+                                        if [ "${GOVIEW:-easy}" != "easy" ]; then
+                                            _hdr_cnt=$((_hdr_cnt + 1))
+                                        else
+                                            case "$_pc" in
+                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*) _hdr_cnt=$((_hdr_cnt + 1)) ;;
+                                            esac
+                                        fi
+                                        continue
+                                        ;;
+                                esac
+                                original_indices[${#original_indices[@]}]="$item"
+                                if [ "${GOVIEW:-easy}" = "easy" ]; then
+                                    _est_l=1
+                                else
+                                    _est_l=$(( (${#c_cmd} > 330 ? 330 : ${#c_cmd}) / 126 + 1 ))
+                                fi
+                                if [ "$_cur_lines" -gt 0 ] && [ $((_cur_lines + _hdr_cnt + _est_l)) -gt "$_max_body_lines" ]; then
+                                    _cur_pg=$((_cur_pg + 1))
+                                    _cur_lines=0
+                                fi
+                                _item_page[$item]=$_cur_pg
+                                _cur_lines=$((_cur_lines + _hdr_cnt + _est_l))
+                                _hdr_cnt=0
+                            done
+                            _cmd_total_pages=$_cur_pg
+                            [ "$_cmd_page" -gt "$_cmd_total_pages" ] && _cmd_page=$_cmd_total_pages
+                            [ "$_cmd_page" -lt 1 ] && _cmd_page=1
+
+                            # [Pass 2] 현재 페이지에 해당하는 항목만 직출력 (서브셸/wc 0회)
+                            local _pending_hdr_lines=""
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
-
-                                # [#h] 이 명령줄에 붙은 설명 (위 #h 태그에서 넘어온 값, 여러줄 가능)
                                 _hdesc="${chosen_desc[$((item - 1))]-}"
+                                _tc="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
 
-                                # [#h] 태그 줄 자체는 여기서 소비한다.
-                                if rx_match "$c_cmd" '^[[:space:]]*#h(e)?[[:space:]]+'; then
-                                    continue
-                                fi
-
-                                # %%% 헤더 줄 소비 (중복 출력 방지)
-                                if rx_match "$c_cmd" '^[[:space:]]*%%%'; then
-                                    continue
-                                fi
-
-                                # 주석줄인 경우 (다음 명령 블록의 머리말로 붙여서 페이지 끝에 혼자 남지 않게 한다)
-                                if rx_match "$c_cmd" '^[[:space:]]*#'; then
-                                    prev_comment="${c_cmd#*#}"
-                                    prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-                                    if [ "${GOVIEW:-easy}" != "easy" ]; then
-                                        _pending_hdr="${_pending_hdr:+${_pending_hdr}$'\n'}$(printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m" "$prev_comment")"
-                                    elif rx_match "$prev_comment" '^[─━═-]+【.*】' || rx_match "$prev_comment" '^(-+[[:space:]]*)?\[.*\]'; then
-                                        _pending_hdr="${_pending_hdr:+${_pending_hdr}$'\n'}$(echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m")"
-                                    fi
-                                    continue
-                                fi
+                                case "$_tc" in
+                                    "#h "*|"#he "*|"%%%"*) continue ;;
+                                    "#"*)
+                                        prev_comment="${_tc#\#}"
+                                        prev_comment="${prev_comment#"${prev_comment%%[![:space:]]*}"}"
+                                        prev_comment="${prev_comment%"${prev_comment##*[![:space:]]}"}"
+                                        if [ "${GOVIEW:-easy}" != "easy" ]; then
+                                            _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}    \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                        else
+                                            case "$prev_comment" in
+                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
+                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                                    ;;
+                                            esac
+                                        fi
+                                        continue
+                                        ;;
+                                esac
 
                                 # 주석 아닌 경우 배열 순번에 줄번호 할당
                                 pi="${display_idx}."
-                                original_indices=("${original_indices[@]}" "$item")
                                 display_idx=$((display_idx + 1))
 
+                                # 현재 페이지가 아니면 렌더링/서브셸/awk 전부 건너뜀!
+                                if [ "${_cmd_page_all:-0}" -eq 0 ] && [ "${_item_page[$item]:-1}" -ne "$_cmd_page" ]; then
+                                    _pending_hdr_lines=""
+                                    prev_comment=""
+                                    continue
+                                fi
+
+                                if [ -n "$_pending_hdr_lines" ]; then
+                                    echo -e "$_pending_hdr_lines"
+                                    _pending_hdr_lines=""
+                                fi
+
                                 if [ "${GOVIEW:-easy}" = "easy" ]; then
-                                    # 쉬움 모드 렌더링
-                                    _blk_out="$(render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment")"
+                                    # 쉬움 모드 렌더링 (직접 stdout 출력)
+                                    render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment"
                                     prev_comment=""
                                 else
                                     # 기존 명령어 모드 렌더링
@@ -2058,11 +2109,11 @@ menufunc() {
                                         processed_cmd="${c_cmd:0:max_len}..."
                                     fi
 
+                                    printf "\e[1m%-3s\e[0m " ${pi}
                                     # [규칙] 널명령(: 라벨) 색칠 분리
                                     #  ': 라벨 ; 명령' 의 라벨은 색칠 규칙 대상에서 완전히 제외하고,
                                     #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
-                                    local _kbadge _rendered _pi_prefix
-                                    _pi_prefix="$(printf "\e[1m%-3s\e[0m " "${pi}")"
+                                    local _kbadge _rendered
                                     _kbadge="$(_cmd_kind_badge "$c_cmd")"
                                     _rendered="$(echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
@@ -2085,50 +2136,12 @@ menufunc() {
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
                                     if [ -n "$_kbadge" ]; then
-                                        _blk_out="$(printf "%s%s %b" "$_pi_prefix" "$_rendered" "$_kbadge")"
+                                        printf "%s %b\n" "$_rendered" "$_kbadge"
                                     else
-                                        _blk_out="$(printf "%s%s" "$_pi_prefix" "$_rendered")"
+                                        printf "%s\n" "$_rendered"
                                     fi
                                 fi
-
-                                if [ -n "$_pending_hdr" ]; then
-                                    _blk_txt="${_pending_hdr}"$'\n'"${_blk_out}"
-                                    _pending_hdr=""
-                                else
-                                    _blk_txt="${_blk_out}"
-                                fi
-                                _lcnt="$(printf '%s\n' "$_blk_txt" | wc -l)"
-                                _page_blocks[${#_page_blocks[@]}]="$_blk_txt"
-                                _page_blines[${#_page_blines[@]}]="$_lcnt"
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
-
-                            # 터미널 높이 기반 자동 페이지네이션 계산 및 출력
-                            local _term_lines _max_body_lines _cur_pg=1 _cur_lines=0 _bi=0
-                            local _blk_pages=()
-                            _term_lines="$(tput lines 2>/dev/null)"
-                            [ -n "$_term_lines" ] || _term_lines="${LINES:-24}"
-                            _max_body_lines=$((_term_lines - 11))
-                            [ "$_max_body_lines" -lt 8 ] && _max_body_lines=8
-
-                            for ((_bi = 0; _bi < ${#_page_blocks[@]}; _bi++)); do
-                                _lcnt="${_page_blines[$_bi]}"
-                                if [ "$_cur_lines" -gt 0 ] && [ $((_cur_lines + _lcnt)) -gt "$_max_body_lines" ]; then
-                                    _cur_pg=$((_cur_pg + 1))
-                                    _cur_lines=0
-                                fi
-                                _blk_pages[${#_blk_pages[@]}]="$_cur_pg"
-                                _cur_lines=$((_cur_lines + _lcnt))
-                            done
-                            _cmd_total_pages=$_cur_pg
-                            [ "$_cmd_page" -gt "$_cmd_total_pages" ] && _cmd_page=$_cmd_total_pages
-                            [ "$_cmd_page" -lt 1 ] && _cmd_page=1
-
-                            for ((_bi = 0; _bi < ${#_page_blocks[@]}; _bi++)); do
-                                if [ "${_cmd_page_all:-0}" -eq 1 ] || [ "${_blk_pages[$_bi]}" -eq "$_cmd_page" ]; then
-                                    printf '%s\n' "${_page_blocks[$_bi]}"
-                                fi
-                            done
-                            [ -n "$_pending_hdr" ] && printf '%s\n' "$_pending_hdr"
 
                             echo "=============================================="
                             if [ "$_cmd_total_pages" -gt 1 ]; then
