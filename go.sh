@@ -646,13 +646,13 @@ menu_keybar() { # compact 한줄 (호환/테스트용 유지, 폭 65~66칸)
 menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
-        ko "  이동  [b]뒤로 [bb]2 [bbb]3 [m]메인 [ESC]위 < > 앞/다음\n"
-        ko "  기능  [V]보기전환 [e]파일 [h]이력 [conf]설정 [sh]쉘 [?번호]설명\n"
+        ko "  이동  [b]뒤로 [bb]2 [bbb]3 [m]메인 [ESC]위 < > 메뉴  [ ] 페이지\n"
+        ko "  기능  [V]보기전환 [A]전체보기 [e]파일 [h]이력 [conf]설정 [?번호]설명\n"
         ko "  언어  [L]한글(L k)/English(L e)  [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
-        ko "  move  [b]back [bb]x2 [bbb]x3 [m]main [ESC]back < > prev/next\n"
-        ko "  tool  [V]view-mode [e]file [h]hist [conf]set [sh]shell [?N]info\n"
+        ko "  move  [b]back [bb]x2 [bbb]x3 [m]main [ESC]up < > menu  [ ] page\n"
+        ko "  tool  [V]view-mode [A]all [e]file [h]hist [conf]set [?N]info\n"
         ko "  lang  [L]Korean(L k)/English(L e) [kr]encoding(fix garbled)\n"
     fi
 }
@@ -1900,6 +1900,7 @@ menufunc() {
             ###############################################################
             cmds() {
                 local cmdloop=0
+                local _cmd_page=1 _cmd_page_all=0 _cmd_total_pages=1
                 #echo "$LINENO --- cmds enter" && sleep 1
                 while true; do # 하부 메뉴 CMDs cmd_choice loop
                     cmdloop=$((cmdloop + 1))
@@ -1972,8 +1973,10 @@ menufunc() {
                             unset original_indices
                             original_indices=()
                             local prev_comment=""
+                            local _page_blocks=() _page_blines=()
+                            local _pending_hdr="" _blk_txt="" _blk_out="" _lcnt=0
 
-                            # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리
+                            # 순수 명령줄 한줄씩 처리 - 색칠/경로/변수처리 (페이지네이션을 위해 블록 단위 버퍼링)
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
@@ -1991,14 +1994,14 @@ menufunc() {
                                     continue
                                 fi
 
-                                # 주석줄인 경우
+                                # 주석줄인 경우 (다음 명령 블록의 머리말로 붙여서 페이지 끝에 혼자 남지 않게 한다)
                                 if rx_match "$c_cmd" '^[[:space:]]*#'; then
                                     prev_comment="${c_cmd#*#}"
                                     prev_comment="$(echo "$prev_comment" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                                     if [ "${GOVIEW:-easy}" != "easy" ]; then
-                                        printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m\n" "$prev_comment"
+                                        _pending_hdr="${_pending_hdr:+${_pending_hdr}$'\n'}$(printf "\e[1m   \e[0m \x1b[1;36m# %s\x1b[0m" "$prev_comment")"
                                     elif rx_match "$prev_comment" '^[─━═-]+【.*】' || rx_match "$prev_comment" '^(-+[[:space:]]*)?\[.*\]'; then
-                                        echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                        _pending_hdr="${_pending_hdr:+${_pending_hdr}$'\n'}$(echo -e "   \x1b[1;36m# ${prev_comment}\x1b[0m")"
                                     fi
                                     continue
                                 fi
@@ -2010,7 +2013,7 @@ menufunc() {
 
                                 if [ "${GOVIEW:-easy}" = "easy" ]; then
                                     # 쉬움 모드 렌더링
-                                    render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment"
+                                    _blk_out="$(render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment")"
                                     prev_comment=""
                                 else
                                     # 기존 명령어 모드 렌더링
@@ -2055,13 +2058,11 @@ menufunc() {
                                         processed_cmd="${c_cmd:0:max_len}..."
                                     fi
 
-                                    printf "\e[1m%-3s\e[0m " ${pi}
                                     # [규칙] 널명령(: 라벨) 색칠 분리
                                     #  ': 라벨 ; 명령' 의 라벨은 색칠 규칙 대상에서 완전히 제외하고,
                                     #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
-                                    #  (예전엔 라벨 안 var/키워드가 ANSI(\x1b[1;35m 등)를 넣고 그 ';' 가
-                                    #   '^: [^;]*' 매칭을 중단시켜 ';35m' 같은 잔여물이 새었다.)
-                                    local _kbadge _rendered
+                                    local _kbadge _rendered _pi_prefix
+                                    _pi_prefix="$(printf "\e[1m%-3s\e[0m " "${pi}")"
                                     _kbadge="$(_cmd_kind_badge "$c_cmd")"
                                     _rendered="$(echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
@@ -2084,14 +2085,67 @@ menufunc() {
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
                                     if [ -n "$_kbadge" ]; then
-                                        printf "%s %b\n" "$_rendered" "$_kbadge"
+                                        _blk_out="$(printf "%s%s %b" "$_pi_prefix" "$_rendered" "$_kbadge")"
                                     else
-                                        printf "%s\n" "$_rendered"
+                                        _blk_out="$(printf "%s%s" "$_pi_prefix" "$_rendered")"
                                     fi
                                 fi
+
+                                if [ -n "$_pending_hdr" ]; then
+                                    _blk_txt="${_pending_hdr}"$'\n'"${_blk_out}"
+                                    _pending_hdr=""
+                                else
+                                    _blk_txt="${_blk_out}"
+                                fi
+                                _lcnt="$(printf '%s\n' "$_blk_txt" | wc -l)"
+                                _page_blocks[${#_page_blocks[@]}]="$_blk_txt"
+                                _page_blines[${#_page_blines[@]}]="$_lcnt"
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
+                            # 터미널 높이 기반 자동 페이지네이션 계산 및 출력
+                            local _term_lines _max_body_lines _cur_pg=1 _cur_lines=0 _bi=0
+                            local _blk_pages=()
+                            _term_lines="$(tput lines 2>/dev/null)"
+                            [ -n "$_term_lines" ] || _term_lines="${LINES:-24}"
+                            _max_body_lines=$((_term_lines - 11))
+                            [ "$_max_body_lines" -lt 8 ] && _max_body_lines=8
+
+                            for ((_bi = 0; _bi < ${#_page_blocks[@]}; _bi++)); do
+                                _lcnt="${_page_blines[$_bi]}"
+                                if [ "$_cur_lines" -gt 0 ] && [ $((_cur_lines + _lcnt)) -gt "$_max_body_lines" ]; then
+                                    _cur_pg=$((_cur_pg + 1))
+                                    _cur_lines=0
+                                fi
+                                _blk_pages[${#_blk_pages[@]}]="$_cur_pg"
+                                _cur_lines=$((_cur_lines + _lcnt))
+                            done
+                            _cmd_total_pages=$_cur_pg
+                            [ "$_cmd_page" -gt "$_cmd_total_pages" ] && _cmd_page=$_cmd_total_pages
+                            [ "$_cmd_page" -lt 1 ] && _cmd_page=1
+
+                            for ((_bi = 0; _bi < ${#_page_blocks[@]}; _bi++)); do
+                                if [ "${_cmd_page_all:-0}" -eq 1 ] || [ "${_blk_pages[$_bi]}" -eq "$_cmd_page" ]; then
+                                    printf '%s\n' "${_page_blocks[$_bi]}"
+                                fi
+                            done
+                            [ -n "$_pending_hdr" ] && printf '%s\n' "$_pending_hdr"
+
                             echo "=============================================="
+                            if [ "$_cmd_total_pages" -gt 1 ]; then
+                                if [ "${_cmd_page_all:-0}" -eq 1 ]; then
+                                    if [ "$GOLANG" = "kr" ]; then
+                                        ko "  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\n" "$_cmd_total_pages"
+                                    else
+                                        printf "  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\n" "$_cmd_total_pages"
+                                    fi
+                                else
+                                    if [ "$GOLANG" = "kr" ]; then
+                                        ko "  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\n" "$_cmd_page" "$_cmd_total_pages"
+                                    else
+                                        printf "  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\n" "$_cmd_page" "$_cmd_total_pages"
+                                    fi
+                                fi
+                            fi
 
                             # __이후.점구분안구분 장애 trash
                             #-e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
@@ -2681,13 +2735,31 @@ menufunc() {
                     # 숫자판정 : [[ ]] 안에서 문자열에 -ge 를 쓰면 bash 가 "syntax error in conditional expression" 을 뱉고
                     # case 자체가 실행되지 않았음 → 숫자인지 먼저 expr 로 확인한다
                     if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '^[0-9]\+$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
-                        {
-                            YEL1
-                            echo
-                            echo "check your cmd_choice: $cmd_choice"
-                            NC
-                        }
                         case "$cmd_choice" in
+                            "]" | "[" | "A" | "all") ;;
+                            *)
+                                YEL1
+                                echo
+                                echo "check your cmd_choice: $cmd_choice"
+                                NC
+                                ;;
+                        esac
+                        case "$cmd_choice" in
+                        # --- Pagination ---
+                        "]")
+                            [ "$_cmd_page" -lt "$_cmd_total_pages" ] && _cmd_page=$((_cmd_page + 1)) || _cmd_page=1
+                            _cmd_page_all=0
+                            continue
+                            ;;
+                        "[")
+                            [ "$_cmd_page" -gt 1 ] && _cmd_page=$((_cmd_page - 1)) || _cmd_page=$_cmd_total_pages
+                            _cmd_page_all=0
+                            continue
+                            ;;
+                        "A" | "all")
+                            _cmd_page_all=$((1 - ${_cmd_page_all:-0}))
+                            continue
+                            ;;
                         # --- View Mode Toggle ---
                         "V" | "v")
                             goview_toggle
