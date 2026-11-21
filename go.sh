@@ -1863,16 +1863,14 @@ menufunc() {
             _m_hdr_buf="${_m_hdr_buf}$(echo -e "* $title $flow")"$'\n'
             _m_hdr_buf="${_m_hdr_buf}=============================================="$'\n'
             if [ ! "$title_of_menu_sub" ]; then
-                local _os_name _host_str _net_bar
+                local _os_name _host_str _net_bar=""
                 _os_name="$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}')"
                 [ -z "$_os_name" ] && _os_name="$(cat /etc/*-release 2>/dev/null | sort -u)"
                 _host_str="$(printf '\x1b[1;37m%s\x1b[0m' "$(hostname)")"
                 if [ "$offline" == "offline" ]; then
-                    _net_bar="===\x1b[1;31m offline \x1b[0m=================================="
-                else
-                    _net_bar="=============================================="
+                    _net_bar="  \x1b[1;31m[offline]\x1b[0m"
                 fi
-                _m_hdr_buf="${_m_hdr_buf}$(printf '%s - %b%b\n' "$_os_name" "$_host_str" "$_net_bar")"$'\n'
+                _m_hdr_buf="${_m_hdr_buf}$(printf '%s - %b%b\n\n' "$_os_name" "$_host_str" "$_net_bar")"
             else
                 # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱 + 중복 ==== 제거)
                 if [ ${#pre_commands[@]} -gt 0 ]; then
@@ -2008,19 +2006,19 @@ menufunc() {
             [ -n "$_m_term_lines" ] || _m_term_lines=24
 
             _m_render_screen() {
-                local _do_home="${1:-0}" _di _dn _dl _pfx _tmp_nl _card_only=0
+                local _do_home="${1:-0}" _di _dn _dl _pfx _tmp_nl _card_only=0 _fbuf=""
                 if [ "$_do_home" = "0" ]; then
-                    printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/'
-                    [ -n "$_m_pre_out" ] && printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/'
+                    _fbuf="${_fbuf}$(printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
+                    [ -n "$_m_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/')"$'\n'
                 elif [ "$_m_peeked" -eq 1 ]; then
-                    printf '\033[2J\033[H'
-                    printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/'
-                    [ -n "$_m_pre_out" ] && printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/'
+                    _fbuf="${_fbuf}"$'\033[?25l\033[2J\033[H'
+                    _fbuf="${_fbuf}$(printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
+                    [ -n "$_m_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/')"$'\n'
                     _m_peeked=0
                 elif [ "$_m_painted" -gt 0 ] && [ "$_m_painted" -lt "$_m_term_lines" ]; then
-                    printf '\r\033[K\033[%dA' "$_m_painted"
+                    _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_m_painted")"
                 elif [ "$menu_idx" -ge 1 ]; then
-                    printf '\r\033[K\033[8A'
+                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[8A'
                     _card_only=1
                 fi
 
@@ -2037,7 +2035,7 @@ menufunc() {
                         _tmp_nl="${_dl//[!$'\n']/}"
                         _m_painted=$((_m_painted + ${#_tmp_nl} + 1))
                         _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
-                        printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
+                        _fbuf="${_fbuf}$(printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl")"$'\n'
                     done
                     if [ "$menu_idx" -ge 1 ]; then
                         _m_painted=$((_m_painted + 8))
@@ -2047,10 +2045,16 @@ menufunc() {
                 fi
 
                 if [ "$menu_idx" -ge 1 ]; then
-                    _render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx"
+                    # 캐시 미적중 시 부모 셸에서 1회 채워둔 뒤 단일 버퍼에 병합 (Subshell 캐시 유실 방지 + 1회 Write)
+                    if [ -z "${_m_detail_cache[$_m_nav_cur]-}" ]; then
+                        _render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx" >/dev/null
+                    fi
+                    _fbuf="${_fbuf}$(_render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx")"$'\n'
                 else
-                    printf "\r==============================================\x1b[K\n"
+                    _fbuf="${_fbuf}$(printf '\r==============================================\x1b[K\n')"$'\n'
                 fi
+                [ "$_do_home" = "1" ] && _fbuf="${_fbuf}"$'\033[?25h'
+                printf '%s' "$_fbuf"
             }
             _m_render_screen 0
         fi
@@ -2409,30 +2413,38 @@ menufunc() {
                                         prev_comment="${prev_comment#"${prev_comment%%[![:space:]]*}"}"
                                         prev_comment="${prev_comment%"${prev_comment##*[![:space:]]}"}"
                                         if [ -z "$prev_comment" ]; then
-                                            # 빈 '#' 주석은 지저분한 '#' 기호 대신 깔끔한 빈 줄(공백)로 표현
-                                            if [ "${GOVIEW:-easy}" != "easy" ]; then
-                                                _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}"
+                                            # 빈 '#' 주석은 지저분한 '#' 기호 대신 깔끔한 빈 줄(공백)로 표현 (중복 방지)
+                                            if [ "${GOVIEW:-easy}" != "easy" ] && [ -z "$_pending_hdr_lines" ] && [ -n "${_cl_pg_first:-}" ]; then
+                                                _pending_hdr_lines=" "
                                             fi
                                         elif [ "${GOVIEW:-easy}" != "easy" ]; then
-                                            # 목록 중간(이미 항목이 출력된 뒤)에 새 소제목 주석이 나오면 위에 빈 줄 1줄 자동 삽입
-                                            if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
-                                                _pending_hdr_lines=$'\n'
-                                            fi
+                                            local _hdr_item=""
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
-                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
+                                                    _hdr_item="   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     ;;
                                                 *)
-                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}    \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                                    _hdr_item="    \x1b[1;36m# ${prev_comment}\x1b[0m"
                                                     ;;
                                             esac
+                                            if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
+                                                _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                            elif [ "$_pending_hdr_lines" = " " ]; then
+                                                _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                            else
+                                                _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}${_hdr_item}"
+                                            fi
                                         else
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
+                                                    local _hdr_item="   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
-                                                        _pending_hdr_lines=$'\n'
+                                                        _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                    elif [ "$_pending_hdr_lines" = " " ]; then
+                                                        _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                    else
+                                                        _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}${_hdr_item}"
                                                     fi
-                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     ;;
                                             esac
                                         fi
@@ -2559,20 +2571,20 @@ menufunc() {
                             [ "${GOTERM_ENC:-}" = "euckr" ] && _cl_tri="$(ko '▶')"
 
                             _cl_render_screen() {
-                                local _do_home="${1:-0}" _di _dl _dn _pfx _tmp_nl _card_only=0
+                                local _do_home="${1:-0}" _di _dl _dn _pfx _tmp_nl _card_only=0 _fbuf=""
                                 if [ "$_do_home" = "0" ]; then
                                     [ -z "$debug" ] && _clear_keep_scrollback
-                                    printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/'
-                                    [ -n "$_cl_pre_out" ] && printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/'
+                                    _fbuf="${_fbuf}$(printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
+                                    [ -n "$_cl_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/')"$'\n'
                                 elif [ "$_cl_peeked" -eq 1 ]; then
-                                    printf '\033[2J\033[H'
-                                    printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/'
-                                    [ -n "$_cl_pre_out" ] && printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/'
+                                    _fbuf="${_fbuf}"$'\033[?25l\033[2J\033[H'
+                                    _fbuf="${_fbuf}$(printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
+                                    [ -n "$_cl_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/')"$'\n'
                                     _cl_peeked=0
                                 elif [ "$_cl_painted" -gt 0 ] && [ "$_cl_painted" -lt "$_term_lines" ]; then
-                                    printf '\r\033[K\033[%dA' "$_cl_painted"
+                                    _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_cl_painted")"
                                 else
-                                    printf '\r\033[K\033[8A'
+                                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[8A'
                                     _card_only=1
                                 fi
 
@@ -2589,22 +2601,22 @@ menufunc() {
                                         _tmp_nl="${_dl//[!$'\n']/}"
                                         _cl_painted=$((_cl_painted + ${#_tmp_nl} + 1))
                                         _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
-                                        printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
+                                        _fbuf="${_fbuf}$(printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl")"$'\n'
                                     done
                                     if [ "$_cmd_total_pages" -gt 1 ]; then
                                         _cl_painted=$((_cl_painted + 2))
-                                        printf "\r\x1b[K\n"
+                                        _fbuf="${_fbuf}"$'\r\x1b[K\n'
                                         if [ "${_cmd_page_all:-0}" -eq 1 ]; then
                                             if [ "$GOLANG" = "kr" ]; then
-                                                ko "\r  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\x1b[K\n" "$_cmd_total_pages"
+                                                _fbuf="${_fbuf}$(ko "\r  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\x1b[K\n" "$_cmd_total_pages")"$'\n'
                                             else
-                                                printf "\r  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\x1b[K\n" "$_cmd_total_pages"
+                                                _fbuf="${_fbuf}$(printf "\r  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\x1b[K\n" "$_cmd_total_pages")"$'\n'
                                             fi
                                         else
                                             if [ "$GOLANG" = "kr" ]; then
-                                                ko "\r  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\x1b[K\n" "$_cmd_page" "$_cmd_total_pages"
+                                                _fbuf="${_fbuf}$(ko "\r  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\x1b[K\n" "$_cmd_page" "$_cmd_total_pages")"$'\n'
                                             else
-                                                printf "\r  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\x1b[K\n" "$_cmd_page" "$_cmd_total_pages"
+                                                _fbuf="${_fbuf}$(printf "\r  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\x1b[K\n" "$_cmd_page" "$_cmd_total_pages")"$'\n'
                                             fi
                                         fi
                                     fi
@@ -2612,7 +2624,9 @@ menufunc() {
                                 fi
 
                                 local _orig_sel="${original_indices[$((_cl_nav_cur - 1))]-}"
-                                _render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_cmd_total_pages" "$_cmd_page" "$((display_idx - 1))"
+                                _fbuf="${_fbuf}$(_render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_cmd_total_pages" "$_cmd_page" "$((display_idx - 1))")"$'\n'
+                                [ "$_do_home" = "1" ] && _fbuf="${_fbuf}"$'\033[?25h'
+                                printf '%s' "$_fbuf"
                             }
                             _cl_render_screen 0
 
