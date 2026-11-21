@@ -687,7 +687,7 @@ menu_prompt() { # $1=최대번호 (? 는 항상 help 로 표시)
 #             반환 0 = 정상입력 / 1 = ESC 또는 Ctrl-D (호출부가 q 처리)
 ###############################################################
 menu_read() {
-    local _mrp="$1" _n1="$2" _n2="$3" _c="" _x="" _rest="" _rc=0 _eol=0
+    local _mrp="$1" _n1="$2" _n2="$3" _allow_nav="${4:-0}" _c="" _x="" _rest="" _rc=0 _eol=0
     local -a _w=()
     #  [규칙] IFS 고정 (인수 분리 버그 근본 차단)
     #   아래 "${_w[*]:1}" 은 배열 결합이면서 **IFS 의 첫 글자를 구분자로 쓴다.**
@@ -713,9 +713,37 @@ menu_read() {
             IFS= read -rsn1 -t $_esc_t _x </dev/tty 2>/dev/null
             # 뒤바이트 없음(또는 ESC 연속) = 단독 ESC -> Ctrl-D 와 동일
             if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then _rc=1; break; fi
-            # '[' 'O' = 화살표/기능키 시퀀스 -> 나머지만 삼키고 readline 위임
+            # '[' 'O' = 화살표/기능키 시퀀스 -> _allow_nav=1 이면 커서 이동 이벤트 반환
             if [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
                 IFS= read -rsn1 -t $_esc_t _x </dev/tty 2>/dev/null
+                if [ "$_allow_nav" = "1" ]; then
+                    case "$_x" in
+                        "A")
+                            _MENU_V1="__NAV_UP__"
+                            [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                            [ -n "$_n2" ] && eval "$_n2=\"\""
+                            return 0
+                            ;;
+                        "B")
+                            _MENU_V1="__NAV_DOWN__"
+                            [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                            [ -n "$_n2" ] && eval "$_n2=\"\""
+                            return 0
+                            ;;
+                        "C")
+                            _MENU_V1="__NAV_RIGHT__"
+                            [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                            [ -n "$_n2" ] && eval "$_n2=\"\""
+                            return 0
+                            ;;
+                        "D")
+                            _MENU_V1="__NAV_LEFT__"
+                            [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                            [ -n "$_n2" ] && eval "$_n2=\"\""
+                            return 0
+                            ;;
+                    esac
+                fi
             fi
             _c=""
             break
@@ -1400,6 +1428,241 @@ show_cmd_card() {
 }
 
 ###############################################################
+# [mc.py 참조] 하단 실시간 [선택된 항목 상세] 카드 렌더링 헬퍼
+###############################################################
+_render_cmd_detail_card() {
+    local _sel="$1" _orig="$2" _tpg="${3:-1}" _cpg="${4:-1}" _max="${5:-1}"
+    local _cmd="" _desc="" _title="" _body="" _badge="" _is_sub=0
+    if [ -n "$_orig" ] && [ "$_orig" -ge 1 ] 2>/dev/null; then
+        _cmd="${chosen_commands[$((_orig - 1))]}"
+        _desc="${chosen_desc[$((_orig - 1))]-}"
+    fi
+
+    local _sline _icon _dot _arr _lr _tri
+    if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+        _sline="----------------------------------------------------------------------"
+        _icon="[*]"
+        _dot="*"
+        _arr="Up/Dn"
+        _lr="L/R"
+        _tri="$(ko '▶')"
+    else
+        _sline="──────────────────────────────────────────────────────────────────────"
+        _icon="🔎"
+        _dot="•"
+        _arr="↑↓"
+        _lr="←→"
+        _tri="▶"
+    fi
+
+    if echo "$_cmd" | grep -q "submenu_"; then
+        _is_sub=1
+        if [ "$GOLANG" = "kr" ]; then
+            _badge="\x1b[1;35m[${_tri} $(ko '서브메뉴')]\x1b[0m"
+        else
+            _badge="\x1b[1;35m[${_tri} SUBMENU]\x1b[0m"
+        fi
+    elif [ "${_cmd#!!!}" != "$_cmd" ]; then
+        _badge="${_EASY_B_WARN:-\x1b[1;31m[WARN]\x1b[0m}"
+    elif rx_match "$_cmd" '(unban[[:space:]]+--all)'; then
+        _badge="${_EASY_B_WARN:-\x1b[1;31m[WARN]\x1b[0m}"
+    elif rx_match "$_cmd" '(install|apt|yum|dnf|rm[[:space:]]|systemctl[[:space:]]+restart|reboot|sed[[:space:]]+-i|>>|kill|pkill|unban|banip)'; then
+        _badge="${_EASY_B_CHG:-\x1b[1;33m[CHG]\x1b[0m}"
+    else
+        _badge="${_EASY_B_VIEW:-\x1b[1;32m[VIEW]\x1b[0m}"
+    fi
+
+    if [ -n "$_desc" ]; then
+        _title="$(printf '%s' "$_desc" | head -n1)"
+        _body="$(printf '%s' "$_desc" | sed -n '2p')"
+    elif rx_match "$_cmd" '^:[[:space:]]*([^;]+);'; then
+        _title="$(rx_cap "$_cmd" '^:[[:space:]]*\([^;][^;]*\);.*' 1)"
+        _title="$(printf '%s' "$_title" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    else
+        _title="$(easy_auto_title "$_cmd")"
+    fi
+    [ -z "$_title" ] && _title="#$_sel"
+    [ ${#_title} -gt 54 ] && _title="${_title:0:51}..."
+
+    local _clean_cmd="$_cmd"
+    _clean_cmd="${_clean_cmd#!!! }"
+    _clean_cmd="${_clean_cmd#!!!}"
+    _clean_cmd="${_clean_cmd//@space@/ }"
+    _clean_cmd="${_clean_cmd//@colon@/:}"
+    _clean_cmd="${_clean_cmd//@dot@/.}"
+    _clean_cmd="${_clean_cmd//@@//}"
+    if [ ${#_clean_cmd} -gt 66 ]; then
+        _clean_cmd="${_clean_cmd:0:63}..."
+    fi
+
+    local _vars=""
+    _vars="$(printf '%s' "$_cmd" | awk '{ s=$0; while (match(s, /var[A-Z][a-zA-Z0-9_@-]*/)) { v=substr(s, RSTART+3, RLENGTH-3); sub(/__.*/, "", v); if (!seen[v]++) out = out (out ? ", " : "") v; s=substr(s, RSTART+RLENGTH) } } END { print out }')"
+
+    # 항상 고정 6줄 출력 (커서 이동 시 줄 수 변동 0)
+    printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+    if [ "$GOLANG" = "kr" ]; then
+        ko "\r %s \x1b[1;33m선택된 항목 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
+        if [ -n "$_body" ]; then
+            [ ${#_body} -gt 64 ] && _body="${_body:0:61}..."
+            ko "\r    \x1b[1;36m%s 설명 :\x1b[0m %s\x1b[K\n" "$_dot" "$_body"
+        else
+            ko "\r    \x1b[1;33m%s 명령 :\x1b[0m \x1b[37m%s\x1b[0m\x1b[K\n" "$_dot" "$_clean_cmd"
+        fi
+        if [ -n "$_vars" ]; then
+            ko "\r    \x1b[1;35m%s 변수 :\x1b[0m %s\x1b[K\n" "$_dot" "$_vars"
+        elif [ -n "$_body" ]; then
+            ko "\r    \x1b[1;33m%s 명령 :\x1b[0m \x1b[37m%s\x1b[0m\x1b[K\n" "$_dot" "$_clean_cmd"
+        elif [ "$_is_sub" -eq 1 ]; then
+            ko "\r    \x1b[38;5;250m%s 안내 : Enter 를 누르면 하위 메뉴로 이동합니다.\x1b[0m\x1b[K\n" "$_dot"
+        else
+            ko "\r    \x1b[38;5;250m%s 안내 : 추가 변수 없음 (Enter 누르면 확인/실행)\x1b[0m\x1b[K\n" "$_dot"
+        fi
+        printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+        local _pg_hint=""
+        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[${_lr}]\x1b[0m $(ko '페이지')(${_cpg}/${_tpg})"
+        ko "\r  \x1b[1;36m[%s]\x1b[0m 이동  \x1b[1;32m[Enter]\x1b[0m 선택실행  \x1b[1;37m[1-%s]\x1b[0m 번호  \x1b[1;37m[V]\x1b[0m 모드  \x1b[1;37m[F]\x1b[0m 상세  \x1b[1;37m[?]\x1b[0m 도움말%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
+    else
+        printf "\r %s \x1b[1;33mSelected Item Detail\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
+        if [ -n "$_body" ]; then
+            [ ${#_body} -gt 64 ] && _body="${_body:0:61}..."
+            printf "\r    \x1b[1;36m%s Desc :\x1b[0m %s\x1b[K\n" "$_dot" "$_body"
+        else
+            printf "\r    \x1b[1;33m%s Cmd  :\x1b[0m \x1b[37m%s\x1b[0m\x1b[K\n" "$_dot" "$_clean_cmd"
+        fi
+        if [ -n "$_vars" ]; then
+            printf "\r    \x1b[1;35m%s Vars :\x1b[0m %s\x1b[K\n" "$_dot" "$_vars"
+        elif [ -n "$_body" ]; then
+            printf "\r    \x1b[1;33m%s Cmd  :\x1b[0m \x1b[37m%s\x1b[0m\x1b[K\n" "$_dot" "$_clean_cmd"
+        elif [ "$_is_sub" -eq 1 ]; then
+            printf "\r    \x1b[38;5;250m%s Info : Press Enter to open submenu.\x1b[0m\x1b[K\n" "$_dot"
+        else
+            printf "\r    \x1b[38;5;250m%s Info : No prompt variables (Enter to run/confirm)\x1b[0m\x1b[K\n" "$_dot"
+        fi
+        printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+        local _pg_hint=""
+        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[${_lr}]\x1b[0m Page(${_cpg}/${_tpg})"
+        printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Run  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
+    fi
+}
+
+_render_main_detail_card() {
+    local _sel="$1" _m_title="$2" _m_key="$3" _m_is_sub="${4:-0}" _max="${5:-1}"
+    local _preview=""
+    if [ -n "${_m_detail_cache[$_sel]-}" ]; then
+        _preview="${_m_detail_cache[$_sel]}"
+    elif [ -n "$_m_key" ] && [ -f "${env:-}" ]; then
+        _preview="$(awk -v k="[$_m_key]" -v lang="${GOLANG:-kr}" '
+            index($0, k) > 0 && /^%%%/ { found=1; next }
+            found && /^%%%/ { exit }
+            found && /^$/ { exit }
+            found && lang=="kr" && /^#h / {
+                s=$0; sub(/^#h /, "", s);
+                if (!seen++) out=s;
+                next
+            }
+            found && lang!="kr" && /^#he / {
+                s=$0; sub(/^#he /, "", s);
+                if (!seen++) out=s;
+                next
+            }
+            found && /^: / {
+                s=$0; sub(/^: /, "", s); sub(/;.*/, "", s);
+                cmds = cmds (cmds ? " / " : "") s;
+                if (++ccnt >= 3 && out != "") exit;
+                next
+            }
+            found && /^# / && $0 !~ /^# [-─━═]/ {
+                s=$0; sub(/^# /, "", s);
+                if (cmnt == "") cmnt=s;
+                next
+            }
+            found && $0 !~ /^[#%]/ && $0 !~ /^[[:space:]]*$/ {
+                s=$0; sub(/^!!! /, "", s); sub(/[[:space:]].*/, "", s);
+                if (rawc == "") rawc=s;
+            }
+            END {
+                if (out != "") print out;
+                else if (cmds != "") print cmds;
+                else if (cmnt != "") print cmnt;
+                else if (rawc != "") print rawc;
+            }
+        ' "$env" 2>/dev/null)"
+        [ -z "$_preview" ] && _preview="-"
+        _m_detail_cache[$_sel]="$_preview"
+    fi
+    [ "$_preview" = "-" ] && _preview=""
+    [ ${#_preview} -gt 66 ] && _preview="${_preview:0:63}..."
+
+    local _sline _icon _dot _arr _tri _dia
+    if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+        _sline="----------------------------------------------------------------------"
+        _icon="[*]"
+        _dot="*"
+        _arr="Up/Dn"
+        _tri="$(ko '▶')"
+        _dia="$(ko '◈')"
+    else
+        _sline="──────────────────────────────────────────────────────────────────────"
+        _icon="🔎"
+        _dot="•"
+        _arr="↑↓"
+        _tri="▶"
+        _dia="◈"
+    fi
+
+    local _clean_title="$_m_title"
+    _clean_title="$(printf '%s' "$_clean_title" | sed -e 's/\x1b\[[0-9;]*m//g')"
+    [ ${#_clean_title} -gt 50 ] && _clean_title="${_clean_title:0:47}..."
+
+    local _badge=""
+    if [ "$_m_is_sub" -eq 1 ]; then
+        if [ "$GOLANG" = "kr" ]; then
+            _badge="\x1b[1;35m[${_tri} $(ko '서브메뉴')]\x1b[0m"
+        else
+            _badge="\x1b[1;35m[${_tri} SUBMENU]\x1b[0m"
+        fi
+    else
+        if [ "$GOLANG" = "kr" ]; then
+            _badge="\x1b[1;32m[${_dia} $(ko '명령어 모음')]\x1b[0m"
+        else
+            _badge="\x1b[1;32m[${_dia} COMMANDS]\x1b[0m"
+        fi
+    fi
+
+    # 항상 고정 6줄 출력
+    printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+    if [ "$GOLANG" = "kr" ]; then
+        ko "\r %s \x1b[1;33m선택된 메뉴 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_clean_title" "$_badge"
+        if [ -n "$_m_key" ]; then
+            ko "\r    \x1b[1;36m%s 단축키 :\x1b[0m [%s]  \x1b[38;5;250m(프롬프트에 바로 입력 가능)\x1b[0m\x1b[K\n" "$_dot" "$_m_key"
+        else
+            ko "\r    \x1b[1;36m%s 번호   :\x1b[0m %s번 항목\x1b[K\n" "$_dot" "$_sel"
+        fi
+        if [ -n "$_preview" ]; then
+            ko "\r    \x1b[1;33m%s 미리보기 :\x1b[0m %s\x1b[K\n" "$_dot" "$_preview"
+        else
+            ko "\r    \x1b[38;5;250m%s 안내   : Enter 를 누르면 해당 메뉴로 이동합니다.\x1b[0m\x1b[K\n" "$_dot"
+        fi
+        printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+        ko "\r  \x1b[1;36m[%s]\x1b[0m 이동  \x1b[1;32m[Enter]\x1b[0m 열기  \x1b[1;37m[1-%s]\x1b[0m 번호  \x1b[1;37m[V]\x1b[0m 모드  \x1b[1;37m[F]\x1b[0m 상세  \x1b[1;37m[?]\x1b[0m 도움말  \x1b[1;37m[q]\x1b[0m 종료\x1b[K\n" "$_arr" "$_max"
+    else
+        printf "\r %s \x1b[1;33mSelected Menu Detail\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_clean_title" "$_badge"
+        if [ -n "$_m_key" ]; then
+            printf "\r    \x1b[1;36m%s Shortcut :\x1b[0m [%s]  \x1b[38;5;250m(Type directly at prompt)\x1b[0m\x1b[K\n" "$_dot" "$_m_key"
+        else
+            printf "\r    \x1b[1;36m%s Index    :\x1b[0m #%s\x1b[K\n" "$_dot" "$_sel"
+        fi
+        if [ -n "$_preview" ]; then
+            printf "\r    \x1b[1;33m%s Preview  :\x1b[0m %s\x1b[K\n" "$_dot" "$_preview"
+        else
+            printf "\r    \x1b[38;5;250m%s Info     : Press Enter to open this menu.\x1b[0m\x1b[K\n" "$_dot"
+        fi
+        printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
+        printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Open  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help  \x1b[1;37m[q]\x1b[0m Exit\x1b[K\n" "$_arr" "$_max"
+    fi
+}
+
+###############################################################
 # 메인 서비스 함수 menufunc
 ###############################################################
 declare -a shortcutarr shortcutstr
@@ -1553,56 +1816,48 @@ menufunc() {
             clear || reset
             unset noclear
         }
+        local _m_nav_cur=1 _m_nav_moved=0
+        local -a _m_disp_lines _m_disp_nums _m_item_titles _m_item_keys _m_item_is_sub _m_detail_cache
+        local _m_hdr_buf="" _m_pre_out=""
+        _m_disp_lines=()
+        _m_disp_nums=()
+        _m_item_titles=()
+        _m_item_keys=()
+        _m_item_is_sub=()
+        _m_detail_cache=()
+
         if [ -z "$skipmain" ]; then
-            echo
-            echo -n "=============================================="
-            echo -n " :$choiceloop"
-            echo ""
-            echo -e "* $title $flow"
-            echo "=============================================="
+            _m_hdr_buf=$'\n'"============================================== :$choiceloop"$'\n'
+            _m_hdr_buf="${_m_hdr_buf}$(echo -e "* $title $flow")"$'\n'
+            _m_hdr_buf="${_m_hdr_buf}=============================================="$'\n'
             if [ ! "$title_of_menu_sub" ]; then
-                echo -ne "$([ "$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null)" ] && grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}' || cat /etc/*-release 2>/dev/null | sort -u) - $(
-                    WHT1
-                    hostname
-                    NC
-                )"
-                # offline print
-                # 네트워크 단절시 바로 표시
+                local _os_name _host_str _net_bar
+                _os_name="$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}')"
+                [ -z "$_os_name" ] && _os_name="$(cat /etc/*-release 2>/dev/null | sort -u)"
+                _host_str="$(printf '\x1b[1;37m%s\x1b[0m' "$(hostname)")"
                 if [ "$offline" == "offline" ]; then
-                    echo -ne "==="
-                    RED1
-                    echo -ne " offline "
-                    NC
-                    echo "=================================="
+                    _net_bar="===\x1b[1;31m offline \x1b[0m=================================="
                 else
-                    echo "=============================================="
+                    _net_bar="=============================================="
                 fi
+                _m_hdr_buf="${_m_hdr_buf}$(printf '%s - %b%b\n' "$_os_name" "$_host_str" "$_net_bar")"$'\n'
             else
-
-                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만)
-                # listof_comm_submain
-                # pre excute
-
-                for items in "${pre_commands[@]}"; do
-                    readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
-                    eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
-                done > >(
-                    output=$(cat)
-                    [ -n "$output" ] && { [ "$(echo "$output" | grep -E '0m')" ] && {
-                        echo "$output"
-                        echo "=============================================="
-                    } || {
-                        CYN
-                        echo "$output"
-                        NC
-                        #if [ -f /dev/shm/dlines ] ; then
-                        #	dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
-                        #dline
-                        #else
-                        echo "=============================================="
-                        #fi
-                    }; }
-                )
+                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱)
+                if [ ${#pre_commands[@]} -gt 0 ]; then
+                    local _pc_raw="" _pc_item
+                    for _pc_item in "${pre_commands[@]}"; do
+                        readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
+                        _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
+                    done
+                    _pc_raw="${_pc_raw%$'\n'}"
+                    if [ -n "$_pc_raw" ]; then
+                        if printf '%s' "$_pc_raw" | grep -qE '0m'; then
+                            _m_pre_out="${_pc_raw}"$'\n'"=============================================="
+                        else
+                            _m_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================' "$_pc_raw")"
+                        fi
+                    fi
+                fi
             fi
             local items
             menu_idx=0
@@ -1637,7 +1892,6 @@ menufunc() {
                     idx_mapping[$shortcut_idx]=$menu_idx
                     ((shortcut_idx++))
                 }
-                # debug printarr keysarr
 
                 # 메인 메뉴일 때 (title_of_menu_sub 가 비어있을 때) 5대 테마 구분선 삽입
                 if [ -z "$title_of_menu_sub" ]; then
@@ -1653,50 +1907,110 @@ menufunc() {
                     elif [ "$menu_idx" -eq 19 ]; then
                         [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ BYUS 자체제작 앱 & 알림 / 도움말 】─────────────────────" || _ghdr="--- [ BYUS Custom Apps, Alerts & Help ] -----------------------"
                     fi
-                    [ -n "$_ghdr" ] && ko " \033[1;36m%s\033[0m\n" "$_ghdr"
+                    if [ -n "$_ghdr" ]; then
+                        _m_disp_lines[${#_m_disp_lines[@]}]=" $(ko "\033[1;36m%s\033[0m" "$_ghdr")"
+                        _m_disp_nums[${#_m_disp_nums[@]}]=""
+                    fi
                 fi
 
                 # 서브메뉴(>) 여부 판별 및 메인 메뉴 아이콘 배지 결정
-                local _badge=""
+                local _badge="" _is_sub_flag=0
                 if [ -z "$title_of_menu_sub" ]; then
                     if [ "$key" = "apps" ]; then
                         _badge="\x1b[1;33m${_mb_star}\x1b[0m"
+                        _is_sub_flag=1
                         items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
                     else
                         local _t_it="${items#"${items%%[![:space:]]*}"}"
                         local _t_ln="${line#"${line%%[![:space:]]*}"}"
                         if [ "${_t_it:0:1}" = ">" ] || { [ "${_t_ln:0:3}" = "%%%" ] && [[ "${_t_ln#%%%}" == "${_t_ln#%%%[![:space:]]*}>"* || "${_t_ln:3:1}" = ">" ]]; }; then
                             _badge="\x1b[1;31m${_mb_tri}\x1b[0m"
+                            _is_sub_flag=1
                             items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
                         elif rx_match "$line" '^[[:space:]]*%%%[[:space:]]*>'; then
                             _badge="\x1b[1;31m${_mb_tri}\x1b[0m"
+                            _is_sub_flag=1
                             items="$(echo "$items" | sed -e 's/^[[:space:]]*>//')"
                         else
                             _badge="\x1b[1;32m${_mb_dia}\x1b[0m"
                         fi
                     fi
-                fi
-
-                # titleansi
-                # items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g')")
-                # > 빨간색 ooldscut 진한흰색
-                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m>\1\o033[0m/")")
-
-                # 메인 메뉴일 때 korea.srt.py 스타일 아이콘 배지 부여
-                if [ -z "$title_of_menu_sub" ]; then
-                    printf "\e[1m%-3s\e[0m ${_badge} ${items}\n" ${menu_idx}.
                 else
-                    printf "\e[1m%-3s\e[0m ${items}\n" ${menu_idx}.
+                    if printf '%s' "$items" | grep -q '>'; then
+                        _is_sub_flag=1
+                    fi
                 fi
+
+                items=$(echo -e "$(echo "$items" | sed -e 's/^>/\o033[1;31m>\o033[0m/g' -e "s/\(.*\[$ooldscut\].*\)$/\o033[1;37m>\1\o033[0m/")")
+                _m_item_titles[$menu_idx]="$items"
+                _m_item_keys[$menu_idx]="$key"
+                _m_item_is_sub[$menu_idx]="$_is_sub_flag"
+
+                if [ -z "$title_of_menu_sub" ]; then
+                    _m_disp_lines[${#_m_disp_lines[@]}]="$(printf "\e[1m%-3s\e[0m ${_badge} ${items}" ${menu_idx}.)"
+                else
+                    _m_disp_lines[${#_m_disp_lines[@]}]="$(printf "\e[1m%-3s\e[0m ${items}" ${menu_idx}.)"
+                fi
+                _m_disp_nums[${#_m_disp_nums[@]}]="$menu_idx"
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
             if [ -z "$title_of_menu_sub" ]; then
-                printf "\e[1m%-3s\e[0m \x1b[1;30m${_mb_dia}\x1b[0m Exit [q]\n" "0."
+                _m_disp_lines[${#_m_disp_lines[@]}]="$(printf "\e[1m%-3s\e[0m \x1b[1;30m${_mb_dia}\x1b[0m Exit [q]" "0.")"
             else
-                echo "0.  Exit [q]"
+                _m_disp_lines[${#_m_disp_lines[@]}]="0.  Exit [q]"
             fi
-            # 하단 단축키 안내는 [?] help 입력 시(menu_keyhelp)에만 출력한다.
-            echo "=============================================="
+            _m_disp_nums[${#_m_disp_nums[@]}]=""
+
+            local _m_painted=0 _m_peeked=0 _m_term_lines="${LINES:-}"
+            [ -n "$_m_term_lines" ] || _m_term_lines="$(tput lines 2>/dev/null)"
+            [ -n "$_m_term_lines" ] || _m_term_lines=24
+
+            _m_render_screen() {
+                local _do_home="${1:-0}" _di _dn _dl _pfx _tmp_nl _card_only=0
+                if [ "$_do_home" = "0" ]; then
+                    printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/'
+                    [ -n "$_m_pre_out" ] && printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/'
+                elif [ "$_m_peeked" -eq 1 ]; then
+                    printf '\033[2J\033[H'
+                    printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/'
+                    [ -n "$_m_pre_out" ] && printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/'
+                    _m_peeked=0
+                elif [ "$_m_painted" -gt 0 ] && [ "$_m_painted" -lt "$_m_term_lines" ]; then
+                    printf '\r\033[K\033[%dA' "$_m_painted"
+                elif [ "$menu_idx" -ge 1 ]; then
+                    printf '\r\033[K\033[6A'
+                    _card_only=1
+                fi
+
+                if [ "$_card_only" -eq 0 ]; then
+                    _m_painted=0
+                    for ((_di = 0; _di < ${#_m_disp_lines[@]}; _di++)); do
+                        _dl="${_m_disp_lines[$_di]}"
+                        _dn="${_m_disp_nums[$_di]}"
+                        if [ -n "$_dn" ] && [ "$_dn" = "$_m_nav_cur" ]; then
+                            _pfx="\x1b[1;33m${_mb_tri}\x1b[0m "
+                        else
+                            _pfx="  "
+                        fi
+                        _tmp_nl="${_dl//[!$'\n']/}"
+                        _m_painted=$((_m_painted + ${#_tmp_nl} + 1))
+                        _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
+                        printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
+                    done
+                    if [ "$menu_idx" -ge 1 ]; then
+                        _m_painted=$((_m_painted + 6))
+                    else
+                        _m_painted=$((_m_painted + 1))
+                    fi
+                fi
+
+                if [ "$menu_idx" -ge 1 ]; then
+                    _render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx"
+                else
+                    printf "\r==============================================\x1b[K\n"
+                fi
+            }
+            _m_render_screen 0
         fi
         ############## 메뉴 출력 끝 ###############
         [[ $chosen_command_sub == "{}" ]] && [[ "$cmd_choice_scut" ]] && choice="$cmd_choice_scut" && cmd_choice_scut=""
@@ -1707,14 +2021,39 @@ menufunc() {
             history -r
             _mp="$(menu_prompt "$menu_idx")"
             while :; do
-                menu_read "$_mp" choice choice1
+                menu_read "$_mp" choice choice1 1
                 _rr=$?
-                # [?] 는 단축키 안내를 아래쪽에 몇줄만 띄우고, 화면을 지우지 않고 다시 입력받는다
-                if [ "$choice" = "?" ]; then
-                    menu_keyhelp
+                if [ "$choice" = "__NAV_UP__" ] && [ "$menu_idx" -ge 1 ]; then
+                    _m_nav_moved=1
+                    _m_nav_cur=$((_m_nav_cur - 1))
+                    [ "$_m_nav_cur" -lt 1 ] && _m_nav_cur="$menu_idx"
+                    _m_render_screen 1
                     choice=""
                     choice1=""
                     continue
+                elif [ "$choice" = "__NAV_DOWN__" ] && [ "$menu_idx" -ge 1 ]; then
+                    _m_nav_moved=1
+                    _m_nav_cur=$((_m_nav_cur + 1))
+                    [ "$_m_nav_cur" -gt "$menu_idx" ] && _m_nav_cur=1
+                    _m_render_screen 1
+                    choice=""
+                    choice1=""
+                    continue
+                elif [ "$choice" = "__NAV_LEFT__" ] || [ "$choice" = "__NAV_RIGHT__" ]; then
+                    choice=""
+                    choice1=""
+                    continue
+                fi
+                # [?] 는 단축키 안내를 아래쪽에 몇줄만 띄우고, 화면을 지우지 않고 다시 입력받는다
+                if [ "$choice" = "?" ]; then
+                    menu_keyhelp
+                    _m_peeked=1
+                    choice=""
+                    choice1=""
+                    continue
+                fi
+                if [ -z "$choice" ] && [ "$_m_nav_moved" -eq 1 ] && [ "$_rr" -eq 0 ]; then
+                    choice="$_m_nav_cur"
                 fi
                 [ "$_rr" -eq 1 ] && choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
                 break
@@ -1925,49 +2264,39 @@ menufunc() {
                         ####################### choice_list #######################
                         choice_list() {
                             local IFS=$' \t\n'
-                            echo
+                            local _cl_hdr_buf="" _cl_pre_out="" _cl_pg_first="" _cl_pg_last=""
+                            local -a _cl_disp_lines _cl_disp_nums
+                            _cl_disp_lines=()
+                            _cl_disp_nums=()
 
                             # scut history 관리 -> flow
                             scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
                             updatescut
 
-                            echo -n "=============================================="
-                            echo -n " :: $cmdloop"
-                            echo
                             local _vmode_badge=""
                             if [ "${GOVIEW:-easy}" = "easy" ]; then
                                 [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 쉬움 (V 로 전환)')" || _vmode_badge="View: Easy (toggle V)"
                             else
                                 [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 명령어 (V 로 전환)')" || _vmode_badge="View: Cmd (toggle V)"
                             fi
-                            echo -ne "* \x1b[1;37;45m $title_of_menu CMDs \x1b[0m $(printf "${flow} \033[1;33;44m pwd: %s \033[0m" "$(pwd)")  \x1b[1;36m${_vmode_badge}\x1b[0m\n"
-                            echo "=============================================="
-                            # pre excute
-
-                            for items in "${pre_commands[@]}"; do
-                                eval "${items#%% }" | sed 's/^[[:space:]]*/  /g'
-                            done > >(
-                                output=$(cat)
-                                [ -n "$output" ] && {
-                                    [ "$(echo "$output" | grep -E '0m')" ] && {
-                                        echo "$output"
-                                        # cmdline menu_list print -pre_comm
-                                        echo "=============================================="
-                                    } || {
-                                        CYN
-                                        echo "$output"
-                                        NC
-                                        #if [ -f /dev/shm/dlines ] ; then
-                                        #dlines "$( </dev/shm/dlines)" && rm -f /dev/shm/dlines 2>/dev/null
-                                        #	dline
-                                        #echo
-                                        #else
-                                        echo "=============================================="
-                                        #fi
-                                    }
-                                    #sleep 0.1
-                                }
-                            ) # end of "done > > ("
+                            _cl_hdr_buf=$'\n'"============================================== :: $cmdloop"$'\n'
+                            _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge")"$'\n'
+                            _cl_hdr_buf="${_cl_hdr_buf}=============================================="$'\n'
+                            # pre excute (1회 캡처 캐싱)
+                            if [ ${#pre_commands[@]} -gt 0 ]; then
+                                local _pc_raw="" _pc_item
+                                for _pc_item in "${pre_commands[@]}"; do
+                                    _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
+                                done
+                                _pc_raw="${_pc_raw%$'\n'}"
+                                if [ -n "$_pc_raw" ]; then
+                                    if printf '%s' "$_pc_raw" | grep -qE '0m'; then
+                                        _cl_pre_out="${_pc_raw}"$'\n'"=============================================="
+                                    else
+                                        _cl_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================' "$_pc_raw")"
+                                    fi
+                                fi
+                            fi
 
                             display_idx=1
                             unset original_indices
@@ -1980,8 +2309,8 @@ menufunc() {
                             _term_lines="${LINES:-}"
                             [ -n "$_term_lines" ] || _term_lines="$(tput lines 2>/dev/null)"
                             [ -n "$_term_lines" ] || _term_lines=24
-                            _max_body_lines=$((_term_lines - 11))
-                            [ "$_max_body_lines" -lt 8 ] && _max_body_lines=8
+                            _max_body_lines=$((_term_lines - 17))
+                            [ "$_max_body_lines" -lt 6 ] && _max_body_lines=6
 
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
                                 c_cmd="${chosen_commands[$((item - 1))]}"
@@ -2057,14 +2386,20 @@ menufunc() {
                                     continue
                                 fi
 
+                                local _cur_item_no=$((display_idx - 1))
+                                [ -z "${_cl_pg_first:-}" ] && _cl_pg_first=$_cur_item_no
+                                _cl_pg_last=$_cur_item_no
+
                                 if [ -n "$_pending_hdr_lines" ]; then
-                                    echo -e "$_pending_hdr_lines"
+                                    _cl_disp_lines[${#_cl_disp_lines[@]}]="$(echo -e "$_pending_hdr_lines")"
+                                    _cl_disp_nums[${#_cl_disp_nums[@]}]=""
                                     _pending_hdr_lines=""
                                 fi
 
                                 if [ "${GOVIEW:-easy}" = "easy" ]; then
-                                    # 쉬움 모드 렌더링 (직접 stdout 출력)
-                                    render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment"
+                                    # 쉬움 모드 렌더링 (배열에 캡처하여 커서 이동 시 재파싱 0회)
+                                    _cl_disp_lines[${#_cl_disp_lines[@]}]="$(render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment")"
+                                    _cl_disp_nums[${#_cl_disp_nums[@]}]="$_cur_item_no"
                                     prev_comment=""
                                 else
                                     # 기존 명령어 모드 렌더링
@@ -2109,11 +2444,11 @@ menufunc() {
                                         processed_cmd="${c_cmd:0:max_len}..."
                                     fi
 
-                                    printf "\e[1m%-3s\e[0m " ${pi}
                                     # [규칙] 널명령(: 라벨) 색칠 분리
                                     #  ': 라벨 ; 명령' 의 라벨은 색칠 규칙 대상에서 완전히 제외하고,
                                     #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
-                                    local _kbadge _rendered
+                                    local _pi_pfx _kbadge _rendered
+                                    _pi_pfx="$(printf "\e[1m%-3s\e[0m " "${pi}")"
                                     _kbadge="$(_cmd_kind_badge "$c_cmd")"
                                     _rendered="$(echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
@@ -2136,92 +2471,144 @@ menufunc() {
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
                                     if [ -n "$_kbadge" ]; then
-                                        printf "%s %b\n" "$_rendered" "$_kbadge"
+                                        _cl_disp_lines[${#_cl_disp_lines[@]}]="$(printf "%s%s %b" "$_pi_pfx" "$_rendered" "$_kbadge")"
                                     else
-                                        printf "%s\n" "$_rendered"
+                                        _cl_disp_lines[${#_cl_disp_lines[@]}]="$(printf "%s%s" "$_pi_pfx" "$_rendered")"
                                     fi
+                                    _cl_disp_nums[${#_cl_disp_nums[@]}]="$_cur_item_no"
                                 fi
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
-                            echo "=============================================="
-                            if [ "$_cmd_total_pages" -gt 1 ]; then
-                                if [ "${_cmd_page_all:-0}" -eq 1 ]; then
-                                    if [ "$GOLANG" = "kr" ]; then
-                                        ko "  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\n" "$_cmd_total_pages"
-                                    else
-                                        printf "  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\n" "$_cmd_total_pages"
-                                    fi
+                            local _cl_nav_cur="${_cl_pg_first:-1}" _cl_nav_moved=0 _cl_painted=0 _cl_peeked=0
+                            local _cl_tri="▶"
+                            [ "${GOTERM_ENC:-}" = "euckr" ] && _cl_tri="$(ko '▶')"
+
+                            _cl_render_screen() {
+                                local _do_home="${1:-0}" _di _dl _dn _pfx _tmp_nl _card_only=0
+                                if [ "$_do_home" = "0" ]; then
+                                    printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/'
+                                    [ -n "$_cl_pre_out" ] && printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/'
+                                elif [ "$_cl_peeked" -eq 1 ]; then
+                                    printf '\033[2J\033[H'
+                                    printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/'
+                                    [ -n "$_cl_pre_out" ] && printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/'
+                                    _cl_peeked=0
+                                elif [ "$_cl_painted" -gt 0 ] && [ "$_cl_painted" -lt "$_term_lines" ]; then
+                                    printf '\r\033[K\033[%dA' "$_cl_painted"
                                 else
-                                    if [ "$GOLANG" = "kr" ]; then
-                                        ko "  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\n" "$_cmd_page" "$_cmd_total_pages"
-                                    else
-                                        printf "  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\n" "$_cmd_page" "$_cmd_total_pages"
-                                    fi
+                                    printf '\r\033[K\033[6A'
+                                    _card_only=1
                                 fi
-                            fi
 
-                            # __이후.점구분안구분 장애 trash
-                            #-e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' `# var 변수 자주색` \
+                                if [ "$_card_only" -eq 0 ]; then
+                                    _cl_painted=0
+                                    for ((_di = 0; _di < ${#_cl_disp_lines[@]}; _di++)); do
+                                        _dl="${_cl_disp_lines[$_di]}"
+                                        _dn="${_cl_disp_nums[$_di]}"
+                                        if [ -n "$_dn" ] && [ "$_dn" = "$_cl_nav_cur" ]; then
+                                            _pfx="\x1b[1;33m${_cl_tri}\x1b[0m "
+                                        else
+                                            _pfx="  "
+                                        fi
+                                        _tmp_nl="${_dl//[!$'\n']/}"
+                                        _cl_painted=$((_cl_painted + ${#_tmp_nl} + 1))
+                                        _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
+                                        printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
+                                    done
+                                    if [ "$_cmd_total_pages" -gt 1 ]; then
+                                        _cl_painted=$((_cl_painted + 1))
+                                        if [ "${_cmd_page_all:-0}" -eq 1 ]; then
+                                            if [ "$GOLANG" = "kr" ]; then
+                                                ko "\r  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\x1b[K\n" "$_cmd_total_pages"
+                                            else
+                                                printf "\r  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\x1b[K\n" "$_cmd_total_pages"
+                                            fi
+                                        else
+                                            if [ "$GOLANG" = "kr" ]; then
+                                                ko "\r  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\x1b[K\n" "$_cmd_page" "$_cmd_total_pages"
+                                            else
+                                                printf "\r  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\x1b[K\n" "$_cmd_page" "$_cmd_total_pages"
+                                            fi
+                                        fi
+                                    fi
+                                    _cl_painted=$((_cl_painted + 6))
+                                fi
 
-                            ############ read cmd_choice
-                            ############ read cmd_choice
-                            #old_cmd_choice="$cmd_choice" && { IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1; }
+                                local _orig_sel="${original_indices[$((_cl_nav_cur - 1))]-}"
+                                _render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_cmd_total_pages" "$_cmd_page" "$((display_idx - 1))"
+                            }
+                            _cl_render_screen 0
+
                             old_cmd_choice="$cmd_choice"
                             cmd_choice=""
-                            # readcmd_choice
 
-                            if [ -z "$pre_commands" ]; then
-                                while :; do
-                                    # 입력이 없으면 있을때 까지 loop
-                                    trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
-                                    history -r
-                                    if [ -n "$newcmds" ]; then
-                                        #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
-                                        unset -v newcmds newcmds1
-                                    else
-                                        menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
+                            # menu_prompt loop (normal)
+                            # menu_prompt loop (pre_commands 통합)
+                            while :; do
+                                trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
+                                history -r
+                                if [ -n "$newcmds" ]; then
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 1; }
+                                    _cl_rc=$?
+                                    unset -v newcmds newcmds1
+                                else
+                                    menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 1
+                                    _cl_rc=$?
+                                fi
+                                trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
+
+                                if [ "$cmd_choice" = "__NAV_UP__" ]; then
+                                    _cl_nav_moved=1
+                                    _cl_nav_cur=$((_cl_nav_cur - 1))
+                                    [ "$_cl_nav_cur" -lt "${_cl_pg_first:-1}" ] && _cl_nav_cur="${_cl_pg_last:-$((display_idx - 1))}"
+                                    _cl_render_screen 1
+                                    cmd_choice=""
+                                    cmd_choice1=""
+                                    continue
+                                elif [ "$cmd_choice" = "__NAV_DOWN__" ]; then
+                                    _cl_nav_moved=1
+                                    _cl_nav_cur=$((_cl_nav_cur + 1))
+                                    [ "$_cl_nav_cur" -gt "${_cl_pg_last:-$((display_idx - 1))}" ] && _cl_nav_cur="${_cl_pg_first:-1}"
+                                    _cl_render_screen 1
+                                    cmd_choice=""
+                                    cmd_choice1=""
+                                    continue
+                                elif [ "$cmd_choice" = "__NAV_RIGHT__" ]; then
+                                    if [ "$_cmd_total_pages" -gt 1 ] && [ "${_cmd_page_all:-0}" -eq 0 ]; then
+                                        cmd_choice="]"
+                                        break
                                     fi
-                                    #        IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
-                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
-                                    # [#h] 설명 조회("?8") 처리였다면 목록 제자리에서 다시 입력받는다
-                                    cmd_desc_peek && continue
-                                    # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
-                                    # (이전에는 여기서 menufunc 를 직접 호출해서 아래 case 의 b 처리와 이중 호출됨)
-                                    if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
-                                        cmd_choice="b"
-                                        echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                    cmd_choice=""
+                                    cmd_choice1=""
+                                    continue
+                                elif [ "$cmd_choice" = "__NAV_LEFT__" ]; then
+                                    if [ "$_cmd_total_pages" -gt 1 ] && [ "${_cmd_page_all:-0}" -eq 0 ]; then
+                                        cmd_choice="["
+                                        break
                                     fi
-                                    [[ -n $cmd_choice ]] && break
-                                done
-                            else
-                                # pre_command refresh
-                                # ([#h] 설명조회("?8")로 목록을 제자리 유지하기 위해 루프로 감싼다.
-                                #  peek 아니면 break 로 빠져나가 기존 동작을 그대로 따른다)
-                                while :; do
-                                    trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
-                                    history -r
-                                    if [ -n "$newcmds" ]; then
-                                        #readxy "$newcmds $newcmds1" && cmd_choice="$newcmds" && cmd_choice1="$newcmds1"
-                                        readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1; }
-                                        unset -v newcmds newcmds1
-                                    else
-                                        menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1
-                                    fi
-                                    #    IFS=' ' read -rep ">>> Select No. ([0-$((display_idx - 1))],h,e,sh,conf): " cmd_choice cmd_choice1 </dev/tty
-                                    [[ $? -eq 1 ]] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
-                                    trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
-                                    # [#h] 설명 조회("?8") 처리였다면 목록 제자리에서 다시 입력받는다
-                                    cmd_desc_peek && continue
-                                    # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
-                                    if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
-                                        cmd_choice="b"
-                                        echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
-                                    fi
-                                    break
-                                done
-                            fi
+                                    cmd_choice=""
+                                    cmd_choice1=""
+                                    continue
+                                fi
+
+                                [ "$_cl_rc" -eq 1 ] && cmd_choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
+                                # [#h] 설명 조회("?8" 또는 "?") 처리였다면 목록 제자리에서 다시 입력받는다
+                                if cmd_desc_peek; then
+                                    _cl_peeked=1
+                                    continue
+                                fi
+                                # 커서를 이동한 상태에서 빈 Enter 를 치면 현재 커서 항목 실행
+                                if [ -z "${cmd_choice-}" ] && [ "$_cl_nav_moved" -eq 1 ]; then
+                                    cmd_choice="$_cl_nav_cur"
+                                fi
+                                # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
+                                if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
+                                    cmd_choice="b"
+                                    echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                fi
+                                [ -n "$pre_commands" ] && break
+                                [[ -n $cmd_choice ]] && break
+                            done
                             readxx $LINENO cmd_choice: $cmd_choice
 
                             ############ read cmd_choice
