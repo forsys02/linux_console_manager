@@ -327,19 +327,13 @@ golang_title_of() { # $1 = scut
 # 바로가기 배열 재구축 (중복검사 대화상자는 포함하지 않는다)
 #   언어 전환 직후 scuttitle/scutsub/st 가 당장 필요하므로 캐시를 바로 다시 만들어 준다.
 #   scutrelay / relay 태그까지 함께 붙여 scutsub·notscutrelay 가 정상 동작하게 한다.
+#   [규칙] for-in 확장은 경로확장(glob)을 수행하므로 루프 동안 set -f (noglob) 로 끄고 복원한다.
+#   [규칙] [scut] 추출은 파라미터 치환으로 fork 0회로 처리한다.
 build_shortcutarr() {
     IFS=$'\n' _bsi="$(cat "$env" | grep -E "^%%%|^\{submenu.*" | awk '/^%%%/ {if (prev) print prev; prev = $0; next} /^{submenu_/ {print prev "@@@" $0; prev = ""; next} {if (prev) print prev; print $0; prev = ""} END {if (prev) print prev}' | grep -E '\[.+\]')"
-    shortcutarr=()
-    shortcutstr="@@@"
-    _bidx=0
-    # [규칙] for-in 확장은 단어마다 **경로확장(glob)** 을 수행한다. 메뉴 라벨의 `[scut]` 가
-    #        파일 패턴으로 해석돼 /root 처럼 파일이 많은 디렉터리에서 22초(실측)가 걸리고,
-    #        같은 이름의 파일이 있으면 라벨이 파일명으로 치환되는 버그도 있었다.
-    #        → 루프 동안만 set -f (noglob) 로 끄고 원래 상태로 복원한다.
+    shortcutarr=(); shortcutstr="@@@"; _bidx=0
     case $- in *f*) _wasf=1 ;; *) _wasf=0 ;; esac
     set -f
-    # [규칙] 항목수(482개)만큼 `echo "$x" | awk` 를 돌리면 fork 2회×482. 구서버(bash 2.05)에서 0.5초+.
-    #        `[scut]` 추출은 파라미터 치환으로 동일 결과를 fork 0회로 얻는다 (awk 정규식과 실측 동일).
     for _bitems in $_bsi; do
         _bsname="${_bitems#*[}"
         _bsname="${_bsname%%]*}"
@@ -1432,6 +1426,19 @@ show_cmd_card() {
 ###############################################################
 # [mc.py 참조] 중복 번호([1], 1., [Step 1] 등) 제거 & 하단 실시간 상세 카드
 ###############################################################
+# 이전 화면을 스크롤백 버퍼 위로 완전히 밀어올린 뒤 현재 뷰포트 최상단(1,1)부터 깨끗하게 시작
+# - 최신 clear 의 \033[3J(스크롤백 삭제)를 쓰지 않아 마우스 스크롤업으로 이전 메뉴/출력을 그대로 볼 수 있음
+_clear_keep_scrollback() {
+    local _tl="${LINES:-}" _i=0 _nl_buf=""
+    [ -n "$_tl" ] || _tl="$(tput lines 2>/dev/null)"
+    [ -n "$_tl" ] || _tl=24
+    while [ "$_i" -lt "$_tl" ]; do
+        _nl_buf="${_nl_buf}"$'\n'
+        _i=$((_i + 1))
+    done
+    printf '%s\033[H\033[2J' "$_nl_buf"
+}
+
 _strip_dup_num() {
     local _t="$1"
     _t="${_t#"${_t%%[![:space:]]*}"}"
@@ -1838,7 +1845,7 @@ menufunc() {
         ############## 메뉴 출력 ###############
 
         [ -z "$debug" ] && [ -z "$noclear" ] && {
-            clear || reset
+            _clear_keep_scrollback
             unset noclear
         }
         local _m_nav_cur=1 _m_nav_moved=0
@@ -1852,7 +1859,7 @@ menufunc() {
         _m_detail_cache=()
 
         if [ -z "$skipmain" ]; then
-            _m_hdr_buf=$'\n'"============================================== :$choiceloop"$'\n'
+            _m_hdr_buf="============================================== :$choiceloop"$'\n'
             _m_hdr_buf="${_m_hdr_buf}$(echo -e "* $title $flow")"$'\n'
             _m_hdr_buf="${_m_hdr_buf}=============================================="$'\n'
             if [ ! "$title_of_menu_sub" ]; then
@@ -2314,7 +2321,7 @@ menufunc() {
                             else
                                 [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 명령어 (V 로 전환)')" || _vmode_badge="View: Cmd (toggle V)"
                             fi
-                            _cl_hdr_buf=$'\n'"============================================== :: $cmdloop"$'\n'
+                            _cl_hdr_buf="============================================== :: $cmdloop"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge")"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}=============================================="$'\n'
                             # pre excute (1회 캡처 캐싱 + 중복 ==== 테두리 제거)
@@ -2344,7 +2351,7 @@ menufunc() {
                             _term_lines="${LINES:-}"
                             [ -n "$_term_lines" ] || _term_lines="$(tput lines 2>/dev/null)"
                             [ -n "$_term_lines" ] || _term_lines=24
-                            _max_body_lines=$((_term_lines - 19))
+                            _max_body_lines=$((_term_lines - 20))
                             [ "$_max_body_lines" -lt 6 ] && _max_body_lines=6
 
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
@@ -2356,10 +2363,14 @@ menufunc() {
                                         _pc="${_tc#\#}"
                                         _pc="${_pc#"${_pc%%[![:space:]]*}"}"
                                         if [ "${GOVIEW:-easy}" != "easy" ]; then
+                                            [ "$_cur_lines" -gt 0 ] && [ "$_hdr_cnt" -eq 0 ] && [ -n "$_pc" ] && _hdr_cnt=$((_hdr_cnt + 1))
                                             _hdr_cnt=$((_hdr_cnt + 1))
                                         else
                                             case "$_pc" in
-                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*) _hdr_cnt=$((_hdr_cnt + 1)) ;;
+                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
+                                                    [ "$_cur_lines" -gt 0 ] && [ "$_hdr_cnt" -eq 0 ] && _hdr_cnt=$((_hdr_cnt + 1))
+                                                    _hdr_cnt=$((_hdr_cnt + 1))
+                                                    ;;
                                             esac
                                         fi
                                         continue
@@ -2403,6 +2414,10 @@ menufunc() {
                                                 _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}"
                                             fi
                                         elif [ "${GOVIEW:-easy}" != "easy" ]; then
+                                            # 목록 중간(이미 항목이 출력된 뒤)에 새 소제목 주석이 나오면 위에 빈 줄 1줄 자동 삽입
+                                            if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
+                                                _pending_hdr_lines=$'\n'
+                                            fi
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
                                                     _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
@@ -2414,6 +2429,9 @@ menufunc() {
                                         else
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
+                                                    if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
+                                                        _pending_hdr_lines=$'\n'
+                                                    fi
                                                     _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     ;;
                                             esac
@@ -2543,6 +2561,7 @@ menufunc() {
                             _cl_render_screen() {
                                 local _do_home="${1:-0}" _di _dl _dn _pfx _tmp_nl _card_only=0
                                 if [ "$_do_home" = "0" ]; then
+                                    [ -z "$debug" ] && _clear_keep_scrollback
                                     printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/'
                                     [ -n "$_cl_pre_out" ] && printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/'
                                 elif [ "$_cl_peeked" -eq 1 ]; then
@@ -2573,7 +2592,8 @@ menufunc() {
                                         printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
                                     done
                                     if [ "$_cmd_total_pages" -gt 1 ]; then
-                                        _cl_painted=$((_cl_painted + 1))
+                                        _cl_painted=$((_cl_painted + 2))
+                                        printf "\r\x1b[K\n"
                                         if [ "${_cmd_page_all:-0}" -eq 1 ]; then
                                             if [ "$GOLANG" = "kr" ]; then
                                                 ko "\r  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\x1b[K\n" "$_cmd_total_pages"
