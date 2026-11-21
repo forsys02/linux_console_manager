@@ -1198,6 +1198,7 @@ render_item_easy() {
                 ;;
         esac
     fi
+    title="$(_strip_dup_num "$title")"
 
     # 3. 명령어 힌트 (쉬움 모드에서 실제 실행될 명령 요약 노출)
     local raw_hint="$c_cmd"
@@ -1301,6 +1302,7 @@ show_cmd_card() {
         title="$(easy_auto_title "$cmd")"
         body=""
     fi
+    title="$(_strip_dup_num "$title")"
 
     echo
     echo "======================================================================"
@@ -1428,8 +1430,24 @@ show_cmd_card() {
 }
 
 ###############################################################
-# [mc.py 참조] 하단 실시간 [선택된 항목 상세] 카드 렌더링 헬퍼
+# [mc.py 참조] 중복 번호([1], 1., [Step 1] 등) 제거 & 하단 실시간 상세 카드
 ###############################################################
+_strip_dup_num() {
+    local _t="$1"
+    _t="${_t#"${_t%%[![:space:]]*}"}"
+    case "$_t" in
+        "["[0-9]"]"*|"["[0-9][0-9]"]"*|"["[0-9]"-"[0-9]"]"*|"["[Ss]"tep "[0-9]"]"*)
+            _t="${_t#*]}"
+            _t="${_t#"${_t%%[![:space:]]*}"}"
+            ;;
+        [0-9]". "*|[0-9][0-9]". "*|[0-9]"-"[0-9]". "*)
+            _t="${_t#*. }"
+            _t="${_t#"${_t%%[![:space:]]*}"}"
+            ;;
+    esac
+    printf '%s' "$_t"
+}
+
 _render_cmd_detail_card() {
     local _sel="$1" _orig="$2" _tpg="${3:-1}" _cpg="${4:-1}" _max="${5:-1}"
     local _cmd="" _desc="" _title="" _body="" _badge="" _is_sub=0
@@ -1481,6 +1499,7 @@ _render_cmd_detail_card() {
     else
         _title="$(easy_auto_title "$_cmd")"
     fi
+    _title="$(_strip_dup_num "$_title")"
     [ -z "$_title" ] && _title="#$_sel"
     [ ${#_title} -gt 54 ] && _title="${_title:0:51}..."
 
@@ -1498,7 +1517,8 @@ _render_cmd_detail_card() {
     local _vars=""
     _vars="$(printf '%s' "$_cmd" | awk '{ s=$0; while (match(s, /var[A-Z][a-zA-Z0-9_@-]*/)) { v=substr(s, RSTART+3, RLENGTH-3); sub(/__.*/, "", v); if (!seen[v]++) out = out (out ? ", " : "") v; s=substr(s, RSTART+RLENGTH) } } END { print out }')"
 
-    # 항상 고정 6줄 출력 (커서 이동 시 줄 수 변동 0)
+    # 항상 고정 8줄 출력 (상단 여백 1줄 + 카드 6줄 + 하단 여백 1줄)
+    printf "\r\x1b[K\n"
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
         ko "\r %s \x1b[1;33m선택된 항목 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
@@ -1543,6 +1563,7 @@ _render_cmd_detail_card() {
         [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[${_lr}]\x1b[0m Page(${_cpg}/${_tpg})"
         printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Run  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
     fi
+    printf "\r\x1b[K\n"
 }
 
 _render_main_detail_card() {
@@ -1587,6 +1608,7 @@ _render_main_detail_card() {
                 else if (rawc != "") print rawc;
             }
         ' "$env" 2>/dev/null)"
+        _preview="$(_strip_dup_num "$_preview")"
         [ -z "$_preview" ] && _preview="-"
         _m_detail_cache[$_sel]="$_preview"
     fi
@@ -1611,7 +1633,8 @@ _render_main_detail_card() {
     fi
 
     local _clean_title="$_m_title"
-    _clean_title="$(printf '%s' "$_clean_title" | sed -e 's/\x1b\[[0-9;]*m//g')"
+    _clean_title="$(printf '%s' "$_clean_title" | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^[[:space:]]*>//')"
+    _clean_title="$(_strip_dup_num "$_clean_title")"
     [ ${#_clean_title} -gt 50 ] && _clean_title="${_clean_title:0:47}..."
 
     local _badge=""
@@ -1629,7 +1652,8 @@ _render_main_detail_card() {
         fi
     fi
 
-    # 항상 고정 6줄 출력
+    # 항상 고정 8줄 출력 (상단 여백 1줄 + 카드 6줄 + 하단 여백 1줄)
+    printf "\r\x1b[K\n"
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
         ko "\r %s \x1b[1;33m선택된 메뉴 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_clean_title" "$_badge"
@@ -1660,6 +1684,7 @@ _render_main_detail_card() {
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
         printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Open  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help  \x1b[1;37m[q]\x1b[0m Exit\x1b[K\n" "$_arr" "$_max"
     fi
+    printf "\r\x1b[K\n"
 }
 
 ###############################################################
@@ -1842,19 +1867,19 @@ menufunc() {
                 fi
                 _m_hdr_buf="${_m_hdr_buf}$(printf '%s - %b%b\n' "$_os_name" "$_host_str" "$_net_bar")"$'\n'
             else
-                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱)
+                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱 + 중복 ==== 제거)
                 if [ ${#pre_commands[@]} -gt 0 ]; then
                     local _pc_raw="" _pc_item
                     for _pc_item in "${pre_commands[@]}"; do
                         readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
                         _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
                     done
-                    _pc_raw="${_pc_raw%$'\n'}"
+                    _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*====*.*$/d')"
                     if [ -n "$_pc_raw" ]; then
                         if printf '%s' "$_pc_raw" | grep -qE '0m'; then
-                            _m_pre_out="${_pc_raw}"$'\n'"=============================================="
+                            _m_pre_out="${_pc_raw}"$'\n'"=============================================="$'\n'
                         else
-                            _m_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================' "$_pc_raw")"
+                            _m_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================\n' "$_pc_raw")"
                         fi
                     fi
                 fi
@@ -1893,7 +1918,7 @@ menufunc() {
                     ((shortcut_idx++))
                 }
 
-                # 메인 메뉴일 때 (title_of_menu_sub 가 비어있을 때) 5대 테마 구분선 삽입
+                # 메인 메뉴일 때 (title_of_menu_sub 가 비어있을 때) 5대 테마 구분선 + 섹션 간 여백 삽입
                 if [ -z "$title_of_menu_sub" ]; then
                     local _ghdr=""
                     if [ "$menu_idx" -eq 1 ]; then
@@ -1908,9 +1933,17 @@ menufunc() {
                         [ "$GOLANG" = "kr" ] && _ghdr="───【 ◈ BYUS 자체제작 앱 & 알림 / 도움말 】─────────────────────" || _ghdr="--- [ BYUS Custom Apps, Alerts & Help ] -----------------------"
                     fi
                     if [ -n "$_ghdr" ]; then
+                        if [ "$menu_idx" -gt 1 ]; then
+                            _m_disp_lines[${#_m_disp_lines[@]}]=""
+                            _m_disp_nums[${#_m_disp_nums[@]}]=""
+                        fi
                         _m_disp_lines[${#_m_disp_lines[@]}]=" $(ko "\033[1;36m%s\033[0m" "$_ghdr")"
                         _m_disp_nums[${#_m_disp_nums[@]}]=""
                     fi
+                else
+                    # 서브메뉴일 때 제목 앞 중복 번호(예: BYUS 1. / 1단계: 등) 정리
+                    items="$(_strip_dup_num "$items")"
+                    items="$(printf '%s' "$items" | sed -e 's/^BYUS [0-9][0-9]*\.[[:space:]]*/BYUS /')"
                 fi
 
                 # 서브메뉴(>) 여부 판별 및 메인 메뉴 아이콘 배지 결정
@@ -1954,6 +1987,8 @@ menufunc() {
                 _m_disp_nums[${#_m_disp_nums[@]}]="$menu_idx"
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
+            _m_disp_lines[${#_m_disp_lines[@]}]=""
+            _m_disp_nums[${#_m_disp_nums[@]}]=""
             if [ -z "$title_of_menu_sub" ]; then
                 _m_disp_lines[${#_m_disp_lines[@]}]="$(printf "\e[1m%-3s\e[0m \x1b[1;30m${_mb_dia}\x1b[0m Exit [q]" "0.")"
             else
@@ -1978,7 +2013,7 @@ menufunc() {
                 elif [ "$_m_painted" -gt 0 ] && [ "$_m_painted" -lt "$_m_term_lines" ]; then
                     printf '\r\033[K\033[%dA' "$_m_painted"
                 elif [ "$menu_idx" -ge 1 ]; then
-                    printf '\r\033[K\033[6A'
+                    printf '\r\033[K\033[8A'
                     _card_only=1
                 fi
 
@@ -1998,7 +2033,7 @@ menufunc() {
                         printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl"
                     done
                     if [ "$menu_idx" -ge 1 ]; then
-                        _m_painted=$((_m_painted + 6))
+                        _m_painted=$((_m_painted + 8))
                     else
                         _m_painted=$((_m_painted + 1))
                     fi
@@ -2282,13 +2317,13 @@ menufunc() {
                             _cl_hdr_buf=$'\n'"============================================== :: $cmdloop"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge")"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}=============================================="$'\n'
-                            # pre excute (1회 캡처 캐싱)
+                            # pre excute (1회 캡처 캐싱 + 중복 ==== 테두리 제거)
                             if [ ${#pre_commands[@]} -gt 0 ]; then
                                 local _pc_raw="" _pc_item
                                 for _pc_item in "${pre_commands[@]}"; do
                                     _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
                                 done
-                                _pc_raw="${_pc_raw%$'\n'}"
+                                _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*====*.*$/d')"
                                 if [ -n "$_pc_raw" ]; then
                                     if printf '%s' "$_pc_raw" | grep -qE '0m'; then
                                         _cl_pre_out="${_pc_raw}"$'\n'"=============================================="
@@ -2309,7 +2344,7 @@ menufunc() {
                             _term_lines="${LINES:-}"
                             [ -n "$_term_lines" ] || _term_lines="$(tput lines 2>/dev/null)"
                             [ -n "$_term_lines" ] || _term_lines=24
-                            _max_body_lines=$((_term_lines - 17))
+                            _max_body_lines=$((_term_lines - 19))
                             [ "$_max_body_lines" -lt 6 ] && _max_body_lines=6
 
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
@@ -2362,12 +2397,24 @@ menufunc() {
                                         prev_comment="${_tc#\#}"
                                         prev_comment="${prev_comment#"${prev_comment%%[![:space:]]*}"}"
                                         prev_comment="${prev_comment%"${prev_comment##*[![:space:]]}"}"
-                                        if [ "${GOVIEW:-easy}" != "easy" ]; then
-                                            _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}    \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                        if [ -z "$prev_comment" ]; then
+                                            # 빈 '#' 주석은 지저분한 '#' 기호 대신 깔끔한 빈 줄(공백)로 표현
+                                            if [ "${GOVIEW:-easy}" != "easy" ]; then
+                                                _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}"
+                                            fi
+                                        elif [ "${GOVIEW:-easy}" != "easy" ]; then
+                                            case "$prev_comment" in
+                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
+                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
+                                                    ;;
+                                                *)
+                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}    \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                                    ;;
+                                            esac
                                         else
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
-                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m# ${prev_comment}\x1b[0m"
+                                                    _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     ;;
                                             esac
                                         fi
@@ -2438,6 +2485,16 @@ menufunc() {
                                     IFS="$_cl_ifs"
                                     unset -v _cl_ifs
 
+                                    # ': [1] 라벨 ; 명령' 또는 ': 1. 라벨 ; 명령' 에서 앞의 중복 번호 제거
+                                    case "$c_cmd" in
+                                        ": ["[0-9]"] "*|": ["[0-9][0-9]"] "*|": ["[0-9]"-"[0-9]"] "*)
+                                            c_cmd=": ${c_cmd#*] }"
+                                            ;;
+                                        ": "[0-9]". "*|": "[0-9][0-9]". "*|": "[0-9]"-"[0-9]". "*)
+                                            c_cmd=": ${c_cmd#*. }"
+                                            ;;
+                                    esac
+
                                     max_len=330
                                     processed_cmd="$c_cmd"
                                     if ((${#c_cmd} > max_len)); then
@@ -2496,7 +2553,7 @@ menufunc() {
                                 elif [ "$_cl_painted" -gt 0 ] && [ "$_cl_painted" -lt "$_term_lines" ]; then
                                     printf '\r\033[K\033[%dA' "$_cl_painted"
                                 else
-                                    printf '\r\033[K\033[6A'
+                                    printf '\r\033[K\033[8A'
                                     _card_only=1
                                 fi
 
@@ -2531,7 +2588,7 @@ menufunc() {
                                             fi
                                         fi
                                     fi
-                                    _cl_painted=$((_cl_painted + 6))
+                                    _cl_painted=$((_cl_painted + 8))
                                 fi
 
                                 local _orig_sel="${original_indices[$((_cl_nav_cur - 1))]-}"
