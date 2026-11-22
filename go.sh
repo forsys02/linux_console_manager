@@ -2318,7 +2318,7 @@ menufunc() {
                     choice1=""
                     continue
                 fi
-                if [ -z "$choice" ] && [ "$_m_nav_moved" -eq 1 ] && [ "$_rr" -eq 0 ]; then
+                if [ -z "$choice" ] && [ "$_rr" -eq 0 ] && [ "$menu_idx" -ge 1 ]; then
                     choice="$_m_nav_cur"
                 fi
                 [ "$_rr" -eq 1 ] && choice="q" # ctrl d 또는 ESC 로 빠져나가는 경우
@@ -2986,14 +2986,14 @@ menufunc() {
                                     _cl_peeked=1
                                     continue
                                 fi
-                                # 커서를 이동한 상태에서 빈 Enter 를 치면 현재 커서 항목 실행
-                                if [ -z "${cmd_choice-}" ] && [ "$_cl_nav_moved" -eq 1 ]; then
-                                    cmd_choice="$_cl_nav_cur"
-                                fi
-                                # flow 메뉴 하위 CMD 화면에서 엔터만 치면 flow 상위메뉴로 복귀
-                                if [ -z "${cmd_choice-}" ] && nav_peek | grep -q '^flow_'; then
+                                # flow 메뉴 하위 CMD 화면에서 커서를 움직이지 않고 엔터만 치면 flow 상위메뉴로 복귀
+                                if [ -z "${cmd_choice-}" ] && [ "$_cl_nav_moved" -eq 0 ] && nav_peek | grep -q '^flow_'; then
                                     cmd_choice="b"
                                     echo "Back to flow menu... [$(nav_peek | awk -F'|' '{print $1}')]"
+                                fi
+                                # 빈 Enter 를 치면 현재 커서 항목(초기 1번 또는 이동한 항목) 실행
+                                if [ -z "${cmd_choice-}" ] && [ "$_cl_rc" -eq 0 ]; then
+                                    cmd_choice="$_cl_nav_cur"
                                 fi
                                 [ -n "$pre_commands" ] && break
                                 [[ -n $cmd_choice ]] && break
