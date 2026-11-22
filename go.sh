@@ -5967,7 +5967,15 @@ push() {
     fi
 
     if [[ ${telegram_token} && ${telegram_chatid} ]]; then
-        _resp="$(curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id="${telegram_chatid}" -d text="${message:-ex) push \"msg\"}" 2>&1)"
+        local _send_msg="$message" _enc_msg
+        if [ ! "$(echo "$LANG" | grep -i "utf")" ] && command -v iconv >/dev/null 2>&1; then
+            _send_msg="$(printf '%s' "$_send_msg" | iconv -f EUC-KR -t UTF-8 2>/dev/null || printf '%s' "$_send_msg")"
+        fi
+        if [ "${#_send_msg}" -gt 3800 ]; then
+            _send_msg="$(printf '%s' "$_send_msg" | head -c 3800)"$'\n'"... (truncated: total ${#message} bytes)"
+        fi
+        _enc_msg="$(printf '%s' "${_send_msg:-ex) push \"msg\"}" | od -t x1 -A n | tr -d '\n' | tr ' ' '%')"
+        _resp="$(curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d "chat_id=${telegram_chatid}&text=${_enc_msg}" 2>&1)"
         result=$?
         if [ "$result" -eq 0 ] && echo "$_resp" | grep -q '"ok":true'; then
             GRN1 && echo "push msg sent"
@@ -5977,7 +5985,7 @@ push() {
             RED1
             case "$_code" in
                 401) ko "Err:401 -> 텔레그램 봇 토큰 인증 실패 (${_desc:-Unauthorized}) — ~/go.private.env 의 telegram_token 을 확인하세요" ;;
-                400) ko "Err:400 -> 잘못된 요청/ChatID 오류 (${_desc:-Bad Request}) — telegram_chatid(${telegram_chatid}) 를 확인하세요" ;;
+                400) ko "Err:400 -> 텔레그램 요청 오류 (${_desc:-Bad Request}) — ChatID(${telegram_chatid}) 또는 메시지 형식을 확인하세요" ;;
                 403) ko "Err:403 -> 봇 권한 거부 (${_desc:-Forbidden}) — 봇 대화방에서 /start 를 먼저 눌러주세요" ;;
                 404) ko "Err:404 -> 봇 토큰 형식 또는 API 경로 오류 (${_desc:-Not Found}) — telegram_token 을 확인하세요" ;;
                 *)   ko "Err:${_code:-API} -> 텔레그램 API 오류: ${_desc:-$_resp}" ;;
@@ -5999,7 +6007,7 @@ push() {
 }
 
 push1() {
-    local message _resp _desc _code
+    local message _resp _desc _code _send_msg _enc_msg
     message="$*"
     [ -z "$message" ] && IFS='' read -d '' -t1 message
     [ -z "$message" ] && message="$HOSTNAME"
@@ -6010,9 +6018,18 @@ push1() {
         return 1
     fi
 
+    _send_msg="$message"
+    if [ ! "$(echo "$LANG" | grep -i "utf")" ] && command -v iconv >/dev/null 2>&1; then
+        _send_msg="$(printf '%s' "$_send_msg" | iconv -f EUC-KR -t UTF-8 2>/dev/null || printf '%s' "$_send_msg")"
+    fi
+    if [ "${#_send_msg}" -gt 3800 ]; then
+        _send_msg="$(printf '%s' "$_send_msg" | head -c 3800)"$'\n'"... (truncated: total ${#message} bytes)"
+    fi
+    _enc_msg="$(printf '%s' "${_send_msg}" | od -t x1 -A n | tr -d '\n' | tr ' ' '%')"
+
     # Telegram으로 전송
     _resp="$(curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
-        -d chat_id="${telegram_chatid}" -d text="${message}" 2>&1)"
+        -d "chat_id=${telegram_chatid}&text=${_enc_msg}" 2>&1)"
 
     result=$?
     if [ "$result" -eq 0 ] && echo "$_resp" | grep -q '"ok":true'; then
