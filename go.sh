@@ -171,12 +171,19 @@ iconv_safe() { # 사용법 : iconv_safe <from> <to> <입력파일> <출력파일
 # go.sh 자체 리터럴(UTF-8) 을 터미널 인코딩으로 변환해 출력
 #   구서버(EUC-KR 터미널)에서는 go.sh 에 박힌 한글 리터럴만 깨져 보인다.
 #   go.env 는 iconv 로 변환되지만 go.sh 자신은 변환되지 않아 하단 안내가 두부더미가 된다.
+#   [규칙] Bash 2.05 호환 & 이중 iconv 깨짐 방지:
+#     1) "${@:2}" 는 Bash 2.05 에서 인자들을 공백 하나로 합쳐버리는 버그가 있으므로 shift 후 "$@" 를 쓴다.
+#     2) $2 이후 인자($env 에서 읽은 제목/설명 등)는 이미 GOTERM_ENC(euckr) 상태이므로,
+#        printf 결과 전체를 다시 iconv -f utf-8 에 넣으면 glibc iconv 가 EUC-KR 바이트에서 즉시 중단되어
+#        줄 끝 개행(\n)까지 잘리고 방향키 이동 시 \033[8A 줄 수가 어긋나 화면이 붕괴된다.
+#        따라서 go.sh 리터럴인 포맷 문자열($1)만 iconv 변환한 뒤 printf "$_fmt" "$@" 로 출력한다.
 ko() { # 사용법 : ko "포맷문자열" [인자...]
+    local _fmt="$1"
+    shift
     if [ "$GOTERM_ENC" = "euckr" ]; then
-        printf "$1" "${@:2}" | iconv -f utf-8 -t euc-kr//TRANSLIT 2>/dev/null
-    else
-        printf "$1" "${@:2}"
+        _fmt="$(printf '%s' "$_fmt" | iconv -f utf-8 -t euc-kr//TRANSLIT 2>/dev/null)"
     fi
+    printf "$_fmt" "$@"
 }
 
 # 터미널 자동감지
@@ -569,7 +576,7 @@ process_commands() {
         # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
         echo "${command%% *}" | grep -qE "rm" >/dev/null 2>&1 && (
             command_args=($command)
-            last_arg="${command_args[@]:$((${#command_args[@]} - 1))}"
+            last_arg="${command_args[$((${#command_args[@]} - 1))]}"
             target_dir=$(dirname "$last_arg")
             [ ! -d "$target_dir" ] && target_dir="."
             echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
@@ -654,9 +661,9 @@ menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
 menu_prompt() { # $1=최대번호 (? 는 항상 help 로 표시)
     local _vtxt=""
     if [ "${GOVIEW:-easy}" = "easy" ]; then
-        [ "$GOLANG" = "kr" ] && _vtxt="[V]명령어모드" || _vtxt="[V]cmd-mode"
+        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]명령어모드')" || _vtxt="[V]cmd-mode"
     else
-        [ "$GOLANG" = "kr" ] && _vtxt="[V]쉬움모드" || _vtxt="[V]easy-mode"
+        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]쉬움모드')" || _vtxt="[V]easy-mode"
     fi
     if [ "$GOLANG" = "kr" ]; then
         ko ">>> 선택 [0-%s]   %s  [F]상세  [?] help : " "$1" "$_vtxt"
@@ -736,8 +743,39 @@ menu_read() {
                             [ -n "$_n2" ] && eval "$_n2=\"\""
                             return 0
                             ;;
+                        "5"|"6")
+                            local _x2="" _pg_nav=""
+                            [ "$_x" = "5" ] && _pg_nav="__NAV_PGUP__" || _pg_nav="__NAV_PGDN__"
+                            IFS= read -rsn1 -t $_esc_t _x2 </dev/tty 2>/dev/null
+                            while [ -n "$_x2" ] && [ "$_x2" != "~" ]; do
+                                case "$_x2" in
+                                    [0-9\;]) IFS= read -rsn1 -t $_esc_t _x2 </dev/tty 2>/dev/null ;;
+                                    *) break ;;
+                                esac
+                            done
+                            _MENU_V1="$_pg_nav"
+                            [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                            [ -n "$_n2" ] && eval "$_n2=\"\""
+                            return 0
+                            ;;
+                        [0-9])
+                            local _x2=""
+                            IFS= read -rsn1 -t $_esc_t _x2 </dev/tty 2>/dev/null
+                            while [ -n "$_x2" ] && [ "$_x2" != "~" ]; do
+                                case "$_x2" in
+                                    [0-9\;]) IFS= read -rsn1 -t $_esc_t _x2 </dev/tty 2>/dev/null ;;
+                                    *) break ;;
+                                esac
+                            done
+                            ;;
                     esac
+                    _c=""
+                    continue
                 fi
+            fi
+            if [ "$_allow_nav" = "1" ]; then
+                _c=""
+                continue
             fi
             _c=""
             break
@@ -798,6 +836,41 @@ menu_read() {
                             if [ -z "$_line" ]; then _rc=1; break; fi
                         elif [ "$_seq" = "[" ] || [ "$_seq" = "O" ]; then
                             IFS= read -rsn1 -t 1 _seq </dev/tty 2>/dev/null
+                            if [ "$_allow_nav" = "1" ] && [ -z "$_line" ]; then
+                                case "$_seq" in
+                                    "A") _MENU_V1="__NAV_UP__"; [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""; [ -n "$_n2" ] && eval "$_n2=\"\""; return 0 ;;
+                                    "B") _MENU_V1="__NAV_DOWN__"; [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""; [ -n "$_n2" ] && eval "$_n2=\"\""; return 0 ;;
+                                    "C") _MENU_V1="__NAV_RIGHT__"; [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""; [ -n "$_n2" ] && eval "$_n2=\"\""; return 0 ;;
+                                    "D") _MENU_V1="__NAV_LEFT__"; [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""; [ -n "$_n2" ] && eval "$_n2=\"\""; return 0 ;;
+                                    "5"|"6")
+                                        local _x2="" _pg_nav=""
+                                        [ "$_seq" = "5" ] && _pg_nav="__NAV_PGUP__" || _pg_nav="__NAV_PGDN__"
+                                        IFS= read -rsn1 -t 1 _x2 </dev/tty 2>/dev/null
+                                        while [ -n "$_x2" ] && [ "$_x2" != "~" ]; do
+                                            case "$_x2" in
+                                                [0-9\;]) IFS= read -rsn1 -t 1 _x2 </dev/tty 2>/dev/null ;;
+                                                *) break ;;
+                                            esac
+                                        done
+                                        _MENU_V1="$_pg_nav"
+                                        [ -n "$_n1" ] && eval "$_n1=\"\$_MENU_V1\""
+                                        [ -n "$_n2" ] && eval "$_n2=\"\""
+                                        return 0
+                                        ;;
+                                esac
+                            fi
+                            case "$_seq" in
+                                [0-9])
+                                    local _x2=""
+                                    IFS= read -rsn1 -t 1 _x2 </dev/tty 2>/dev/null
+                                    while [ -n "$_x2" ] && [ "$_x2" != "~" ]; do
+                                        case "$_x2" in
+                                            [0-9\;]) IFS= read -rsn1 -t 1 _x2 </dev/tty 2>/dev/null ;;
+                                            *) break ;;
+                                        esac
+                                    done
+                                    ;;
+                            esac
                         fi
                         ;;
                     [[:cntrl:]])
@@ -970,73 +1043,76 @@ easy_auto_title() {
     easy_cmd="${easy_cmd%"${easy_cmd##*[![:space:]]}"}"
 
     if [ "$GOLANG" = "kr" ]; then
+        local _kr_out=""
         case "$easy_cmd" in
-            *"systemctl status"*) echo "서비스 상태를 확인합니다" ;;
-            *"systemctl restart"*|*"systemctl try-reload-or-restart"*) echo "서비스를 다시 시작합니다" ;;
-            *"systemctl reload"*) echo "서비스 설정을 다시 불러옵니다" ;;
-            *"systemctl enable"*) echo "서비스 자동 시작을 설정합니다" ;;
-            *"systemctl disable"*) echo "서비스 자동 시작을 해제합니다" ;;
-            *"systemctl start"*) echo "서비스를 시작합니다" ;;
-            *"systemctl stop"*) echo "서비스를 중지합니다" ;;
-            *"journalctl"*) echo "시스템 로그를 확인합니다" ;;
-            *"apt "*"install"*|*"apt-get "*"install"*|*"yum "*"install"*|*"dnf "*"install"*|"yyay "*) echo "패키지를 설치합니다" ;;
-            *"apt "*"remove"*|*"yum "*"remove"*|*"dnf "*"remove"*) echo "패키지를 제거합니다" ;;
-            *"apt "*"update"*|*"apt "*"upgrade"*|*"yum "*"update"*|*"dnf "*"update"*) echo "패키지 목록 또는 시스템을 업데이트합니다" ;;
-            *"docker-compose"*" up"*|*"docker compose"*" up"*) echo "Docker Compose 서비스를 시작합니다" ;;
-            *"docker-compose"*" down"*|*"docker compose"*" down"*) echo "Docker Compose 서비스를 중지합니다" ;;
-            *"docker-compose"*" logs"*|*"docker compose"*" logs"*) echo "Docker Compose 로그를 봅니다" ;;
-            *"docker "*" ps"*) echo "Docker 컨테이너 목록을 봅니다" ;;
-            *"docker "*" start"*) echo "Docker 컨테이너를 시작합니다" ;;
-            *"docker "*" stop"*) echo "Docker 컨테이너를 중지합니다" ;;
-            *"docker "*" rm"*) echo "Docker 컨테이너를 삭제합니다" ;;
-            *"git clone"*) echo "Git 저장소를 복제합니다" ;;
-            *"git pull"*) echo "Git 저장소를 최신 상태로 받습니다" ;;
-            *"git push"*) echo "Git 변경 사항을 원격 저장소에 올립니다" ;;
-            *"git status"*) echo "Git 변경 상태를 확인합니다" ;;
-            *"git diff"*) echo "Git 변경 내용을 비교합니다" ;;
-            *"certbot"*) echo "SSL 인증서를 발급하거나 관리합니다" ;;
-            *"fail2ban-client unban --all"*) echo "모든 감옥 차단 일괄 해제 (초기화)" ;;
-            *"fail2ban-client unban"*) echo "지정한 IP 차단 일괄 해제" ;;
-            *"fail2ban-client set"*" unbanip"*) echo "선택한 감옥에서 지정한 IP 차단 수동 해제" ;;
-            *"fail2ban-client set"*" banip"*) echo "선택한 감옥에 지정한 IP 수동 차단 등록" ;;
-            *"fail2ban-client status"*) echo "Fail2ban 감옥 상태 및 차단 통계 확인" ;;
-            *"firewall-cmd"*"--remove-rich-rule"*) echo "방화벽 리치 룰(Rich Rule) 차단 수동 삭제" ;;
-            *"firewall-cmd"*"--list-rich-rules"*) echo "방화벽 리치 룰(Rich Rule) 차단 목록 조회" ;;
-            *"firewall-cmd"*) echo "방화벽 규칙을 확인하거나 변경합니다" ;;
-            *"pkill -kill -t"*|*"pkill"*"pts"*) echo "특정 터미널(pts) 세션 강제 종료 (kick)" ;;
-            *"pkill"*"sshd"*|*"kill"*"sshd"*) echo "특정 IP의 모든 SSH 연결 일괄 강제 퇴출" ;;
-            *"pkill "*|*"kill "*) echo "프로세스를 강제 종료합니다" ;;
-            *"w |"*|"w") echo "현재 서버 접속자 및 활성 터미널 세션 확인" ;;
-            *"explorer /etc/fail2ban"*) echo "Fail2ban 설정 폴더 내부 파일 탐색" ;;
-            *"yyay fail2ban"*) echo "Fail2ban 침입 차단 보안 패키지 설치" ;;
-            *"ufw "*) echo "UFW 방화벽을 관리합니다" ;;
-            *"iptables"*) echo "iptables 방화벽 규칙을 확인하거나 변경합니다" ;;
-            *"ssh "*|"ssh"*) echo "원격 서버에 SSH로 연결하거나 명령을 실행합니다" ;;
-            *"scp "*|"rsync "*|"ncp "*|"ncpr "*) echo "파일을 서버 사이에 전송합니다" ;;
-            *"curl "*|"wget "*) echo "웹에서 파일 또는 응답을 가져옵니다" ;;
-            *"mysql"*|"mariadb"*) echo "MariaDB 또는 MySQL을 관리합니다" ;;
-            *"vi "*|"vi2 "*|"vi3 "*|"vim "*|"nano "*) echo "설정 파일을 편집합니다" ;;
-            *"tail -f"*) echo "로그를 실시간으로 봅니다" ;;
-            *"cat "*|"less "*|"head "*) echo "파일 내용을 확인합니다" ;;
-            *"find "*) echo "파일 또는 폴더를 찾습니다" ;;
-            *"grep "*|*"cgrep"*) echo "텍스트에서 조건에 맞는 내용을 찾습니다" ;;
-            *"ls "*|"ls") echo "파일과 폴더 목록을 봅니다" ;;
-            *"mkdir "*) echo "폴더를 만듭니다" ;;
-            *"cp "*) echo "파일을 복사합니다" ;;
-            *"mv "*) echo "파일을 이동하거나 이름을 바꿉니다" ;;
-            *"rm "*) echo "파일 또는 폴더를 삭제합니다" ;;
-            *"chmod "*|*"chown "*|*"setfacl "*) echo "파일 또는 폴더 권한을 설정합니다" ;;
-            *"ip "*|"ifconfig"*|"nmcli"*) echo "네트워크 설정과 상태를 확인합니다" ;;
-            *"ping "*|"traceroute "*|"dig "*|"nslookup "*) echo "네트워크 연결 또는 DNS를 확인합니다" ;;
-            *"nmap "*) echo "호스트의 네트워크 포트를 검사합니다" ;;
-            *"reboot"*|"shutdown "*) echo "시스템 전원을 제어합니다" ;;
-            export\ *|[a-zA-Z_]*=*) echo "변수 값을 설정하거나 준비합니다" ;;
+            *"systemctl status"*) _kr_out="서비스 상태를 확인합니다" ;;
+            *"systemctl restart"*|*"systemctl try-reload-or-restart"*) _kr_out="서비스를 다시 시작합니다" ;;
+            *"systemctl reload"*) _kr_out="서비스 설정을 다시 불러옵니다" ;;
+            *"systemctl enable"*) _kr_out="서비스 자동 시작을 설정합니다" ;;
+            *"systemctl disable"*) _kr_out="서비스 자동 시작을 해제합니다" ;;
+            *"systemctl start"*) _kr_out="서비스를 시작합니다" ;;
+            *"systemctl stop"*) _kr_out="서비스를 중지합니다" ;;
+            *"journalctl"*) _kr_out="시스템 로그를 확인합니다" ;;
+            *"apt "*"install"*|*"apt-get "*"install"*|*"yum "*"install"*|*"dnf "*"install"*|"yyay "*) _kr_out="패키지를 설치합니다" ;;
+            *"apt "*"remove"*|*"yum "*"remove"*|*"dnf "*"remove"*) _kr_out="패키지를 제거합니다" ;;
+            *"apt "*"update"*|*"apt "*"upgrade"*|*"yum "*"update"*|*"dnf "*"update"*) _kr_out="패키지 목록 또는 시스템을 업데이트합니다" ;;
+            *"docker-compose"*" up"*|*"docker compose"*" up"*) _kr_out="Docker Compose 서비스를 시작합니다" ;;
+            *"docker-compose"*" down"*|*"docker compose"*" down"*) _kr_out="Docker Compose 서비스를 중지합니다" ;;
+            *"docker-compose"*" logs"*|*"docker compose"*" logs"*) _kr_out="Docker Compose 로그를 봅니다" ;;
+            *"docker "*" ps"*) _kr_out="Docker 컨테이너 목록을 봅니다" ;;
+            *"docker "*" start"*) _kr_out="Docker 컨테이너를 시작합니다" ;;
+            *"docker "*" stop"*) _kr_out="Docker 컨테이너를 중지합니다" ;;
+            *"docker "*" rm"*) _kr_out="Docker 컨테이너를 삭제합니다" ;;
+            *"git clone"*) _kr_out="Git 저장소를 복제합니다" ;;
+            *"git pull"*) _kr_out="Git 저장소를 최신 상태로 받습니다" ;;
+            *"git push"*) _kr_out="Git 변경 사항을 원격 저장소에 올립니다" ;;
+            *"git status"*) _kr_out="Git 변경 상태를 확인합니다" ;;
+            *"git diff"*) _kr_out="Git 변경 내용을 비교합니다" ;;
+            *"certbot"*) _kr_out="SSL 인증서를 발급하거나 관리합니다" ;;
+            *"fail2ban-client unban --all"*) _kr_out="모든 감옥 차단 일괄 해제 (초기화)" ;;
+            *"fail2ban-client unban"*) _kr_out="지정한 IP 차단 일괄 해제" ;;
+            *"fail2ban-client set"*" unbanip"*) _kr_out="선택한 감옥에서 지정한 IP 차단 수동 해제" ;;
+            *"fail2ban-client set"*" banip"*) _kr_out="선택한 감옥에 지정한 IP 수동 차단 등록" ;;
+            *"fail2ban-client status"*) _kr_out="Fail2ban 감옥 상태 및 차단 통계 확인" ;;
+            *"firewall-cmd"*"--remove-rich-rule"*) _kr_out="방화벽 리치 룰(Rich Rule) 차단 수동 삭제" ;;
+            *"firewall-cmd"*"--list-rich-rules"*) _kr_out="방화벽 리치 룰(Rich Rule) 차단 목록 조회" ;;
+            *"firewall-cmd"*) _kr_out="방화벽 규칙을 확인하거나 변경합니다" ;;
+            *"pkill -kill -t"*|*"pkill"*"pts"*) _kr_out="특정 터미널(pts) 세션 강제 종료 (kick)" ;;
+            *"pkill"*"sshd"*|*"kill"*"sshd"*) _kr_out="특정 IP의 모든 SSH 연결 일괄 강제 퇴출" ;;
+            *"pkill "*|*"kill "*) _kr_out="프로세스를 강제 종료합니다" ;;
+            *"w |"*|"w") _kr_out="현재 서버 접속자 및 활성 터미널 세션 확인" ;;
+            *"explorer /etc/fail2ban"*) _kr_out="Fail2ban 설정 폴더 내부 파일 탐색" ;;
+            *"yyay fail2ban"*) _kr_out="Fail2ban 침입 차단 보안 패키지 설치" ;;
+            *"ufw "*) _kr_out="UFW 방화벽을 관리합니다" ;;
+            *"iptables"*) _kr_out="iptables 방화벽 규칙을 확인하거나 변경합니다" ;;
+            *"ssh "*|"ssh"*) _kr_out="원격 서버에 SSH로 연결하거나 명령을 실행합니다" ;;
+            *"scp "*|"rsync "*|"ncp "*|"ncpr "*) _kr_out="파일을 서버 사이에 전송합니다" ;;
+            *"curl "*|"wget "*) _kr_out="웹에서 파일 또는 응답을 가져옵니다" ;;
+            *"mysql"*|"mariadb"*) _kr_out="MariaDB 또는 MySQL을 관리합니다" ;;
+            *"vi "*|"vi2 "*|"vi3 "*|"vim "*|"nano "*) _kr_out="설정 파일을 편집합니다" ;;
+            *"tail -f"*) _kr_out="로그를 실시간으로 봅니다" ;;
+            *"cat "*|"less "*|"head "*) _kr_out="파일 내용을 확인합니다" ;;
+            *"find "*) _kr_out="파일 또는 폴더를 찾습니다" ;;
+            *"grep "*|*"cgrep"*) _kr_out="텍스트에서 조건에 맞는 내용을 찾습니다" ;;
+            *"ls "*|"ls") _kr_out="파일과 폴더 목록을 봅니다" ;;
+            *"mkdir "*) _kr_out="폴더를 만듭니다" ;;
+            *"cp "*) _kr_out="파일을 복사합니다" ;;
+            *"mv "*) _kr_out="파일을 이동하거나 이름을 바꿉니다" ;;
+            *"rm "*) _kr_out="파일 또는 폴더를 삭제합니다" ;;
+            *"chmod "*|*"chown "*|*"setfacl "*) _kr_out="파일 또는 폴더 권한을 설정합니다" ;;
+            *"ip "*|"ifconfig"*|"nmcli"*) _kr_out="네트워크 설정과 상태를 확인합니다" ;;
+            *"ping "*|"traceroute "*|"dig "*|"nslookup "*) _kr_out="네트워크 연결 또는 DNS를 확인합니다" ;;
+            *"nmap "*) _kr_out="호스트의 네트워크 포트를 검사합니다" ;;
+            *"reboot"*|"shutdown "*) _kr_out="시스템 전원을 제어합니다" ;;
+            export\ *|[a-zA-Z_]*=*) _kr_out="변수 값을 설정하거나 준비합니다" ;;
             *)
                 easy_name="${easy_cmd%%[[:space:];]*}"
-                [ -z "$easy_name" ] && easy_name="명령"
-                printf '%s 실행\n' "$easy_name"
+                [ -z "$easy_name" ] && easy_name="$(ko '명령')"
+                ko '%s 실행\n' "$easy_name"
+                return
                 ;;
         esac
+        ko "${_kr_out}\n"
     else
         case "$easy_cmd" in
             *"systemctl status"*) echo "Check service status" ;;
@@ -1174,9 +1250,10 @@ render_item_easy() {
         esac
     fi
 
-    # 2. 제목 결정 (4단 폴백 사다리)
+    # 2. 제목 결정 (4단 폴백 사다리) — Bash 2.05 호환: 큰따옴표 내부 ${var%%$'\n'*} 금지 -> 변수 $_nl 사용
+    local _nl=$'\n'
     if [ -n "$hdesc" ]; then
-        title="${hdesc%%$'\n'*}"
+        title="${hdesc%%$_nl*}"
     elif [ -n "$prev_comm" ] && [ "${#prev_comm}" -gt 2 ]; then
         title="$prev_comm"
     else
@@ -1426,12 +1503,35 @@ show_cmd_card() {
 ###############################################################
 # [mc.py 참조] 중복 번호([1], 1., [Step 1] 등) 제거 & 하단 실시간 상세 카드
 ###############################################################
+# 구형 리눅스(Red Hat 7.2 등)에서 최신 TERM(xterm-256color 등) 접속 시 terminfo 미존재로
+# tput lines / tput cols 가 실패(빈 문자열 반환)하여 24x120 으로 잘못 고정되는 문제 방지:
+# 커널 PTY 크기(stty size </dev/tty)를 먼저 읽고, 실패 시 tput -> TERM=xterm tput 순으로 폴백한다.
+_get_term_size() {
+    _TS_LINES="${LINES:-}"
+    _TS_COLS="${COLUMNS:-}"
+    if [ -z "$_TS_LINES" ] || [ -z "$_TS_COLS" ]; then
+        local _stty_sz=""
+        _stty_sz="$(stty size </dev/tty 2>/dev/null)"
+        if [ -n "$_stty_sz" ]; then
+            local _sl="${_stty_sz%% *}" _sc="${_stty_sz#* }"
+            case "$_sl" in [1-9][0-9]*) [ -z "$_TS_LINES" ] && _TS_LINES="$_sl" ;; esac
+            case "$_sc" in [1-9][0-9]*) [ -z "$_TS_COLS" ] && _TS_COLS="$_sc" ;; esac
+        fi
+    fi
+    [ -n "$_TS_LINES" ] || _TS_LINES="$(tput lines 2>/dev/null)"
+    [ -n "$_TS_LINES" ] || _TS_LINES="$(TERM=xterm tput lines 2>/dev/null)"
+    case "$_TS_LINES" in [1-9][0-9]*) ;; *) _TS_LINES=24 ;; esac
+    [ -n "$_TS_COLS" ] || _TS_COLS="$(tput cols 2>/dev/null)"
+    [ -n "$_TS_COLS" ] || _TS_COLS="$(TERM=xterm tput cols 2>/dev/null)"
+    case "$_TS_COLS" in [1-9][0-9]*) ;; *) _TS_COLS=120 ;; esac
+}
+
 # 이전 화면을 스크롤백 버퍼 위로 완전히 밀어올린 뒤 현재 뷰포트 최상단(1,1)부터 깨끗하게 시작
 # - 최신 clear 의 \033[3J(스크롤백 삭제)를 쓰지 않아 마우스 스크롤업으로 이전 메뉴/출력을 그대로 볼 수 있음
 _clear_keep_scrollback() {
-    local _tl="${LINES:-}" _i=0 _nl_buf=""
-    [ -n "$_tl" ] || _tl="$(tput lines 2>/dev/null)"
-    [ -n "$_tl" ] || _tl=24
+    local _TS_LINES="" _TS_COLS="" _tl _i=0 _nl_buf=""
+    _get_term_size
+    _tl="$_TS_LINES"
     while [ "$_i" -lt "$_tl" ]; do
         _nl_buf="${_nl_buf}"$'\n'
         _i=$((_i + 1))
@@ -1465,14 +1565,14 @@ _render_cmd_detail_card() {
 
     local _sline _icon _dot _arr _lr _tri
     if [ "${GOTERM_ENC:-}" = "euckr" ]; then
-        _sline="----------------------------------------------------------------------"
+        _sline="--------------------------------------------------------------------------------"
         _icon="[*]"
         _dot="*"
         _arr="Up/Dn"
         _lr="L/R"
         _tri="$(ko '▶')"
     else
-        _sline="──────────────────────────────────────────────────────────────────────"
+        _sline="────────────────────────────────────────────────────────────────────────────────"
         _icon="🔎"
         _dot="•"
         _arr="↑↓"
@@ -1546,7 +1646,7 @@ _render_cmd_detail_card() {
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
         local _pg_hint=""
-        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[${_lr}]\x1b[0m $(ko '페이지')(${_cpg}/${_tpg})"
+        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[PgUp/PgDn/${_lr}]\x1b[0m $(ko '스크롤')"
         ko "\r  \x1b[1;36m[%s]\x1b[0m 이동  \x1b[1;32m[Enter]\x1b[0m 선택실행  \x1b[1;37m[1-%s]\x1b[0m 번호  \x1b[1;37m[V]\x1b[0m 모드  \x1b[1;37m[F]\x1b[0m 상세  \x1b[1;37m[?]\x1b[0m 도움말%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
     else
         printf "\r %s \x1b[1;33mSelected Item Detail\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
@@ -1567,7 +1667,7 @@ _render_cmd_detail_card() {
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
         local _pg_hint=""
-        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[${_lr}]\x1b[0m Page(${_cpg}/${_tpg})"
+        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[PgUp/PgDn/${_lr}]\x1b[0m Scroll"
         printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Run  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
     fi
     printf "\r\x1b[K\n"
@@ -1624,14 +1724,14 @@ _render_main_detail_card() {
 
     local _sline _icon _dot _arr _tri _dia
     if [ "${GOTERM_ENC:-}" = "euckr" ]; then
-        _sline="----------------------------------------------------------------------"
+        _sline="--------------------------------------------------------------------------------"
         _icon="[*]"
         _dot="*"
         _arr="Up/Dn"
         _tri="$(ko '▶')"
         _dia="$(ko '◈')"
     else
-        _sline="──────────────────────────────────────────────────────────────────────"
+        _sline="────────────────────────────────────────────────────────────────────────────────"
         _icon="🔎"
         _dot="•"
         _arr="↑↓"
@@ -1859,9 +1959,17 @@ menufunc() {
         _m_detail_cache=()
 
         if [ -z "$skipmain" ]; then
-            _m_hdr_buf="============================================== :$choiceloop"$'\n'
+            local _m_dline _m_hline
+            if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+                _m_dline="================================================================================"
+                _m_hline="--------------------------------------------------------------------------------"
+            else
+                _m_dline="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                _m_hline="────────────────────────────────────────────────────────────────────────────────"
+            fi
+            _m_hdr_buf="$(printf '\x1b[38;5;75m%s\x1b[0m :%s\n' "$_m_dline" "$choiceloop")"$'\n'
             _m_hdr_buf="${_m_hdr_buf}$(echo -e "* $title $flow")"$'\n'
-            _m_hdr_buf="${_m_hdr_buf}=============================================="$'\n'
+            _m_hdr_buf="${_m_hdr_buf}$(printf '\x1b[38;5;110m%s\x1b[0m\n' "$_m_hline")"$'\n'
             if [ ! "$title_of_menu_sub" ]; then
                 local _os_name _host_str _net_bar=""
                 _os_name="$(grep "PRETTY_NAME" /etc/*-release 2>/dev/null | awk -F'"' '{print $2}')"
@@ -1870,21 +1978,21 @@ menufunc() {
                 if [ "$offline" == "offline" ]; then
                     _net_bar="  \x1b[1;31m[offline]\x1b[0m"
                 fi
-                _m_hdr_buf="${_m_hdr_buf}$(printf '%s - %b%b\n\n' "$_os_name" "$_host_str" "$_net_bar")"
+                _m_hdr_buf="${_m_hdr_buf}$(printf '  %s - %b%b\n\x1b[38;5;110m%s\x1b[0m\n' "$_os_name" "$_host_str" "$_net_bar" "$_m_hline")"$'\n'
             else
-                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱 + 중복 ==== 제거)
+                # %% cmds -> pre_commands 검출및 실행 (submenu 일때만, 1회 캡처 캐싱 + 중복 구분선 제거)
                 if [ ${#pre_commands[@]} -gt 0 ]; then
                     local _pc_raw="" _pc_item
                     for _pc_item in "${pre_commands[@]}"; do
                         readxx "$LINENO // $choice // $title_of_menu // $chosen_command_sub // $title"
                         _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
                     done
-                    _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*====*.*$/d')"
+                    _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*\(====*\|────*\|━━━━*\).*$/d')"
                     if [ -n "$_pc_raw" ]; then
                         if printf '%s' "$_pc_raw" | grep -qE '0m'; then
-                            _m_pre_out="${_pc_raw}"$'\n'"=============================================="$'\n'
+                            _m_pre_out="${_pc_raw}"$'\n'"$(printf '\x1b[38;5;110m%s\x1b[0m\n' "$_m_hline")"
                         else
-                            _m_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================\n' "$_pc_raw")"
+                            _m_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n\x1b[38;5;110m%s\x1b[0m\n' "$_pc_raw" "$_m_hline")"
                         fi
                     fi
                 fi
@@ -1942,7 +2050,7 @@ menufunc() {
                             _m_disp_lines[${#_m_disp_lines[@]}]=""
                             _m_disp_nums[${#_m_disp_nums[@]}]=""
                         fi
-                        _m_disp_lines[${#_m_disp_lines[@]}]=" $(ko "\033[1;36m%s\033[0m" "$_ghdr")"
+                        _m_disp_lines[${#_m_disp_lines[@]}]=" $(ko "\033[1;36m${_ghdr}\033[0m")"
                         _m_disp_nums[${#_m_disp_nums[@]}]=""
                     fi
                 else
@@ -2001,19 +2109,93 @@ menufunc() {
             fi
             _m_disp_nums[${#_m_disp_nums[@]}]=""
 
-            local _m_painted=0 _m_peeked=0 _m_term_lines="${LINES:-}"
-            [ -n "$_m_term_lines" ] || _m_term_lines="$(tput lines 2>/dev/null)"
-            [ -n "$_m_term_lines" ] || _m_term_lines=24
+            local _TS_LINES="" _TS_COLS="" _m_painted=0 _m_peeked=0 _m_term_lines _m_term_cols
+            _get_term_size
+            _m_term_lines="$_TS_LINES"
+            _m_term_cols="$_TS_COLS"
+
+            local -a _m_flat_lines _m_flat_nums _m_item_start _m_item_end _m_card_cache
+            _m_flat_lines=()
+            _m_flat_nums=()
+            _m_item_start=()
+            _m_item_end=()
+            _m_card_cache=()
+            local _mdi _mdl _mdn _mline _mis_first _mfi _mnl=$'\n'
+            for ((_mdi = 0; _mdi < ${#_m_disp_lines[@]}; _mdi++)); do
+                _mdl="${_m_disp_lines[$_mdi]}"
+                _mdn="${_m_disp_nums[$_mdi]}"
+                if [ -z "$_mdl" ]; then
+                    _mfi=${#_m_flat_lines[@]}
+                    _m_flat_lines[$_mfi]=""
+                    _m_flat_nums[$_mfi]=""
+                    continue
+                fi
+                _mis_first=1
+                while [ -n "$_mdl" ]; do
+                    case "$_mdl" in
+                        *"$_mnl"*)
+                            _mline="${_mdl%%$_mnl*}"
+                            _mdl="${_mdl#*$_mnl}"
+                            ;;
+                        *)
+                            _mline="$_mdl"
+                            _mdl=""
+                            ;;
+                    esac
+                    _mfi=${#_m_flat_lines[@]}
+                    _m_flat_lines[$_mfi]="$_mline"
+                    if [ -n "$_mdn" ] && [ "$_mis_first" -eq 1 ]; then
+                        _m_flat_nums[$_mfi]="$_mdn"
+                        _m_item_start[$_mdn]=$_mfi
+                        _m_item_end[$_mdn]=$_mfi
+                        _mis_first=0
+                    else
+                        _m_flat_nums[$_mfi]=""
+                        [ -n "$_mdn" ] && _m_item_end[$_mdn]=$_mfi
+                    fi
+                done
+            done
+
+            local _m_top_lines=5 _m_vp_h _m_total_flat=${#_m_flat_lines[@]}
+            [ -n "$title_of_menu_sub" ] && _m_top_lines=4
+            if [ -n "$_m_pre_out" ]; then
+                local _m_pre_cnt
+                _m_pre_cnt="$(printf '%s\n' "$_m_pre_out" | awk -v cols="$_m_term_cols" '{ gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); l=length($0); c += (l > cols && cols > 0) ? int((l - 1) / cols) + 1 : 1 } END { print c+0 }')"
+                _m_top_lines=$((_m_top_lines + _m_pre_cnt))
+            fi
+            _m_vp_h=$((_m_term_lines - _m_top_lines - 9))
+            [ "$_m_vp_h" -lt 5 ] && _m_vp_h=5
+
+            local _m_need_scroll=0 _m_scroll_top=0 _m_max_scroll=0
+            [ "$_m_total_flat" -gt "$_m_vp_h" ] && _m_need_scroll=1
+            _m_max_scroll=$((_m_total_flat - _m_vp_h))
+            [ "$_m_max_scroll" -lt 0 ] && _m_max_scroll=0
+
+            _m_ensure_visible() {
+                [ "$_m_need_scroll" -eq 0 ] && return
+                local _cs="${_m_item_start[$_m_nav_cur]:-0}"
+                local _ce="${_m_item_end[$_m_nav_cur]:-$_cs}"
+                if [ "$_cs" -lt "$_m_scroll_top" ]; then
+                    _m_scroll_top="$_cs"
+                elif [ "$_ce" -ge $((_m_scroll_top + _m_vp_h)) ]; then
+                    _m_scroll_top=$((_ce - _m_vp_h + 1))
+                fi
+                [ "$_m_scroll_top" -gt "$_m_max_scroll" ] && _m_scroll_top=$_m_max_scroll
+                [ "$_m_scroll_top" -lt 0 ] && _m_scroll_top=0
+            }
 
             _m_render_screen() {
-                local _do_home="${1:-0}" _di _dn _dl _pfx _tmp_nl _card_only=0 _fbuf=""
+                local _do_home="${1:-0}" _di _dn _dl _pfx _s_idx _e_idx _vp_drawn=0 _card_only=0 _fbuf=""
+                local _cr=$'\r' _nl=$'\n' _el=$'\033[K' _pfx_sel=$'\033[1;33m'"${_mb_tri}"$'\033[0m '
                 if [ "$_do_home" = "0" ]; then
                     _fbuf="${_fbuf}$(printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
                     [ -n "$_m_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/')"$'\n'
+                    _fbuf="${_fbuf}"$'\r\x1b[K\n'
                 elif [ "$_m_peeked" -eq 1 ]; then
                     _fbuf="${_fbuf}"$'\033[?25l\033[2J\033[H'
                     _fbuf="${_fbuf}$(printf '%s' "$_m_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
                     [ -n "$_m_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_m_pre_out" | sed 's/$/\x1b[K/')"$'\n'
+                    _fbuf="${_fbuf}"$'\r\x1b[K\n'
                     _m_peeked=0
                 elif [ "$_m_painted" -gt 0 ] && [ "$_m_painted" -lt "$_m_term_lines" ]; then
                     _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_m_painted")"
@@ -2024,19 +2206,33 @@ menufunc() {
 
                 if [ "$_card_only" -eq 0 ]; then
                     _m_painted=0
-                    for ((_di = 0; _di < ${#_m_disp_lines[@]}; _di++)); do
-                        _dl="${_m_disp_lines[$_di]}"
-                        _dn="${_m_disp_nums[$_di]}"
+                    if [ "$_m_need_scroll" -eq 1 ]; then
+                        _s_idx=$_m_scroll_top
+                        _e_idx=$((_m_scroll_top + _m_vp_h))
+                        [ "$_e_idx" -gt "$_m_total_flat" ] && _e_idx=$_m_total_flat
+                    else
+                        _s_idx=0
+                        _e_idx=$_m_total_flat
+                    fi
+                    for ((_di = _s_idx; _di < _e_idx; _di++)); do
+                        _dl="${_m_flat_lines[$_di]}"
+                        _dn="${_m_flat_nums[$_di]}"
                         if [ -n "$_dn" ] && [ "$_dn" = "$_m_nav_cur" ]; then
-                            _pfx="\x1b[1;33m${_mb_tri}\x1b[0m "
+                            _pfx="$_pfx_sel"
                         else
                             _pfx="  "
                         fi
-                        _tmp_nl="${_dl//[!$'\n']/}"
-                        _m_painted=$((_m_painted + ${#_tmp_nl} + 1))
-                        _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
-                        _fbuf="${_fbuf}$(printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl")"$'\n'
+                        _m_painted=$((_m_painted + 1))
+                        _vp_drawn=$((_vp_drawn + 1))
+                        _fbuf="${_fbuf}${_cr}${_pfx}${_dl}${_el}${_nl}"
                     done
+                    if [ "$_m_need_scroll" -eq 1 ]; then
+                        while [ "$_vp_drawn" -lt "$_m_vp_h" ]; do
+                            _fbuf="${_fbuf}${_cr}${_el}${_nl}"
+                            _m_painted=$((_m_painted + 1))
+                            _vp_drawn=$((_vp_drawn + 1))
+                        done
+                    fi
                     if [ "$menu_idx" -ge 1 ]; then
                         _m_painted=$((_m_painted + 8))
                     else
@@ -2046,12 +2242,15 @@ menufunc() {
 
                 if [ "$menu_idx" -ge 1 ]; then
                     # 캐시 미적중 시 부모 셸에서 1회 채워둔 뒤 단일 버퍼에 병합 (Subshell 캐시 유실 방지 + 1회 Write)
-                    if [ -z "${_m_detail_cache[$_m_nav_cur]-}" ]; then
-                        _render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx" >/dev/null
+                    if [ -z "${_m_card_cache[$_m_nav_cur]-}" ]; then
+                        if [ -z "${_m_detail_cache[$_m_nav_cur]-}" ]; then
+                            _render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx" >/dev/null
+                        fi
+                        _m_card_cache[$_m_nav_cur]="$(_render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx")"
                     fi
-                    _fbuf="${_fbuf}$(_render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx")"$'\n'
+                    _fbuf="${_fbuf}${_m_card_cache[$_m_nav_cur]}${_nl}"
                 else
-                    _fbuf="${_fbuf}$(printf '\r==============================================\x1b[K\n')"$'\n'
+                    _fbuf="${_fbuf}$(printf '\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n' "${_m_hline:-────────────────────────────────────────────────────────────────────────────────}")"$'\n'
                 fi
                 [ "$_do_home" = "1" ] && _fbuf="${_fbuf}"$'\033[?25h'
                 printf '%s' "$_fbuf"
@@ -2073,6 +2272,7 @@ menufunc() {
                     _m_nav_moved=1
                     _m_nav_cur=$((_m_nav_cur - 1))
                     [ "$_m_nav_cur" -lt 1 ] && _m_nav_cur="$menu_idx"
+                    _m_ensure_visible
                     _m_render_screen 1
                     choice=""
                     choice1=""
@@ -2081,11 +2281,31 @@ menufunc() {
                     _m_nav_moved=1
                     _m_nav_cur=$((_m_nav_cur + 1))
                     [ "$_m_nav_cur" -gt "$menu_idx" ] && _m_nav_cur=1
+                    _m_ensure_visible
                     _m_render_screen 1
                     choice=""
                     choice1=""
                     continue
-                elif [ "$choice" = "__NAV_LEFT__" ] || [ "$choice" = "__NAV_RIGHT__" ]; then
+                elif { [ "$choice" = "__NAV_PGUP__" ] || [ "$choice" = "__NAV_LEFT__" ]; } && [ "$menu_idx" -ge 1 ]; then
+                    _m_nav_moved=1
+                    _m_nav_cur=$((_m_nav_cur - 5))
+                    [ "$_m_nav_cur" -lt 1 ] && _m_nav_cur=1
+                    _m_ensure_visible
+                    _m_render_screen 1
+                    choice=""
+                    choice1=""
+                    continue
+                elif { [ "$choice" = "__NAV_PGDN__" ] || [ "$choice" = "__NAV_RIGHT__" ]; } && [ "$menu_idx" -ge 1 ]; then
+                    _m_nav_moved=1
+                    _m_nav_cur=$((_m_nav_cur + 5))
+                    [ "$_m_nav_cur" -gt "$menu_idx" ] && _m_nav_cur="$menu_idx"
+                    _m_ensure_visible
+                    _m_render_screen 1
+                    choice=""
+                    choice1=""
+                    continue
+                elif [ "$choice" = "__NAV_LEFT__" ] || [ "$choice" = "__NAV_RIGHT__" ] || [ "$choice" = "__NAV_PGUP__" ] || [ "$choice" = "__NAV_PGDN__" ]; then
+                    printf '\r\033[K'
                     choice=""
                     choice1=""
                     continue
@@ -2240,12 +2460,13 @@ menufunc() {
                 chosen_desc=()
                 _cd_pending=""
                 _cd_ifs="$IFS"
+                local _cd_cr=$'\r'
                 IFS=$'\n'
                 for _cd_line in $(echo "${allof_chosen_commands}" | grep -v "^%% "); do
                     if rx_match "$_cd_line" '^[[:space:]]*#h(e)?[[:space:]]+(.*)$'; then
                         # 태그 줄 자체에는 설명을 붙이지 않는다 (바로 다음 명령줄의 짝)
                         _cd_text="$(rx_cap "$_cd_line" '^[[:space:]]*#h[e]*[[:space:]][[:space:]]*\(.*\)$' 1)"
-                        _cd_text="${_cd_text%$'\r'}"
+                        _cd_text="${_cd_text%$_cd_cr}"
                         if [ -n "$_cd_pending" ]; then
                             _cd_pending="$_cd_pending"$'\n'"$_cd_text" # 여러줄 설명 누적
                         else
@@ -2325,21 +2546,29 @@ menufunc() {
                             else
                                 [ "$GOLANG" = "kr" ] && _vmode_badge="$(ko '보기: 명령어 (V 로 전환)')" || _vmode_badge="View: Cmd (toggle V)"
                             fi
-                            _cl_hdr_buf="============================================== :: $cmdloop"$'\n'
+                            local _cl_dline _cl_hline
+                            if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+                                _cl_dline="================================================================================"
+                                _cl_hline="--------------------------------------------------------------------------------"
+                            else
+                                _cl_dline="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                                _cl_hline="────────────────────────────────────────────────────────────────────────────────"
+                            fi
+                            _cl_hdr_buf="$(printf '\x1b[38;5;75m%s\x1b[0m :: %s\n' "$_cl_dline" "$cmdloop")"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge")"$'\n'
-                            _cl_hdr_buf="${_cl_hdr_buf}=============================================="$'\n'
-                            # pre excute (1회 캡처 캐싱 + 중복 ==== 테두리 제거)
+                            _cl_hdr_buf="${_cl_hdr_buf}$(printf '\x1b[38;5;110m%s\x1b[0m\n' "$_cl_hline")"$'\n'
+                            # pre excute (1회 캡처 캐싱 + 중복 테두리 제거)
                             if [ ${#pre_commands[@]} -gt 0 ]; then
                                 local _pc_raw="" _pc_item
                                 for _pc_item in "${pre_commands[@]}"; do
                                     _pc_raw="${_pc_raw}$(eval "${_pc_item#%% }" | sed 's/^[[:space:]]*/  /g')"$'\n'
                                 done
-                                _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*====*.*$/d')"
+                                _pc_raw="$(printf '%s' "$_pc_raw" | sed -e '/^[[:space:]]*\(\x1b\[[0-9;]*m\)*\(====*\|────*\|━━━━*\).*$/d')"
                                 if [ -n "$_pc_raw" ]; then
                                     if printf '%s' "$_pc_raw" | grep -qE '0m'; then
-                                        _cl_pre_out="${_pc_raw}"$'\n'"=============================================="
+                                        _cl_pre_out="${_pc_raw}"$'\n'"$(printf '\x1b[38;5;110m%s\x1b[0m' "$_cl_hline")"
                                     else
-                                        _cl_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n==============================================' "$_pc_raw")"
+                                        _cl_pre_out="$(printf '\x1b[0;36m%s\x1b[0m\n\x1b[38;5;110m%s\x1b[0m' "$_pc_raw" "$_cl_hline")"
                                     fi
                                 fi
                             fi
@@ -2349,57 +2578,21 @@ menufunc() {
                             original_indices=()
                             local prev_comment=""
 
-                            # [Pass 1] 순수 Bash 내장 연산으로 인덱스 및 페이지 배정 (Zero-fork)
-                            local _term_lines _max_body_lines _cur_pg=1 _cur_lines=0 _hdr_cnt=0 _est_l=1
-                            local _item_page=() _tc="" _pc=""
-                            _term_lines="${LINES:-}"
-                            [ -n "$_term_lines" ] || _term_lines="$(tput lines 2>/dev/null)"
-                            [ -n "$_term_lines" ] || _term_lines=24
-                            _max_body_lines=$((_term_lines - 20))
-                            [ "$_max_body_lines" -lt 6 ] && _max_body_lines=6
+                            # 터미널 크기 및 상단 고정 줄 수 계산 (가운데 스크롤 뷰포트용)
+                            local _TS_LINES="" _TS_COLS="" _term_lines _term_cols _top_lines=4 _vp_h=10 _tc=""
+                            _get_term_size
+                            _term_lines="$_TS_LINES"
+                            _term_cols="$_TS_COLS"
+                            if [ -n "$_cl_pre_out" ]; then
+                                local _pre_cnt
+                                _pre_cnt="$(printf '%s\n' "$_cl_pre_out" | awk -v cols="$_term_cols" '{ gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); l=length($0); c += (l > cols && cols > 0) ? int((l - 1) / cols) + 1 : 1 } END { print c+0 }')"
+                                _top_lines=$((_top_lines + _pre_cnt))
+                            fi
+                            _vp_h=$((_term_lines - _top_lines - 9))
+                            [ "$_vp_h" -lt 5 ] && _vp_h=5
 
-                            for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
-                                c_cmd="${chosen_commands[$((item - 1))]}"
-                                _tc="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
-                                case "$_tc" in
-                                    "#h "*|"#he "*|"%%%"*) continue ;;
-                                    "#"*)
-                                        _pc="${_tc#\#}"
-                                        _pc="${_pc#"${_pc%%[![:space:]]*}"}"
-                                        if [ "${GOVIEW:-easy}" != "easy" ]; then
-                                            [ "$_cur_lines" -gt 0 ] && [ "$_hdr_cnt" -eq 0 ] && [ -n "$_pc" ] && _hdr_cnt=$((_hdr_cnt + 1))
-                                            _hdr_cnt=$((_hdr_cnt + 1))
-                                        else
-                                            case "$_pc" in
-                                                "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
-                                                    [ "$_cur_lines" -gt 0 ] && [ "$_hdr_cnt" -eq 0 ] && _hdr_cnt=$((_hdr_cnt + 1))
-                                                    _hdr_cnt=$((_hdr_cnt + 1))
-                                                    ;;
-                                            esac
-                                        fi
-                                        continue
-                                        ;;
-                                esac
-                                original_indices[${#original_indices[@]}]="$item"
-                                if [ "${GOVIEW:-easy}" = "easy" ]; then
-                                    _est_l=1
-                                else
-                                    _est_l=$(( (${#c_cmd} > 330 ? 330 : ${#c_cmd}) / 126 + 1 ))
-                                fi
-                                if [ "$_cur_lines" -gt 0 ] && [ $((_cur_lines + _hdr_cnt + _est_l)) -gt "$_max_body_lines" ]; then
-                                    _cur_pg=$((_cur_pg + 1))
-                                    _cur_lines=0
-                                fi
-                                _item_page[$item]=$_cur_pg
-                                _cur_lines=$((_cur_lines + _hdr_cnt + _est_l))
-                                _hdr_cnt=0
-                            done
-                            _cmd_total_pages=$_cur_pg
-                            [ "$_cmd_page" -gt "$_cmd_total_pages" ] && _cmd_page=$_cmd_total_pages
-                            [ "$_cmd_page" -lt 1 ] && _cmd_page=1
-
-                            # [Pass 2] 현재 페이지에 해당하는 항목만 직출력 (서브셸/wc 0회)
-                            local _pending_hdr_lines=""
+                            # 전체 항목 렌더링 (페이지 분할 없이 스크롤 뷰포트에서 슬라이싱)
+                            local _pending_hdr_lines="" _cl_nl=$'\n'
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
 
                                 c_cmd="${chosen_commands[$((item - 1))]}"
@@ -2428,22 +2621,22 @@ menufunc() {
                                                     ;;
                                             esac
                                             if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
-                                                _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                _pending_hdr_lines="${_cl_nl}${_hdr_item}"
                                             elif [ "$_pending_hdr_lines" = " " ]; then
-                                                _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                _pending_hdr_lines="${_cl_nl}${_hdr_item}"
                                             else
-                                                _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}${_hdr_item}"
+                                                _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}${_cl_nl}}${_hdr_item}"
                                             fi
                                         else
                                             case "$prev_comment" in
                                                 "─"*|"━"*|"═"*|"-"*"【"*|"["*|"- "*"["*|"--"*|"---"*)
                                                     local _hdr_item="   \x1b[1;36m${prev_comment}\x1b[0m"
                                                     if [ -n "${_cl_pg_first:-}" ] && [ -z "$_pending_hdr_lines" ]; then
-                                                        _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                        _pending_hdr_lines="${_cl_nl}${_hdr_item}"
                                                     elif [ "$_pending_hdr_lines" = " " ]; then
-                                                        _pending_hdr_lines=$'\n'"${_hdr_item}"
+                                                        _pending_hdr_lines="${_cl_nl}${_hdr_item}"
                                                     else
-                                                        _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}$'\n'}${_hdr_item}"
+                                                        _pending_hdr_lines="${_pending_hdr_lines:+${_pending_hdr_lines}${_cl_nl}}${_hdr_item}"
                                                     fi
                                                     ;;
                                             esac
@@ -2453,15 +2646,9 @@ menufunc() {
                                 esac
 
                                 # 주석 아닌 경우 배열 순번에 줄번호 할당
+                                original_indices[${#original_indices[@]}]="$item"
                                 pi="${display_idx}."
                                 display_idx=$((display_idx + 1))
-
-                                # 현재 페이지가 아니면 렌더링/서브셸/awk 전부 건너뜀!
-                                if [ "${_cmd_page_all:-0}" -eq 0 ] && [ "${_item_page[$item]:-1}" -ne "$_cmd_page" ]; then
-                                    _pending_hdr_lines=""
-                                    prev_comment=""
-                                    continue
-                                fi
 
                                 local _cur_item_no=$((display_idx - 1))
                                 [ -z "${_cl_pg_first:-}" ] && _cl_pg_first=$_cur_item_no
@@ -2534,10 +2721,12 @@ menufunc() {
                                     # [규칙] 널명령(: 라벨) 색칠 분리
                                     #  ': 라벨 ; 명령' 의 라벨은 색칠 규칙 대상에서 완전히 제외하고,
                                     #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
-                                    local _pi_pfx _kbadge _rendered
+                                    local _pi_pfx _kbadge _rendered _fold_w
+                                    _fold_w=$((_term_cols > 30 ? _term_cols - 8 : 22))
+                                    [ "$_fold_w" -gt 126 ] && _fold_w=126
                                     _pi_pfx="$(printf "\e[1m%-3s\e[0m " "${pi}")"
                                     _kbadge="$(_cmd_kind_badge "$c_cmd")"
-                                    _rendered="$(echo "$processed_cmd" | fold -sw 126 | sed -e '2,$s/^/    /' \
+                                    _rendered="$(echo "$processed_cmd" | fold -sw "$_fold_w" | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
                                         -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' \
                                         -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' \
@@ -2566,20 +2755,103 @@ menufunc() {
                                 fi
                             done # end of for item in $(seq 1 ${#chosen_commands[@]}); do
 
+                            # 평면 줄 배열 생성 (스크롤 뷰포트 슬라이싱용, 서브셸 0회)
+                            # [규칙] Bash 2.05 호환: 큰따옴표 내부 ${var%%$'\n'*} / ${var#*$'\n'} 금지 (작은따옴표가 리터럴로 들어가 무한루프 발생) -> 변수 $_cl_nl 사용
+                            local -a _cl_flat_lines _cl_flat_nums _cl_item_start _cl_item_end _cl_card_cache
+                            _cl_flat_lines=()
+                            _cl_flat_nums=()
+                            _cl_item_start=()
+                            _cl_item_end=()
+                            _cl_card_cache=()
+                            local _di _dl _dn _line _is_first _fi
+                            for ((_di = 0; _di < ${#_cl_disp_lines[@]}; _di++)); do
+                                _dl="${_cl_disp_lines[$_di]}"
+                                _dn="${_cl_disp_nums[$_di]}"
+                                if [ -z "$_dl" ]; then
+                                    _fi=${#_cl_flat_lines[@]}
+                                    _cl_flat_lines[$_fi]=""
+                                    _cl_flat_nums[$_fi]=""
+                                    continue
+                                fi
+                                _is_first=1
+                                while [ -n "$_dl" ]; do
+                                    case "$_dl" in
+                                        *"$_cl_nl"*)
+                                            _line="${_dl%%$_cl_nl*}"
+                                            _dl="${_dl#*$_cl_nl}"
+                                            ;;
+                                        *)
+                                            _line="$_dl"
+                                            _dl=""
+                                            ;;
+                                    esac
+                                    _fi=${#_cl_flat_lines[@]}
+                                    _cl_flat_lines[$_fi]="$_line"
+                                    if [ -n "$_dn" ] && [ "$_is_first" -eq 1 ]; then
+                                        _cl_flat_nums[$_fi]="$_dn"
+                                        _cl_item_start[$_dn]=$_fi
+                                        _cl_item_end[$_dn]=$_fi
+                                        _is_first=0
+                                    else
+                                        _cl_flat_nums[$_fi]=""
+                                        [ -n "$_dn" ] && _cl_item_end[$_dn]=$_fi
+                                    fi
+                                done
+                            done
+
+                            local _total_flat=${#_cl_flat_lines[@]}
+                            local _need_scroll=0 _scroll_top=0 _max_scroll=0
+                            [ "${_cmd_page_all:-0}" -eq 0 ] && [ "$_total_flat" -gt "$_vp_h" ] && _need_scroll=1
+                            _max_scroll=$((_total_flat - _vp_h))
+                            [ "$_max_scroll" -lt 0 ] && _max_scroll=0
+
                             local _cl_nav_cur="${_cl_pg_first:-1}" _cl_nav_moved=0 _cl_painted=0 _cl_peeked=0
                             local _cl_tri="▶"
                             [ "${GOTERM_ENC:-}" = "euckr" ] && _cl_tri="$(ko '▶')"
 
+                            _cl_ensure_visible() {
+                                [ "$_need_scroll" -eq 0 ] && return
+                                local _cs="${_cl_item_start[$_cl_nav_cur]:-0}"
+                                local _ce="${_cl_item_end[$_cl_nav_cur]:-$_cs}"
+                                if [ "$_cs" -lt "$_scroll_top" ]; then
+                                    _scroll_top="$_cs"
+                                elif [ "$_ce" -ge $((_scroll_top + _vp_h)) ]; then
+                                    _scroll_top=$((_ce - _vp_h + 1))
+                                fi
+                                [ "$_scroll_top" -gt "$_max_scroll" ] && _scroll_top=$_max_scroll
+                                [ "$_scroll_top" -lt 0 ] && _scroll_top=0
+                            }
+
+                            _cl_pick_in_view() {
+                                local _vi _ve=$((_scroll_top + _vp_h))
+                                [ "$_ve" -gt "$_total_flat" ] && _ve="$_total_flat"
+                                for ((_vi = _scroll_top; _vi < _ve; _vi++)); do
+                                    if [ -n "${_cl_flat_nums[$_vi]}" ]; then
+                                        _cl_nav_cur="${_cl_flat_nums[$_vi]}"
+                                        return 0
+                                    fi
+                                done
+                                for ((_vi = _scroll_top - 1; _vi >= 0; _vi--)); do
+                                    if [ -n "${_cl_flat_nums[$_vi]}" ]; then
+                                        _cl_nav_cur="${_cl_flat_nums[$_vi]}"
+                                        return 0
+                                    fi
+                                done
+                            }
+
                             _cl_render_screen() {
-                                local _do_home="${1:-0}" _di _dl _dn _pfx _tmp_nl _card_only=0 _fbuf=""
+                                local _do_home="${1:-0}" _fi _dl _dn _pfx _s_idx _e_idx _vp_drawn=0 _card_only=0 _fbuf=""
+                                local _cr=$'\r' _nl=$'\n' _el=$'\033[K' _pfx_sel=$'\033[1;33m'"${_cl_tri}"$'\033[0m '
                                 if [ "$_do_home" = "0" ]; then
                                     [ -z "$debug" ] && _clear_keep_scrollback
                                     _fbuf="${_fbuf}$(printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
                                     [ -n "$_cl_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/')"$'\n'
+                                    _fbuf="${_fbuf}"$'\r\x1b[K\n'
                                 elif [ "$_cl_peeked" -eq 1 ]; then
                                     _fbuf="${_fbuf}"$'\033[?25l\033[2J\033[H'
                                     _fbuf="${_fbuf}$(printf '%s' "$_cl_hdr_buf" | sed 's/$/\x1b[K/')"$'\n'
                                     [ -n "$_cl_pre_out" ] && _fbuf="${_fbuf}$(printf '%s\n' "$_cl_pre_out" | sed 's/$/\x1b[K/')"$'\n'
+                                    _fbuf="${_fbuf}"$'\r\x1b[K\n'
                                     _cl_peeked=0
                                 elif [ "$_cl_painted" -gt 0 ] && [ "$_cl_painted" -lt "$_term_lines" ]; then
                                     _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_cl_painted")"
@@ -2590,41 +2862,43 @@ menufunc() {
 
                                 if [ "$_card_only" -eq 0 ]; then
                                     _cl_painted=0
-                                    for ((_di = 0; _di < ${#_cl_disp_lines[@]}; _di++)); do
-                                        _dl="${_cl_disp_lines[$_di]}"
-                                        _dn="${_cl_disp_nums[$_di]}"
+                                    if [ "$_need_scroll" -eq 1 ]; then
+                                        _s_idx=$_scroll_top
+                                        _e_idx=$((_scroll_top + _vp_h))
+                                        [ "$_e_idx" -gt "$_total_flat" ] && _e_idx=$_total_flat
+                                    else
+                                        _s_idx=0
+                                        _e_idx=$_total_flat
+                                    fi
+                                    for ((_fi = _s_idx; _fi < _e_idx; _fi++)); do
+                                        _dl="${_cl_flat_lines[$_fi]}"
+                                        _dn="${_cl_flat_nums[$_fi]}"
                                         if [ -n "$_dn" ] && [ "$_dn" = "$_cl_nav_cur" ]; then
-                                            _pfx="\x1b[1;33m${_cl_tri}\x1b[0m "
+                                            _pfx="$_pfx_sel"
                                         else
                                             _pfx="  "
                                         fi
-                                        _tmp_nl="${_dl//[!$'\n']/}"
-                                        _cl_painted=$((_cl_painted + ${#_tmp_nl} + 1))
-                                        _dl="${_dl//$'\n'/$'\x1b[K\n\r'}"
-                                        _fbuf="${_fbuf}$(printf '\r%b%s\x1b[K\n' "$_pfx" "$_dl")"$'\n'
+                                        _cl_painted=$((_cl_painted + 1))
+                                        _vp_drawn=$((_vp_drawn + 1))
+                                        _fbuf="${_fbuf}${_cr}${_pfx}${_dl}${_el}${_nl}"
                                     done
-                                    if [ "$_cmd_total_pages" -gt 1 ]; then
-                                        _cl_painted=$((_cl_painted + 2))
-                                        _fbuf="${_fbuf}"$'\r\x1b[K\n'
-                                        if [ "${_cmd_page_all:-0}" -eq 1 ]; then
-                                            if [ "$GOLANG" = "kr" ]; then
-                                                _fbuf="${_fbuf}$(ko "\r  \x1b[1;33m[전체보기 중 (%s페이지 분량)]\x1b[0m  \x1b[1;36mA\x1b[0m:페이지모드\x1b[K\n" "$_cmd_total_pages")"$'\n'
-                                            else
-                                                _fbuf="${_fbuf}$(printf "\r  \x1b[1;33m[Showing All (%s pages)]\x1b[0m  \x1b[1;36mA\x1b[0m:Paged\x1b[K\n" "$_cmd_total_pages")"$'\n'
-                                            fi
-                                        else
-                                            if [ "$GOLANG" = "kr" ]; then
-                                                _fbuf="${_fbuf}$(ko "\r  \x1b[1;33m[페이지 %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:다음  \x1b[1;36m[\x1b[0m:이전  \x1b[1;36mA\x1b[0m:전체보기\x1b[K\n" "$_cmd_page" "$_cmd_total_pages")"$'\n'
-                                            else
-                                                _fbuf="${_fbuf}$(printf "\r  \x1b[1;33m[Page %s/%s]\x1b[0m  \x1b[1;36m]\x1b[0m:Next  \x1b[1;36m[\x1b[0m:Prev  \x1b[1;36mA\x1b[0m:All\x1b[K\n" "$_cmd_page" "$_cmd_total_pages")"$'\n'
-                                            fi
-                                        fi
+                                    if [ "$_need_scroll" -eq 1 ]; then
+                                        while [ "$_vp_drawn" -lt "$_vp_h" ]; do
+                                            _fbuf="${_fbuf}${_cr}${_el}${_nl}"
+                                            _cl_painted=$((_cl_painted + 1))
+                                            _vp_drawn=$((_vp_drawn + 1))
+                                        done
                                     fi
                                     _cl_painted=$((_cl_painted + 8))
                                 fi
 
                                 local _orig_sel="${original_indices[$((_cl_nav_cur - 1))]-}"
-                                _fbuf="${_fbuf}$(_render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_cmd_total_pages" "$_cmd_page" "$((display_idx - 1))")"$'\n'
+                                local _has_scroll=1
+                                [ "$_need_scroll" -eq 1 ] && _has_scroll=2
+                                if [ -z "${_cl_card_cache[$_cl_nav_cur]-}" ]; then
+                                    _cl_card_cache[$_cl_nav_cur]="$(_render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_has_scroll" "1" "$((display_idx - 1))")"
+                                fi
+                                _fbuf="${_fbuf}${_cl_card_cache[$_cl_nav_cur]}${_nl}"
                                 [ "$_do_home" = "1" ] && _fbuf="${_fbuf}"$'\033[?25h'
                                 printf '%s' "$_fbuf"
                             }
@@ -2652,6 +2926,7 @@ menufunc() {
                                     _cl_nav_moved=1
                                     _cl_nav_cur=$((_cl_nav_cur - 1))
                                     [ "$_cl_nav_cur" -lt "${_cl_pg_first:-1}" ] && _cl_nav_cur="${_cl_pg_last:-$((display_idx - 1))}"
+                                    _cl_ensure_visible
                                     _cl_render_screen 1
                                     cmd_choice=""
                                     cmd_choice1=""
@@ -2660,23 +2935,46 @@ menufunc() {
                                     _cl_nav_moved=1
                                     _cl_nav_cur=$((_cl_nav_cur + 1))
                                     [ "$_cl_nav_cur" -gt "${_cl_pg_last:-$((display_idx - 1))}" ] && _cl_nav_cur="${_cl_pg_first:-1}"
+                                    _cl_ensure_visible
                                     _cl_render_screen 1
                                     cmd_choice=""
                                     cmd_choice1=""
                                     continue
-                                elif [ "$cmd_choice" = "__NAV_RIGHT__" ]; then
-                                    if [ "$_cmd_total_pages" -gt 1 ] && [ "${_cmd_page_all:-0}" -eq 0 ]; then
-                                        cmd_choice="]"
-                                        break
+                                elif [ "$cmd_choice" = "__NAV_PGDN__" ] || [ "$cmd_choice" = "__NAV_RIGHT__" ] || [ "$cmd_choice" = "]" ]; then
+                                    [ "$cmd_choice" = "]" ] && printf '\033[1A\r\033[K'
+                                    if [ "$_need_scroll" -eq 1 ]; then
+                                        if [ "$_scroll_top" -ge "$_max_scroll" ]; then
+                                            _cl_nav_cur="${_cl_pg_last:-$((display_idx - 1))}"
+                                        else
+                                            _scroll_top=$((_scroll_top + _vp_h))
+                                            [ "$_scroll_top" -gt "$_max_scroll" ] && _scroll_top=$_max_scroll
+                                            _cl_pick_in_view
+                                        fi
+                                    else
+                                        _cl_nav_cur=$((_cl_nav_cur + 5))
+                                        [ "$_cl_nav_cur" -gt "${_cl_pg_last:-$((display_idx - 1))}" ] && _cl_nav_cur="${_cl_pg_last:-$((display_idx - 1))}"
                                     fi
+                                    _cl_nav_moved=1
+                                    _cl_render_screen 1
                                     cmd_choice=""
                                     cmd_choice1=""
                                     continue
-                                elif [ "$cmd_choice" = "__NAV_LEFT__" ]; then
-                                    if [ "$_cmd_total_pages" -gt 1 ] && [ "${_cmd_page_all:-0}" -eq 0 ]; then
-                                        cmd_choice="["
-                                        break
+                                elif [ "$cmd_choice" = "__NAV_PGUP__" ] || [ "$cmd_choice" = "__NAV_LEFT__" ] || [ "$cmd_choice" = "[" ]; then
+                                    [ "$cmd_choice" = "[" ] && printf '\033[1A\r\033[K'
+                                    if [ "$_need_scroll" -eq 1 ]; then
+                                        if [ "$_scroll_top" -le 0 ]; then
+                                            _cl_nav_cur="${_cl_pg_first:-1}"
+                                        else
+                                            _scroll_top=$((_scroll_top - _vp_h))
+                                            [ "$_scroll_top" -lt 0 ] && _scroll_top=0
+                                            _cl_pick_in_view
+                                        fi
+                                    else
+                                        _cl_nav_cur=$((_cl_nav_cur - 5))
+                                        [ "$_cl_nav_cur" -lt "${_cl_pg_first:-1}" ] && _cl_nav_cur="${_cl_pg_first:-1}"
                                     fi
+                                    _cl_nav_moved=1
+                                    _cl_render_screen 1
                                     cmd_choice=""
                                     cmd_choice1=""
                                     continue
@@ -3094,8 +3392,9 @@ menufunc() {
                                         # echo "here var_name~~:$var_name // var_value~~:$var_value" ;
                                         :
                                     fi
-                                    # 최종 var_value(직접 입력 및 env Default 포함) 앞뒤 공백 및 ANSI/제어문자 제거
-                                    var_value="$(printf '%s' "$var_value" | sed -e $'s/\x1b\\[[0-9;]*[a-zA-Z]//g' -e 's/[[:cntrl:]]//g')"
+                                    # 최종 var_value(직접 입력 및 env Default 포함) 앞뒤 공백 및 ANSI/제어문자 제거 (Bash 2.05 호환)
+                                    local _esc_ch=$'\033'
+                                    var_value="$(printf '%s' "$var_value" | sed -e "s/${_esc_ch}\\[[0-9;]*[a-zA-Z]//g" -e 's/[[:cntrl:]]//g')"
                                     var_value="${var_value#"${var_value%%[![:space:]]*}"}"
                                     var_value="${var_value%"${var_value##*[![:space:]]}"}"
                                     if [[ $var_name == varDomain* ]]; then
@@ -3263,7 +3562,7 @@ menufunc() {
                             unsetvar varl
                             saveVAR
                             nav_back 1
-                            continue
+                            return 0
                             ;;
 
                         ".." | "sh")
@@ -3275,7 +3574,7 @@ menufunc() {
                             ;;
                         "m")
                             nav_main
-                            continue
+                            return 0
                             ;;
                         # 화면 프롬프트에 안내되지만 이전에는 case 가 없어 동작하지 않던 키들
                         conf | conf1 | confb | confmy | conff | confc | conffc | pconf)
@@ -3316,23 +3615,25 @@ menufunc() {
                             ;;
                         "b" | "00")
                             savescut && nav_back 1 # 이전 화면으로
-                            continue
+                            return 0
                             ;;
                         "bb")
                             savescut && nav_back 2 # 두 단계 이전 화면으로
-                            continue
+                            return 0
                             ;;
                         "bbb")
                             savescut && nav_back 3 # 세 단계 이전 화면으로
-                            continue
+                            return 0
                             ;;
                         "<" | "before")
                             beforescut=$(st $scut b)
                             echo "Move to Before menu.. [$beforescut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$beforescut")" "$(scuttitle "$beforescut")" "$(notscutrelay "$beforescut")"
+                            return 0
                             ;;
                         ">" | "next")
                             nextscut=$(st $scut n)
                             echo "Move to Next menu.. [$nextscut]" && sleep 0.5 && savescut && menufunc "$(scutsub "$nextscut")" "$(scuttitle "$nextscut")" "$(notscutrelay "$nextscut")"
+                            return 0
                             ;;
                         "chat" | "ai" | "hi" | "hello")
                             ollama run gemma3 2>/dev/null && continue
@@ -3544,6 +3845,7 @@ menufunc() {
             case "$choice" in
             m) # 메인/서브 메뉴 탈출
                 nav_main
+                return 0
                 ;;
             0 | "q" | .) # 메인/서브 메뉴 탈출 (quit)
                 # title_of_menu_sub=""
@@ -3553,6 +3855,7 @@ menufunc() {
                 # 서브메뉴에서 탈출할경우 메인메뉴로 돌아옴
                 if [ "$title_of_menu_sub" ]; then
                     nav_main
+                    return 0
                 else
                     saveVAR
                     exit 0
@@ -3560,12 +3863,15 @@ menufunc() {
                 ;;
             b | 00)
                 savescut && nav_back 1 # 이전 화면으로
+                return 0
                 ;;
             bb)
                 savescut && nav_back 2 # 두 단계 이전 화면으로
+                return 0
                 ;;
             bbb)
                 savescut && nav_back 3 # 세 단계 이전 화면으로
+                return 0
                 ;;
             df)
                 # Original condition checked for ! "$choice1"
@@ -4995,7 +5301,7 @@ nav_save() { # $1=scut $2=sub $3=title
         return 0
     fi
     NAVSTACK[${#NAVSTACK[@]}]="$1|$2|$3|"
-    [ ${#NAVSTACK[@]} -gt "$NAV_MAX" ] && NAVSTACK=("${NAVSTACK[@]:1}")
+    [ ${#NAVSTACK[@]} -gt "$NAV_MAX" ] && { unset "NAVSTACK[0]"; NAVSTACK=("${NAVSTACK[@]}"); }
     return 0
 }
 
