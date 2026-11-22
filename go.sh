@@ -658,17 +658,29 @@ menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
     fi
 }
 
-menu_prompt() { # $1=최대번호 (? 는 항상 help 로 표시)
-    local _vtxt=""
+menu_prompt() { # $1=최대번호 $2=스크롤여부(0|1) (? 는 항상 help 로 표시)
+    local _vtxt="" _arr="↑↓" _lr="←→" _has_pg="${2:-0}"
+    if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+        _arr="Up/Dn"
+        _lr="L/R"
+    fi
     if [ "${GOVIEW:-easy}" = "easy" ]; then
-        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]명령어모드')" || _vtxt="[V]cmd-mode"
+        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]명령어')" || _vtxt="[V]Cmd"
     else
-        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]쉬움모드')" || _vtxt="[V]easy-mode"
+        [ "$GOLANG" = "kr" ] && _vtxt="$(ko '[V]쉬움')" || _vtxt="[V]Easy"
     fi
     if [ "$GOLANG" = "kr" ]; then
-        ko ">>> 선택 [0-%s]   %s  [F]상세  [?] help : " "$1" "$_vtxt"
+        if [ "$_has_pg" = "1" ]; then
+            ko ">>> 선택 [0-%s]  [%s]이동 [%s]페이지 [Enter]실행 %s [F]상세 [?]도움 : " "$1" "$_arr" "$_lr" "$_vtxt"
+        else
+            ko ">>> 선택 [0-%s]  [%s]이동 [Enter]실행 %s [F]상세 [?]도움 [q]종료 : " "$1" "$_arr" "$_vtxt"
+        fi
     else
-        printf '>>> Select [0-%s]   %s  [F]detail  [?] help : ' "$1" "$_vtxt"
+        if [ "$_has_pg" = "1" ]; then
+            printf '>>> Select [0-%s]  [%s]Move [%s]Page [Enter]Go %s [F]Detail [?]Help : ' "$1" "$_arr" "$_lr" "$_vtxt"
+        else
+            printf '>>> Select [0-%s]  [%s]Move [Enter]Go %s [F]Detail [?]Help [q]Quit : ' "$1" "$_arr" "$_vtxt"
+        fi
     fi
 }
 
@@ -1624,7 +1636,7 @@ _render_cmd_detail_card() {
     local _vars=""
     _vars="$(printf '%s' "$_cmd" | awk '{ s=$0; while (match(s, /var[A-Z][a-zA-Z0-9_@-]*/)) { v=substr(s, RSTART+3, RLENGTH-3); sub(/__.*/, "", v); if (!seen[v]++) out = out (out ? ", " : "") v; s=substr(s, RSTART+RLENGTH) } } END { print out }')"
 
-    # 항상 고정 8줄 출력 (상단 여백 1줄 + 카드 6줄 + 하단 여백 1줄)
+    # 항상 고정 6줄 출력 (상단 여백 1줄 + 카드 5줄; 하단 단축키는 프롬프트 1줄로 통합)
     printf "\r\x1b[K\n"
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
@@ -1645,9 +1657,6 @@ _render_cmd_detail_card() {
             ko "\r    \x1b[38;5;250m%s 안내 : 추가 변수 없음 (Enter 누르면 확인/실행)\x1b[0m\x1b[K\n" "$_dot"
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
-        local _pg_hint=""
-        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[PgUp/PgDn/${_lr}]\x1b[0m $(ko '스크롤')"
-        ko "\r  \x1b[1;36m[%s]\x1b[0m 이동  \x1b[1;32m[Enter]\x1b[0m 선택실행  \x1b[1;37m[1-%s]\x1b[0m 번호  \x1b[1;37m[V]\x1b[0m 모드  \x1b[1;37m[F]\x1b[0m 상세  \x1b[1;37m[?]\x1b[0m 도움말%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
     else
         printf "\r %s \x1b[1;33mSelected Item Detail\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
         if [ -n "$_body" ]; then
@@ -1666,11 +1675,7 @@ _render_cmd_detail_card() {
             printf "\r    \x1b[38;5;250m%s Info : No prompt variables (Enter to run/confirm)\x1b[0m\x1b[K\n" "$_dot"
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
-        local _pg_hint=""
-        [ "$_tpg" -gt 1 ] && _pg_hint="  \x1b[1;36m[PgUp/PgDn/${_lr}]\x1b[0m Scroll"
-        printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Run  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help%b\x1b[K\n" "$_arr" "$_max" "$_pg_hint"
     fi
-    printf "\r\x1b[K\n"
 }
 
 _render_main_detail_card() {
@@ -1759,7 +1764,7 @@ _render_main_detail_card() {
         fi
     fi
 
-    # 항상 고정 8줄 출력 (상단 여백 1줄 + 카드 6줄 + 하단 여백 1줄)
+    # 항상 고정 6줄 출력 (상단 여백 1줄 + 카드 5줄; 하단 단축키는 프롬프트 1줄로 통합)
     printf "\r\x1b[K\n"
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
@@ -1775,7 +1780,6 @@ _render_main_detail_card() {
             ko "\r    \x1b[38;5;250m%s 안내   : Enter 를 누르면 해당 메뉴로 이동합니다.\x1b[0m\x1b[K\n" "$_dot"
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
-        ko "\r  \x1b[1;36m[%s]\x1b[0m 이동  \x1b[1;32m[Enter]\x1b[0m 열기  \x1b[1;37m[1-%s]\x1b[0m 번호  \x1b[1;37m[V]\x1b[0m 모드  \x1b[1;37m[F]\x1b[0m 상세  \x1b[1;37m[?]\x1b[0m 도움말  \x1b[1;37m[q]\x1b[0m 종료\x1b[K\n" "$_arr" "$_max"
     else
         printf "\r %s \x1b[1;33mSelected Menu Detail\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_clean_title" "$_badge"
         if [ -n "$_m_key" ]; then
@@ -1789,9 +1793,7 @@ _render_main_detail_card() {
             printf "\r    \x1b[38;5;250m%s Info     : Press Enter to open this menu.\x1b[0m\x1b[K\n" "$_dot"
         fi
         printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
-        printf "\r  \x1b[1;36m[%s]\x1b[0m Move  \x1b[1;32m[Enter]\x1b[0m Open  \x1b[1;37m[1-%s]\x1b[0m No  \x1b[1;37m[V]\x1b[0m View  \x1b[1;37m[F]\x1b[0m Detail  \x1b[1;37m[?]\x1b[0m Help  \x1b[1;37m[q]\x1b[0m Exit\x1b[K\n" "$_arr" "$_max"
     fi
-    printf "\r\x1b[K\n"
 }
 
 ###############################################################
@@ -2163,7 +2165,7 @@ menufunc() {
                 _m_pre_cnt="$(printf '%s\n' "$_m_pre_out" | awk -v cols="$_m_term_cols" '{ gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); l=length($0); c += (l > cols && cols > 0) ? int((l - 1) / cols) + 1 : 1 } END { print c+0 }')"
                 _m_top_lines=$((_m_top_lines + _m_pre_cnt))
             fi
-            _m_vp_h=$((_m_term_lines - _m_top_lines - 9))
+            _m_vp_h=$((_m_term_lines - _m_top_lines - 7))
             [ "$_m_vp_h" -lt 5 ] && _m_vp_h=5
 
             local _m_need_scroll=0 _m_scroll_top=0 _m_max_scroll=0
@@ -2177,11 +2179,29 @@ menufunc() {
                 local _ce="${_m_item_end[$_m_nav_cur]:-$_cs}"
                 if [ "$_cs" -lt "$_m_scroll_top" ]; then
                     _m_scroll_top="$_cs"
+                    [ "$_m_scroll_top" -lt 0 ] && _m_scroll_top=0
                 elif [ "$_ce" -ge $((_m_scroll_top + _m_vp_h)) ]; then
                     _m_scroll_top=$((_ce - _m_vp_h + 1))
+                    [ "$_m_scroll_top" -gt "$_m_max_scroll" ] && _m_scroll_top=$_m_max_scroll
+                    [ "$_m_scroll_top" -lt 0 ] && _m_scroll_top=0
                 fi
-                [ "$_m_scroll_top" -gt "$_m_max_scroll" ] && _m_scroll_top=$_m_max_scroll
-                [ "$_m_scroll_top" -lt 0 ] && _m_scroll_top=0
+            }
+
+            _m_pick_in_view() {
+                local _vi _ve=$((_m_scroll_top + _m_vp_h))
+                [ "$_ve" -gt "$_m_total_flat" ] && _ve="$_m_total_flat"
+                for ((_vi = _m_scroll_top; _vi < _ve; _vi++)); do
+                    if [ -n "${_m_flat_nums[$_vi]}" ]; then
+                        _m_nav_cur="${_m_flat_nums[$_vi]}"
+                        return 0
+                    fi
+                done
+                for ((_vi = _m_scroll_top - 1; _vi >= 0; _vi--)); do
+                    if [ -n "${_m_flat_nums[$_vi]}" ]; then
+                        _m_nav_cur="${_m_flat_nums[$_vi]}"
+                        return 0
+                    fi
+                done
             }
 
             _m_render_screen() {
@@ -2200,7 +2220,7 @@ menufunc() {
                 elif [ "$_m_painted" -gt 0 ] && [ "$_m_painted" -lt "$_m_term_lines" ]; then
                     _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_m_painted")"
                 elif [ "$menu_idx" -ge 1 ]; then
-                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[8A'
+                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[6A'
                     _card_only=1
                 fi
 
@@ -2234,7 +2254,7 @@ menufunc() {
                         done
                     fi
                     if [ "$menu_idx" -ge 1 ]; then
-                        _m_painted=$((_m_painted + 8))
+                        _m_painted=$((_m_painted + 6))
                     else
                         _m_painted=$((_m_painted + 1))
                     fi
@@ -2264,7 +2284,7 @@ menufunc() {
             # readchoice read choice
             trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
             history -r
-            _mp="$(menu_prompt "$menu_idx")"
+            _mp="$(menu_prompt "$menu_idx" "$_m_need_scroll")"
             while :; do
                 menu_read "$_mp" choice choice1 1
                 _rr=$?
@@ -2288,18 +2308,36 @@ menufunc() {
                     continue
                 elif { [ "$choice" = "__NAV_PGUP__" ] || [ "$choice" = "__NAV_LEFT__" ]; } && [ "$menu_idx" -ge 1 ]; then
                     _m_nav_moved=1
-                    _m_nav_cur=$((_m_nav_cur - 5))
-                    [ "$_m_nav_cur" -lt 1 ] && _m_nav_cur=1
-                    _m_ensure_visible
+                    if [ "$_m_need_scroll" -eq 1 ]; then
+                        if [ "$_m_scroll_top" -le 0 ]; then
+                            _m_nav_cur=1
+                        else
+                            _m_scroll_top=$(( ((_m_scroll_top - 1) / _m_vp_h) * _m_vp_h ))
+                            [ "$_m_scroll_top" -lt 0 ] && _m_scroll_top=0
+                            _m_pick_in_view
+                        fi
+                    else
+                        _m_nav_cur=$((_m_nav_cur - 5))
+                        [ "$_m_nav_cur" -lt 1 ] && _m_nav_cur=1
+                    fi
                     _m_render_screen 1
                     choice=""
                     choice1=""
                     continue
                 elif { [ "$choice" = "__NAV_PGDN__" ] || [ "$choice" = "__NAV_RIGHT__" ]; } && [ "$menu_idx" -ge 1 ]; then
                     _m_nav_moved=1
-                    _m_nav_cur=$((_m_nav_cur + 5))
-                    [ "$_m_nav_cur" -gt "$menu_idx" ] && _m_nav_cur="$menu_idx"
-                    _m_ensure_visible
+                    if [ "$_m_need_scroll" -eq 1 ]; then
+                        _m_pg_next=$(( (_m_scroll_top / _m_vp_h + 1) * _m_vp_h ))
+                        if [ "$_m_pg_next" -ge "$_m_total_flat" ]; then
+                            _m_nav_cur="$menu_idx"
+                        else
+                            _m_scroll_top=$_m_pg_next
+                            _m_pick_in_view
+                        fi
+                    else
+                        _m_nav_cur=$((_m_nav_cur + 5))
+                        [ "$_m_nav_cur" -gt "$menu_idx" ] && _m_nav_cur="$menu_idx"
+                    fi
                     _m_render_screen 1
                     choice=""
                     choice1=""
@@ -2588,7 +2626,7 @@ menufunc() {
                                 _pre_cnt="$(printf '%s\n' "$_cl_pre_out" | awk -v cols="$_term_cols" '{ gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); l=length($0); c += (l > cols && cols > 0) ? int((l - 1) / cols) + 1 : 1 } END { print c+0 }')"
                                 _top_lines=$((_top_lines + _pre_cnt))
                             fi
-                            _vp_h=$((_term_lines - _top_lines - 9))
+                            _vp_h=$((_term_lines - _top_lines - 7))
                             [ "$_vp_h" -lt 5 ] && _vp_h=5
 
                             # 전체 항목 렌더링 (페이지 분할 없이 스크롤 뷰포트에서 슬라이싱)
@@ -2815,11 +2853,12 @@ menufunc() {
                                 local _ce="${_cl_item_end[$_cl_nav_cur]:-$_cs}"
                                 if [ "$_cs" -lt "$_scroll_top" ]; then
                                     _scroll_top="$_cs"
+                                    [ "$_scroll_top" -lt 0 ] && _scroll_top=0
                                 elif [ "$_ce" -ge $((_scroll_top + _vp_h)) ]; then
                                     _scroll_top=$((_ce - _vp_h + 1))
+                                    [ "$_scroll_top" -gt "$_max_scroll" ] && _scroll_top=$_max_scroll
+                                    [ "$_scroll_top" -lt 0 ] && _scroll_top=0
                                 fi
-                                [ "$_scroll_top" -gt "$_max_scroll" ] && _scroll_top=$_max_scroll
-                                [ "$_scroll_top" -lt 0 ] && _scroll_top=0
                             }
 
                             _cl_pick_in_view() {
@@ -2856,7 +2895,7 @@ menufunc() {
                                 elif [ "$_cl_painted" -gt 0 ] && [ "$_cl_painted" -lt "$_term_lines" ]; then
                                     _fbuf="${_fbuf}$(printf '\033[?25l\r\033[K\033[%dA' "$_cl_painted")"
                                 else
-                                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[8A'
+                                    _fbuf="${_fbuf}"$'\033[?25l\r\033[K\033[6A'
                                     _card_only=1
                                 fi
 
@@ -2889,7 +2928,7 @@ menufunc() {
                                             _vp_drawn=$((_vp_drawn + 1))
                                         done
                                     fi
-                                    _cl_painted=$((_cl_painted + 8))
+                                    _cl_painted=$((_cl_painted + 6))
                                 fi
 
                                 local _orig_sel="${original_indices[$((_cl_nav_cur - 1))]-}"
@@ -2913,11 +2952,11 @@ menufunc() {
                                 trap 'saveVAR;stty sane;exit' SIGINT SIGTERM EXIT # 트랩 설정
                                 history -r
                                 if [ -n "$newcmds" ]; then
-                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 1; }
+                                    readxy "$newcmds $newcmds1" && { cmd_choice="$newcmds" && cmd_choice1="$newcmds1"; } || { menu_read "$(menu_prompt "$((display_idx - 1))" "$_need_scroll")" cmd_choice cmd_choice1 1; }
                                     _cl_rc=$?
                                     unset -v newcmds newcmds1
                                 else
-                                    menu_read "$(menu_prompt "$((display_idx - 1))")" cmd_choice cmd_choice1 1
+                                    menu_read "$(menu_prompt "$((display_idx - 1))" "$_need_scroll")" cmd_choice cmd_choice1 1
                                     _cl_rc=$?
                                 fi
                                 trap - SIGINT SIGTERM EXIT       # 트랩 해제 (이후에는 기본 동작)
@@ -2943,11 +2982,11 @@ menufunc() {
                                 elif [ "$cmd_choice" = "__NAV_PGDN__" ] || [ "$cmd_choice" = "__NAV_RIGHT__" ] || [ "$cmd_choice" = "]" ]; then
                                     [ "$cmd_choice" = "]" ] && printf '\033[1A\r\033[K'
                                     if [ "$_need_scroll" -eq 1 ]; then
-                                        if [ "$_scroll_top" -ge "$_max_scroll" ]; then
+                                        _cl_pg_next=$(( (_scroll_top / _vp_h + 1) * _vp_h ))
+                                        if [ "$_cl_pg_next" -ge "$_total_flat" ]; then
                                             _cl_nav_cur="${_cl_pg_last:-$((display_idx - 1))}"
                                         else
-                                            _scroll_top=$((_scroll_top + _vp_h))
-                                            [ "$_scroll_top" -gt "$_max_scroll" ] && _scroll_top=$_max_scroll
+                                            _scroll_top=$_cl_pg_next
                                             _cl_pick_in_view
                                         fi
                                     else
@@ -2965,7 +3004,7 @@ menufunc() {
                                         if [ "$_scroll_top" -le 0 ]; then
                                             _cl_nav_cur="${_cl_pg_first:-1}"
                                         else
-                                            _scroll_top=$((_scroll_top - _vp_h))
+                                            _scroll_top=$(( ((_scroll_top - 1) / _vp_h) * _vp_h ))
                                             [ "$_scroll_top" -lt 0 ] && _scroll_top=0
                                             _cl_pick_in_view
                                         fi
