@@ -245,7 +245,8 @@ sed -i \
 #  go.env 는 KR/EN 양쪽 출력이 기존 sed 와 byte-identical 임을 실측 검증 완료.
 #############################################################
 envlang_master="$env.lang"
-GOLANG=""
+# 기존 환경변수 GOLANG 유지 (시작 시 .golang > go.my.env > 환경변수 > 자동감지 순으로 결정)
+golang_file=""
 
 golang_filter() { # $1 = kr|en   (성공 0 / 실패 1)
     [ "$1" = "kr" ] || [ "$1" = "en" ] || return 1
@@ -308,6 +309,9 @@ golang_toggle() { # $1 = kr|en
     golang_filter "$1" || return 1
     shortcutarr=()
     shortcutstr="@@@"
+    if [ -n "$golang_file" ]; then
+        printf '%s\n' "$GOLANG" >"$golang_file" 2>/dev/null
+    fi
     return 0
 }
 
@@ -356,11 +360,25 @@ build_shortcutarr() {
 # 인코딩만 확정된 "두 언어 모두 포함" 원본을 마스터로 보관 (L 토글의 재실행 지점)
 cp -f "$env" "$envlang_master" 2>/dev/null
 
-# 시작시 언어/보기모드 결정 : 수동지정(go.my.env / .goview) 우선, 없으면 기존 환경변수/자동감지
+# 시작시 언어/보기모드 결정 : 영구저장(.golang / .goview) > go.my.env > 환경변수 > 자동감지
 local_myenv=""
 [ -f "$envorg2" ] && local_myenv="$envorg2"
 [ -z "$local_myenv" ] && [ -f "$HOME/go.my.env" ] && local_myenv="$HOME/go.my.env"
-[ -z "$GOLANG" ] && [ -n "$local_myenv" ] && GOLANG="$(grep -m1 '^[[:blank:]]*GOLANG=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+
+# 언어(GOLANG) 영구 저장 파일 경로 결정 및 로드 (.golang > go.my.env > 환경변수 > locale 자동감지)
+if [ -n "$base" ] && [ -w "$base" ]; then
+    golang_file="$base/.golang"
+else
+    golang_file="$HOME/.golang"
+fi
+_saved_golang=""
+[ -f "$golang_file" ] && _saved_golang="$(head -n 1 "$golang_file" 2>/dev/null | tr -d '\r\n ')"
+if [ "$_saved_golang" = "kr" ] || [ "$_saved_golang" = "en" ]; then
+    GOLANG="$_saved_golang"
+elif [ -n "$local_myenv" ]; then
+    _myenv_golang="$(grep -m1 '^[[:blank:]]*GOLANG=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
+    [ -n "$_myenv_golang" ] && GOLANG="$_myenv_golang"
+fi
 
 # 보기모드(GOVIEW) 영구 저장 파일 경로 결정 및 로드 (.goview > go.my.env > 환경변수 > easy)
 goview_file=""
@@ -377,7 +395,7 @@ elif [ -n "$local_myenv" ]; then
     _myenv_goview="$(grep -m1 '^[[:blank:]]*GOVIEW=' "$local_myenv" 2>/dev/null | cut -d= -f2- | tr -d '\r' | sed -e 's/^[[:blank:]]*//' -e 's/[[:blank:]]*$//' -e 's/^"//' -e 's/"$//')"
     [ -n "$_myenv_goview" ] && GOVIEW="$_myenv_goview"
 fi
-unset -v local_myenv _saved_goview _myenv_goview
+unset -v local_myenv _saved_golang _myenv_golang _saved_goview _myenv_goview
 if [ "$GOLANG" != "kr" ] && [ "$GOLANG" != "en" ]; then
     GOLANG=""
     if (($(locale | grep -ci "kr") == 0)); then
@@ -3705,9 +3723,9 @@ menufunc() {
                                 # 캐시 재구축 후 여기로 돌아와야 scutsub/scuttitle 이 값을 준다
                                 build_shortcutarr
                                 if [ "$_lnew" = "kr" ]; then
-                                    ko "한글 메뉴로 전환 [L]"
+                                    ko "한글 메뉴로 전환 [L] - 저장됨"
                                 else
-                                    echo "English menu [L]"
+                                    echo "English menu [L] - saved"
                                 fi
                                 if [ "$scut" != "m" ] && [ -n "$scut" ]; then
                                     menufunc "$(scutsub "$scut")" "$(scuttitle "$scut")" "$(notscutrelay "$scut")"
@@ -4002,9 +4020,9 @@ menufunc() {
                     #   서브메뉴에서 L 을 눌렀는데 메인메뉴로 튀는 문제가 생긴다.
                     #   이 태그는 언어와 무관하다 (%%%e -> %%% 정규화시 {submenu_*} 가 보존됨)
                     if [ "$_lnew" = "kr" ]; then
-                        ko "한글 메뉴로 전환 [L]"
+                        ko "한글 메뉴로 전환 [L] - 저장됨"
                     else
-                        echo "English menu [L]"
+                        echo "English menu [L] - saved"
                     fi
                     continue
                 fi
