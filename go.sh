@@ -5947,7 +5947,7 @@ verr() { cdiff $basefile $basefile.1.bak; }
 bell() { echo -ne "\a"; }
 # telegram push
 push() {
-    local message
+    local message _resp _desc _code
     message="$*"
     [ ! "$message" ] && IFS='' read -d '' -t1 message
     # 인수도 파이프값도 없을때 기본값 hostname 으로 지정
@@ -5967,10 +5967,31 @@ push() {
     fi
 
     if [[ ${telegram_token} && ${telegram_chatid} ]]; then
-        curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" >/dev/null
+        _resp="$(curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id="${telegram_chatid}" -d text="${message:-ex) push \"msg\"}" 2>&1)"
         result=$?
-        #curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${message:-ex) push "msg"}" ; result=$?
-        [ "$result" == 0 ] && { GRN1 && echo "push msg sent"; } || { RED1 && echo "Err:$result ->  push send error"; }
+        if [ "$result" -eq 0 ] && echo "$_resp" | grep -q '"ok":true'; then
+            GRN1 && echo "push msg sent"
+        elif [ "$result" -eq 0 ]; then
+            _code="$(echo "$_resp" | sed -n 's/.*"error_code":\([0-9]*\).*/\1/p')"
+            _desc="$(echo "$_resp" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')"
+            RED1
+            case "$_code" in
+                401) ko "Err:401 -> 텔레그램 봇 토큰 인증 실패 (${_desc:-Unauthorized}) — ~/go.private.env 의 telegram_token 을 확인하세요" ;;
+                400) ko "Err:400 -> 잘못된 요청/ChatID 오류 (${_desc:-Bad Request}) — telegram_chatid(${telegram_chatid}) 를 확인하세요" ;;
+                403) ko "Err:403 -> 봇 권한 거부 (${_desc:-Forbidden}) — 봇 대화방에서 /start 를 먼저 눌러주세요" ;;
+                404) ko "Err:404 -> 봇 토큰 형식 또는 API 경로 오류 (${_desc:-Not Found}) — telegram_token 을 확인하세요" ;;
+                *)   ko "Err:${_code:-API} -> 텔레그램 API 오류: ${_desc:-$_resp}" ;;
+            esac
+        else
+            RED1
+            case "$result" in
+                6)  ko "Err:6 -> DNS 조회 실패 (api.telegram.org 호스트를 찾을 수 없음)" ;;
+                7)  ko "Err:7 -> 서버 연결 실패 (api.telegram.org:443 접속 거부/방화벽)" ;;
+                28) ko "Err:28 -> 연결 시간 초과 (api.telegram.org 응답 지연 / 타임아웃)" ;;
+                35) ko "Err:35 -> SSL/TLS 핸드셰이크 오류" ;;
+                *)  ko "Err:$result -> push 전송 실패 (curl 종료코드: $result)" ;;
+            esac
+        fi
         NC
     fi
     # 기본적으로 인자 출력
@@ -5978,7 +5999,7 @@ push() {
 }
 
 push1() {
-    local message
+    local message _resp _desc _code
     message="$*"
     [ -z "$message" ] && IFS='' read -d '' -t1 message
     [ -z "$message" ] && message="$HOSTNAME"
@@ -5990,18 +6011,43 @@ push1() {
     fi
 
     # Telegram으로 전송
-    curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
-        -d chat_id="${telegram_chatid}" -d text="${message}" >/dev/null
+    _resp="$(curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" \
+        -d chat_id="${telegram_chatid}" -d text="${message}" 2>&1)"
 
     result=$?
-    if [ "$result" -eq 0 ]; then
+    if [ "$result" -eq 0 ] && echo "$_resp" | grep -q '"ok":true'; then
         GRN1 && echo "push1 msg sent" && bell
+    elif [ "$result" -eq 0 ]; then
+        _code="$(echo "$_resp" | sed -n 's/.*"error_code":\([0-9]*\).*/\1/p')"
+        _desc="$(echo "$_resp" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')"
+        RED1 && ko "Err:${_code:-API} -> push1 실패 (${_desc:-$_resp})" && bell
     else
-        RED1 && echo "Err:$result -> push1 send error" && bell
+        RED1 && ko "Err:$result -> push1 전송 실패 (curl 코드: $result)" && bell
     fi
     NC
 
     echo "$message"
+}
+
+pushc() {
+    local _cmd="$*" _out _rc
+    if [ -z "$_cmd" ]; then
+        echo "Usage: pushc \"<command>\""
+        return 1
+    fi
+    _out="$(eval "$_cmd" 2>&1)"
+    _rc=$?
+    push "[$HOSTNAME] $ $_cmd (exit:$_rc)"$'\n'"$_out"
+    return $_rc
+}
+
+pushfile() {
+    local _f="$1"
+    if [ -z "$_f" ] || [ ! -f "$_f" ]; then
+        ko "오류: 파일을 찾을 수 없습니다: ${_f:-<미지정>}"
+        return 1
+    fi
+    push "[$HOSTNAME] file: $_f"$'\n'"$(head -c 3500 "$_f")"
 }
 
 atqq() { atq | sort | while read -r l; do
@@ -6227,7 +6273,7 @@ alarm() {
         local days="${input:8:2}"
         [ -z "$days" ] && days=0
         telegram_msg="${time_in_hours}:${time_in_minutes}-Alarm ${telegram_msg}"
-        echo ": alarm_task_$input && curl -m3 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at "$time_in_hours":"$time_in_minutes" "$( ((days > 0)) && echo "today + $days" days)" &>/dev/null
+        echo ": alarm_task_$input && curl -4 -m8 -ks -X POST \"https://api.telegram.org/bot${telegram_token}/sendMessage\" -d chat_id=${telegram_chatid} -d text=\"${telegram_msg}\"" | at "$time_in_hours":"$time_in_minutes" "$( ((days > 0)) && echo "today + $days" days)" &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
@@ -6249,7 +6295,7 @@ alarm() {
         adjusted_minutes=$((time_in_minutes))
         ((wait_seconds < 0)) && wait_seconds=$((60 + wait_seconds)) && adjusted_minutes=$((time_in_minutes - 1))
 
-        echo ": alarm_task_$input && sleep $wait_seconds && curl -m3 -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
+        echo ": alarm_task_$input && sleep $wait_seconds && curl -4 -m8 -ks -X POST 'https://api.telegram.org/bot${telegram_token}/sendMessage' -d chat_id=${telegram_chatid} -d text='${telegram_msg}'" | at now + "$adjusted_minutes" minutes &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
@@ -6266,7 +6312,7 @@ alarm() {
 
         date
         #echo "input: $input // msg: $telegram_msg"
-        sleepdot $time_in_seconds && curl -m3 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
+        sleepdot $time_in_seconds && curl -4 -m8 -ks -X POST "https://api.telegram.org/bot${telegram_token}/sendMessage" -d chat_id=${telegram_chatid} -d text="${telegram_msg}" &>/dev/null
 
         atq | sort | while read -r l; do
             echo $l
