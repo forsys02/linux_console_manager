@@ -5836,9 +5836,19 @@ disksetup() {
         case "$name" in
         loop* | ram* | sr* | fd* | zram* | dm-* | md*) continue ;;
         esac
-        size="$(lsblk -dn -o SIZE "/dev/$name" 2>/dev/null | awk '{print $1}')"
+        size="$(lsblk -dn -o SIZE "/dev/$name" 2>/dev/null | awk 'NF {print $1; exit}')"
         model="$(lsblk -dn -o MODEL "/dev/$name" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        tran="$(lsblk -dn -o TRAN "/dev/$name" 2>/dev/null | awk 'NF {print $1; exit}')"
         [ -z "$model" ] && model="-"
+        [ -n "$tran" ] && model="[$tran] $model"
+
+        # 0B / 미디어 없음 / USB 재인식 과도기 유령 장치 차단
+        local blk_sectors=""
+        [ -r "/sys/block/$name/size" ] && read -r blk_sectors <"/sys/block/$name/size"
+        if [ -z "$size" ] || [ "$size" = "0B" ] || [ "$blk_sectors" = "0" ]; then
+            busy_lines[${#busy_lines[@]}]="$(printf "  [대기] /dev/%-10s  %-8s  %-24s  %s" "$name" "${size:-0B}" "${model:0:24}" "NO-MEDIA/0B")"
+            continue
+        fi
 
         st="$(_disksetup_status "$name")"
         state="${st%%|*}"
@@ -5853,7 +5863,7 @@ disksetup() {
             free_reasons[${#free_reasons[@]}]="$reason"
             free_details[${#free_details[@]}]="$detail"
         else
-            busy_lines[${#busy_lines[@]}]="$(printf "  [보호] /dev/%-10s  %-8s  %-22s  %s" "$name" "$size" "${model:0:22}" "$reason")"
+            busy_lines[${#busy_lines[@]}]="$(printf "  [보호] /dev/%-10s  %-8s  %-24s  %s" "$name" "$size" "${model:0:24}" "$reason")"
         fi
     done < <(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk" {print $1}')
 
@@ -6019,7 +6029,10 @@ disksetup() {
             RED1; echo "[!] $target_part 에 파일시스템이 감지되지 않습니다(포맷 필요). [2] 또는 [3]번을 이용하세요."; NC
             return 1
         fi
-        _disksetup_mount_and_fstab "$target_part" "/mnt/${target_part##*/}"
+        local p_label def_mp_name
+        p_label="$(blkid -o value -s LABEL "$target_part" 2>/dev/null | tr -cd 'A-Za-z0-9._-')"
+        def_mp_name="${p_label:-${target_part##*/}}"
+        _disksetup_mount_and_fstab "$target_part" "/mnt/$def_mp_name"
         ;;
 
     # ------------------------------------------------------------------
