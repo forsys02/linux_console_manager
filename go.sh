@@ -1851,6 +1851,13 @@ menufunc() {
     # 화면 진입 이력 동기화 (이전 화면은 스택에 보관)
     nav_sync "$NAVENTRY_sub" "$NAVENTRY_title"
 
+    # [I] 색인 검색으로 진입한 1회만 검색어 하이라이트 유지, 일반 이동 시 자동 해제
+    if [ "${_IDX_HILITE_ARMED:-0}" = "1" ]; then
+        _IDX_HILITE_ARMED=0
+    else
+        _IDX_HILITE_KW=""
+    fi
+
     # 탈출코드 또는 ctrlc 가 입력되지 않는 경우 루프 loop
     ############### main loop ###################
     ############### main loop ###################
@@ -2603,8 +2610,12 @@ menufunc() {
                                 _cl_dline="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                                 _cl_hline="────────────────────────────────────────────────────────────────────────────────"
                             fi
+                            local _hl_badge=""
+                            if [ -n "${_IDX_HILITE_KW:-}" ]; then
+                                _hl_badge="$(printf '  \x1b[1;30;43m [I] %s \x1b[0m' "$_IDX_HILITE_KW")"
+                            fi
                             _cl_hdr_buf="$(printf '\x1b[38;5;75m%s\x1b[0m :: %s\n' "$_cl_dline" "$cmdloop")"$'\n'
-                            _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge")"$'\n'
+                            _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m%b\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge" "$_hl_badge")"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}$(printf '\x1b[38;5;110m%s\x1b[0m\n' "$_cl_hline")"$'\n'
                             # pre excute (1회 캡처 캐싱 + 중복 테두리 제거)
                             if [ ${#pre_commands[@]} -gt 0 ]; then
@@ -2711,7 +2722,16 @@ menufunc() {
 
                                 if [ "${GOVIEW:-easy}" = "easy" ]; then
                                     # 쉬움 모드 렌더링 (배열에 캡처하여 커서 이동 시 재파싱 0회)
-                                    _cl_disp_lines[${#_cl_disp_lines[@]}]="$(render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment")"
+                                    local _easy_line
+                                    _easy_line="$(render_item_easy "$pi" "$c_cmd" "$_hdesc" "$prev_comment")"
+                                    if [ -n "${_IDX_HILITE_KW:-}" ]; then
+                                        if printf '%s\n' "$_easy_line" | grep -qiF -- "$_IDX_HILITE_KW" 2>/dev/null; then
+                                            _easy_line="$(printf '%s\n' "$_easy_line" | _idx_hilite_ansi "$_IDX_HILITE_KW")"
+                                        elif printf '%s\n' "$c_cmd" | grep -qiF -- "$_IDX_HILITE_KW" 2>/dev/null; then
+                                            _easy_line="${_easy_line} $(printf '\033[1;30;43m[%s]\033[0m' "$_IDX_HILITE_KW")"
+                                        fi
+                                    fi
+                                    _cl_disp_lines[${#_cl_disp_lines[@]}]="$_easy_line"
                                     _cl_disp_nums[${#_cl_disp_nums[@]}]="$_cur_item_no"
                                     prev_comment=""
                                 else
@@ -2795,6 +2815,9 @@ menufunc() {
                                         -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' \
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
+                                    if [ -n "${_IDX_HILITE_KW:-}" ] && printf '%s\n' "$_rendered" | grep -qiF -- "$_IDX_HILITE_KW" 2>/dev/null; then
+                                        _rendered="$(printf '%s\n' "$_rendered" | _idx_hilite_ansi "$_IDX_HILITE_KW")"
+                                    fi
                                     if [ -n "$_kbadge" ]; then
                                         _cl_disp_lines[${#_cl_disp_lines[@]}]="$(printf "%s%s %b" "$_pi_pfx" "$_rendered" "$_kbadge")"
                                     else
@@ -7075,6 +7098,8 @@ EOF_IDX
             if expr "$_sel1" : '^[0-9][0-9]*$' >/dev/null 2>&1 && [ "$_sel1" -ge 1 ] && [ "$_sel1" -le "$_shown" ]; then
                 _IDX_TARGET_SCUT="${_idx_scuts[$((_sel1 - 1))]}"
                 _IDX_LAST_KW="$_kw"
+                _IDX_HILITE_KW="$_kw"
+                _IDX_HILITE_ARMED=1
                 local _kw_nav="${_kw//|/ }"
                 if [ "${NAV_scut:-}" = "__IDX__" ]; then
                     NAV_title="$_kw_nav"
@@ -7092,6 +7117,55 @@ EOF_IDX
             fi
         done
     done
+}
+
+# [I] ANSI 색상 코드를 보존하면서 일반 텍스트 구간의 검색어만 대소문자 무시 형광 하이라이트
+_idx_hilite_ansi() {
+    local _hl_kw="$1"
+    [ -z "$_hl_kw" ] && { cat; return 0; }
+    GO_HL_KW="$_hl_kw" awk '
+    function hl_plain(str,    low, pos, res, mlen, orig) {
+        if (kw == "" || str == "") return str
+        mlen = length(kw)
+        res = ""
+        while (str != "") {
+            low = tolower(str)
+            pos = index(low, kw)
+            if (pos == 0) {
+                res = res str
+                break
+            }
+            orig = substr(str, pos, mlen)
+            res = res substr(str, 1, pos - 1) "\033[1;30;43m" orig "\033[0m" cur_ansi
+            str = substr(str, pos + mlen)
+        }
+        return res
+    }
+    BEGIN {
+        kw = tolower(ENVIRON["GO_HL_KW"])
+    }
+    {
+        s = $0
+        out = ""
+        cur_ansi = ""
+        while (s != "") {
+            if (match(s, /\033\[[0-9;]*[A-Za-z]/)) {
+                plain = substr(s, 1, RSTART - 1)
+                seq = substr(s, RSTART, RLENGTH)
+                out = out hl_plain(plain) seq
+                if (seq == "\033[0m" || seq == "\033[m") {
+                    cur_ansi = ""
+                } else if (substr(seq, length(seq), 1) == "m") {
+                    cur_ansi = seq
+                }
+                s = substr(s, RSTART + RLENGTH)
+            } else {
+                out = out hl_plain(s)
+                break
+            }
+        }
+        print out
+    }'
 }
 
 # flow save and exec go.sh
