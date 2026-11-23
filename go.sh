@@ -666,12 +666,12 @@ menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
         ko "  이동  [b]뒤로 [bb]2 [bbb]3 [m]메인 [ESC]위 < > 메뉴  [ ] 페이지\n"
-        ko "  기능  [I]색인 [V]보기 [A]전체 [e]파일 [h]이력 [conf]설정 [?번호]설명\n"
+        ko "  기능  [I/II]색인 [V]보기 [A]전체 [e]파일 [h]이력 [conf]설정 [?번호]설명\n"
         ko "  언어  [L]한글(L k)/English(L e)  [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
         ko "  move  [b]back [bb]x2 [bbb]x3 [m]main [ESC]up < > menu  [ ] page\n"
-        ko "  tool  [I]index [V]view [A]all [e]file [h]hist [conf]set [?N]info\n"
+        ko "  tool  [I/II]index [V]view [A]all [e]file [h]hist [conf]set [?N]info\n"
         ko "  lang  [L]Korean(L k)/English(L e) [kr]encoding(fix garbled)\n"
     fi
 }
@@ -3578,7 +3578,7 @@ menufunc() {
                     # case 자체가 실행되지 않았음 → 숫자인지 먼저 expr 로 확인한다
                     if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '^[0-9]\+$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
                         case "$cmd_choice" in
-                            "]" | "[" | "A" | "all" | "I") ;;
+                            "]" | "[" | "A" | "all" | "I" | "II") ;;
                             *)
                                 YEL1
                                 echo
@@ -3641,6 +3641,14 @@ menufunc() {
                             ;;
                         I)
                             if menu_index_search "$cmd_choice1"; then
+                                savescut
+                                menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
+                                return 0
+                            fi
+                            continue
+                            ;;
+                        II)
+                            if menu_index_search "${_IDX_LAST_KW:-}"; then
                                 savescut
                                 menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
                                 return 0
@@ -4000,6 +4008,13 @@ menufunc() {
                 ;;
             I)
                 if menu_index_search "$choice1"; then
+                    savescut
+                    menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
+                fi
+                continue
+                ;;
+            II)
+                if menu_index_search "${_IDX_LAST_KW:-}"; then
                     savescut
                     menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
                 fi
@@ -5462,6 +5477,16 @@ nav_back() { # $1=단계수(기본 1)
         return 0
     fi
     nav_set "$d" # 현재 화면을 되돌린것으로 처리 (재 저장 방지)
+    # [I] 색인 검색 결과 화면으로 복귀
+    if [ "$NAV_scut" = "__IDX__" ]; then
+        if menu_index_search "$NAV_title"; then
+            savescut
+            menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
+        else
+            nav_back 1
+        fi
+        return 0
+    fi
     # [L] 로 언어를 전환한 뒤에는 이력에 쌓아둔 제목이 옛 언어 문자열로 남아 있다.
     # 그대로 쓰면 아래 listof_comm 의 헤더 텍스트 매칭이 실패해서
     # '명령목록이 통째로 빈 화면'이 되므로, 저장된 제목이 현재 $env 에서 더 이상
@@ -6962,6 +6987,7 @@ EOF_IDX
         IFS="$_mi_ifs"
 
         # 결과 화면 출력
+        _IDX_LAST_KW="$_kw"
         _clear_keep_scrollback
         printf '\033[38;5;75m%s\033[0m\n' "$_dl"
         if [ "$GOLANG" = "kr" ]; then
@@ -7048,6 +7074,13 @@ EOF_IDX
             # 숫자 선택 확인
             if expr "$_sel1" : '^[0-9][0-9]*$' >/dev/null 2>&1 && [ "$_sel1" -ge 1 ] && [ "$_sel1" -le "$_shown" ]; then
                 _IDX_TARGET_SCUT="${_idx_scuts[$((_sel1 - 1))]}"
+                _IDX_LAST_KW="$_kw"
+                local _kw_nav="${_kw//|/ }"
+                if [ "${NAV_scut:-}" = "__IDX__" ]; then
+                    NAV_title="$_kw_nav"
+                else
+                    nav_goto "__IDX__" "__IDX__" "$_kw_nav"
+                fi
                 unset _idx_scuts _idx_titles _idx_cmds _idx_metas _idx_vars _idx_samples
                 IFS="$_mi_ifs"
                 return 0
