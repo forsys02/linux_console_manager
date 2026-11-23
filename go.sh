@@ -1585,6 +1585,53 @@ _strip_dup_num() {
     printf '%s' "$_t"
 }
 
+# 다중 페이지 인디케이터 바 (하단 상세 카드 위 1줄 여백 활용, 폭 80칸 정렬)
+#   인자: $1=need_scroll(0|1) $2=scroll_top $3=vp_h $4=total_flat
+_render_page_bar() {
+    local _ns="${1:-0}" _stop="${2:-0}" _vph="${3:-1}" _tot="${4:-0}"
+    if [ "$_ns" -ne 1 ] || [ "$_vph" -le 0 ] || [ "$_tot" -le "$_vph" ]; then
+        printf '\r\x1b[K\n'
+        return 0
+    fi
+    local _tpg=$(( (_tot + _vph - 1) / _vph ))
+    [ "$_tpg" -lt 2 ] && _tpg=2
+    local _has_prev=0 _has_next=0
+    [ "$_stop" -gt 0 ] && _has_prev=1
+    [ $((_stop + _vph)) -lt "$_tot" ] && _has_next=1
+
+    local _cpg=$(( _stop / _vph + 1 ))
+    [ "$_has_prev" -eq 0 ] && _cpg=1
+    [ "$_has_next" -eq 0 ] && _cpg=$_tpg
+    [ "$_cpg" -lt 1 ] && _cpg=1
+    [ "$_cpg" -gt "$_tpg" ] && _cpg=$_tpg
+
+    local _la _ra _lstr _rstr
+    if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+        _la=" <------"
+        _ra="------> "
+    else
+        _la=" ◀──────"
+        _ra="──────▶ "
+    fi
+    if [ "$_has_prev" -eq 1 ]; then
+        _lstr="\x1b[1;33m${_la}\x1b[0m"
+    else
+        _lstr="        "
+    fi
+    if [ "$_has_next" -eq 1 ]; then
+        _rstr="\x1b[1;33m${_ra}\x1b[0m"
+    else
+        _rstr="        "
+    fi
+
+    local _mid="[ ${_cpg} / ${_tpg} ]"
+    local _rem=$(( 64 - ${#_mid} ))
+    [ "$_rem" -lt 2 ] && _rem=2
+    local _lpad=$(( _rem / 2 ))
+    local _rpad=$(( _rem - _lpad ))
+    printf '\r%b%*s\x1b[1;36m%s\x1b[0m%*s%b\x1b[K\n' "$_lstr" "$_lpad" "" "$_mid" "$_rpad" "" "$_rstr"
+}
+
 _render_cmd_detail_card() {
     local _sel="$1" _orig="$2" _tpg="${3:-1}" _cpg="${4:-1}" _max="${5:-1}"
     local _cmd="" _desc="" _title="" _body="" _badge="" _is_sub=0
@@ -1654,8 +1701,7 @@ _render_cmd_detail_card() {
     local _vars=""
     _vars="$(printf '%s' "$_cmd" | awk '{ s=$0; while (match(s, /var[A-Z][a-zA-Z0-9_@-]*/)) { v=substr(s, RSTART+3, RLENGTH-3); sub(/__.*/, "", v); if (!seen[v]++) out = out (out ? ", " : "") v; s=substr(s, RSTART+RLENGTH) } } END { print out }')"
 
-    # 항상 고정 6줄 출력 (상단 여백 1줄 + 카드 5줄; 하단 단축키는 프롬프트 1줄로 통합)
-    printf "\r\x1b[K\n"
+    # 항상 고정 5줄 출력 (상단 1줄 페이지 바는 호출부에서 실시간 렌더링 -> 합계 6줄)
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
         ko "\r %s \x1b[1;33m선택된 항목 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_title" "$_badge"
@@ -1782,8 +1828,7 @@ _render_main_detail_card() {
         fi
     fi
 
-    # 항상 고정 6줄 출력 (상단 여백 1줄 + 카드 5줄; 하단 단축키는 프롬프트 1줄로 통합)
-    printf "\r\x1b[K\n"
+    # 항상 고정 5줄 출력 (상단 1줄 페이지 바는 호출부에서 실시간 렌더링 -> 합계 6줄)
     printf "\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n" "$_sline"
     if [ "$GOLANG" = "kr" ]; then
         ko "\r %s \x1b[1;33m선택된 메뉴 상세\x1b[0m  -  \x1b[1;37m[%s] %s\x1b[0m   %b\x1b[K\n" "$_icon" "$_sel" "$_clean_title" "$_badge"
@@ -2286,7 +2331,7 @@ menufunc() {
                         fi
                         _m_card_cache[$_m_nav_cur]="$(_render_main_detail_card "$_m_nav_cur" "${_m_item_titles[$_m_nav_cur]-}" "${_m_item_keys[$_m_nav_cur]-}" "${_m_item_is_sub[$_m_nav_cur]-0}" "$menu_idx")"
                     fi
-                    _fbuf="${_fbuf}${_m_card_cache[$_m_nav_cur]}${_nl}"
+                    _fbuf="${_fbuf}$(_render_page_bar "$_m_need_scroll" "$_m_scroll_top" "$_m_vp_h" "$_m_total_flat")${_nl}${_m_card_cache[$_m_nav_cur]}${_nl}"
                 else
                     _fbuf="${_fbuf}$(printf '\r\x1b[38;5;110m%s\x1b[0m\x1b[K\n' "${_m_hline:-────────────────────────────────────────────────────────────────────────────────}")"$'\n'
                 fi
@@ -2971,7 +3016,7 @@ menufunc() {
                                 if [ -z "${_cl_card_cache[$_cl_nav_cur]-}" ]; then
                                     _cl_card_cache[$_cl_nav_cur]="$(_render_cmd_detail_card "$_cl_nav_cur" "$_orig_sel" "$_has_scroll" "1" "$((display_idx - 1))")"
                                 fi
-                                _fbuf="${_fbuf}${_cl_card_cache[$_cl_nav_cur]}${_nl}"
+                                _fbuf="${_fbuf}$(_render_page_bar "$_need_scroll" "$_scroll_top" "$_vp_h" "$_total_flat")${_nl}${_cl_card_cache[$_cl_nav_cur]}${_nl}"
                                 [ "$_do_home" = "1" ] && _fbuf="${_fbuf}"$'\033[?25h'
                                 printf '%s' "$_fbuf"
                             }
