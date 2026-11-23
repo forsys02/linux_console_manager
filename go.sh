@@ -5909,8 +5909,10 @@ disksetup() {
     echo "  (팁: 'a' 입력 시 전체 lsblk 트리 보기, 'q' 또는 Enter 로 종료)"
 
     # 2. 디스크 번호 선택
+    local range_hint="1"
+    [ "${#free_names[@]}" -gt 1 ] && range_hint="1-${#free_names[@]}"
     while true; do
-        printf "작업할 디스크 번호 선택 [1-%d / a / q]: " "${#free_names[@]}"
+        printf "작업할 디스크 번호 선택 [%s / a / q]: " "$range_hint"
         read -r sel </dev/tty
         case "$sel" in
         "" | q | Q | 0)
