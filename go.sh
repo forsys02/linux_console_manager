@@ -5533,6 +5533,916 @@ blkid2fstab() {
     echo "$fstabadd" >>/etc/fstab
 }
 
+# ==============================================================================
+# disksetup : 미마운트/미파티션 디스크 전천후 마법사 (ext4/xfs/btrfs/PV/LVM/LVM-Thin/Mount/fstab/Proxmox)
+# ==============================================================================
+
+# 디스크 장치의 1번 파티션 경로 계산 (/dev/nvme0n1 -> /dev/nvme0n1p1, /dev/sdb -> /dev/sdb1)
+_disksetup_part1() {
+    local dev="$1"
+    case "$dev" in
+    *[0-9]) echo "${dev}p1" ;;
+    *) echo "${dev}1" ;;
+    esac
+}
+
+# 디스크 사용 상태 판별: "STATE|REASON|DETAIL" 출력
+#   STATE: INUSE / FREE
+_disksetup_status() {
+    local name="$1"
+    local dev="/dev/$name"
+    local mps fstypes pv_info vg_name pv_dev holders parts p p_size p_fs detail=""
+
+    # 1) 마운트 여부 (디스크 자체 + 모든 하위 파티션/DM/LV)
+    mps="$(lsblk -nr -o MOUNTPOINT "$dev" 2>/dev/null | awk 'NF {print $1}' | paste -sd ',' -)"
+    if [ -n "$mps" ]; then
+        echo "INUSE|MOUNTED($mps)|-"
+        return 0
+    fi
+
+    # 2) 스왑 여부
+    if [ -r /proc/swaps ] && awk -v d="$dev" 'NR>1 && ($1==d || $1 ~ ("^" d "[0-9p]")) {found=1} END{exit !found}' /proc/swaps; then
+        echo "INUSE|SWAP|-"
+        return 0
+    fi
+
+    # 3) ZFS / Linux RAID 멤버 여부
+    fstypes="$(lsblk -nr -o FSTYPE "$dev" 2>/dev/null | awk 'NF {print $1}')"
+    if echo "$fstypes" | grep -qE '^zfs_member$'; then
+        echo "INUSE|ZFS|-"
+        return 0
+    fi
+    if echo "$fstypes" | grep -qE '^linux_raid_member$'; then
+        echo "INUSE|RAID|-"
+        return 0
+    fi
+
+    # 4) LVM PV 여부 (VG 소속이면 INUSE, VG 없는 고아 PV면 FREE:ORPHAN-PV)
+    if command -v pvs >/dev/null 2>&1; then
+        pv_info="$(pvs --noheadings --separator '|' -o pv_name,vg_name 2>/dev/null | tr -d ' ' | awk -F'|' -v d="$dev" '$1==d || $1 ~ ("^" d "[0-9p]") {print $0; exit}')"
+        if [ -n "$pv_info" ]; then
+            pv_dev="${pv_info%%|*}"
+            vg_name="${pv_info#*|}"
+            if [ -n "$vg_name" ]; then
+                echo "INUSE|LVM(vg:$vg_name)|$pv_dev"
+                return 0
+            else
+                echo "FREE|ORPHAN-PV|$pv_dev"
+                return 0
+            fi
+        fi
+    fi
+
+    # 5) 커널 holders (dm-crypt / multipath / md 등 활성 점유)
+    holders="$(ls -A "/sys/block/$name/holders" 2>/dev/null)"
+    if [ -z "$holders" ]; then
+        local hp
+        for hp in "/sys/block/$name/${name}"*/holders; do
+            [ -d "$hp" ] || continue
+            holders="$(ls -A "$hp" 2>/dev/null)"
+            [ -n "$holders" ] && break
+        done
+    fi
+    if [ -n "$holders" ]; then
+        echo "INUSE|HOLDER($holders)|-"
+        return 0
+    fi
+
+    # 6) 미사용 디스크 세부 분류 (RAW vs UNMOUNTED)
+    parts="$(lsblk -nr -o NAME,TYPE "$dev" 2>/dev/null | awk '$2=="part" {print $1}')"
+    if [ -z "$parts" ]; then
+        local raw_fs
+        raw_fs="$(lsblk -dn -o FSTYPE "$dev" 2>/dev/null | awk 'NF {print $1}')"
+        if [ -n "$raw_fs" ]; then
+            echo "FREE|RAW-FS($raw_fs)|no-part,fs=$raw_fs"
+        else
+            echo "FREE|RAW|파티션 없음 (생디스크)"
+        fi
+        return 0
+    fi
+
+    for p in $parts; do
+        p_size="$(lsblk -dn -o SIZE "/dev/$p" 2>/dev/null | awk 'NF {print $1; exit}')"
+        p_fs="$(lsblk -dn -o FSTYPE "/dev/$p" 2>/dev/null | awk 'NF {print $1; exit}')"
+        [ -z "$p_fs" ] && p_fs="no-fs"
+        detail="${detail:+$detail, }${p}(${p_size}/${p_fs})"
+    done
+    echo "FREE|UNMOUNTED|$detail"
+    return 0
+}
+
+# 파괴적 작업 전 이중 확인 (장치명 직접 타이핑 강제)
+_disksetup_confirm_destructive() {
+    local expect="$1"
+    local title="$2"
+    local ans
+    echo
+    RED1
+    echo "=================================================================="
+    echo "  [경고 / DANGER] $title"
+    echo "  대상 장치의 기존 데이터가 영구 삭제될 수 있습니다!"
+    echo "=================================================================="
+    NC
+    printf "진행하려면 대상 이름 '%s' 을(를) 정확히 입력하세요 (취소: Enter/q): " "$expect"
+    read -r ans </dev/tty
+    if [ "$ans" != "$expect" ]; then
+        YEL1; echo "[-] 확인 불일치로 작업을 안전하게 취소했습니다."; NC
+        return 1
+    fi
+    return 0
+}
+
+# 디스크 시그니처 및 파티션 테이블 초기화
+_disksetup_wipe_disk() {
+    local dev="$1"
+    local p
+    # 하위 파티션 시그니처 먼저 제거
+    for p in $(lsblk -nr -o NAME,TYPE "$dev" 2>/dev/null | awk '$2=="part" {print $1}'); do
+        if command -v wipefs >/dev/null 2>&1; then
+            wipefs -a "/dev/$p" 2>/dev/null || true
+        fi
+    done
+    if command -v wipefs >/dev/null 2>&1; then
+        wipefs -a "$dev"
+    else
+        dd if=/dev/zero of="$dev" bs=1M count=2 conv=fsync 2>/dev/null
+    fi
+    if command -v sgdisk >/dev/null 2>&1; then
+        sgdisk --zap-all "$dev" 2>/dev/null || true
+    fi
+    partprobe "$dev" 2>/dev/null || blockdev --rereadpt "$dev" 2>/dev/null || true
+    command -v udevadm >/dev/null 2>&1 && udevadm settle 2>/dev/null || sleep 1
+}
+
+# GPT 100% 단일 파티션 생성 ($1: /dev/sdX, $2: linux|lvm)
+_disksetup_mkpart_gpt() {
+    local dev="$1"
+    local kind="${2:-linux}"
+    local part1 i
+
+    _disksetup_wipe_disk "$dev" || return 1
+
+    if command -v parted >/dev/null 2>&1; then
+        parted -s "$dev" mklabel gpt || return 1
+        if [ "$kind" = "lvm" ]; then
+            parted -s -a optimal "$dev" mkpart primary 0% 100% || return 1
+            parted -s "$dev" set 1 lvm on || return 1
+        else
+            parted -s -a optimal "$dev" mkpart primary ext4 0% 100% || return 1
+        fi
+    elif command -v sgdisk >/dev/null 2>&1; then
+        local tcode="8300"
+        [ "$kind" = "lvm" ] && tcode="8e00"
+        sgdisk -n 1:0:0 -t "1:$tcode" "$dev" || return 1
+    elif command -v sfdisk >/dev/null 2>&1; then
+        if [ "$kind" = "lvm" ]; then
+            printf "label: gpt\n,,V\n" | sfdisk "$dev" || return 1
+        else
+            printf "label: gpt\n,,L\n" | sfdisk "$dev" || return 1
+        fi
+    else
+        RED1; echo "[!] parted, sgdisk, sfdisk 중 어떤 파티션 도구도 설치되어 있지 않습니다."; NC
+        return 1
+    fi
+
+    partprobe "$dev" 2>/dev/null || blockdev --rereadpt "$dev" 2>/dev/null || true
+    command -v udevadm >/dev/null 2>&1 && udevadm settle 2>/dev/null || sleep 2
+
+    part1="$(_disksetup_part1 "$dev")"
+    i=0
+    while [ ! -b "$part1" ] && [ "$i" -lt 10 ]; do
+        sleep 0.5
+        i=$((i + 1))
+    done
+    if [ ! -b "$part1" ]; then
+        RED1; echo "[!] 생성된 파티션($part1) 장치를 찾을 수 없습니다."; NC
+        return 1
+    fi
+    return 0
+}
+
+# 마운트 및 /etc/fstab 등록 헬퍼 ($1: target_dev, $2: default_mp)
+_disksetup_mount_and_fstab() {
+    local target_dev="$1"
+    local default_mp="${2:-/mnt/data}"
+    local mp fstype uuid fstab_dev ans bak entry
+
+    echo
+    CYN1; echo "--- [마운트 및 /etc/fstab 등록] ---"; NC
+    while true; do
+        printf "마운트할 디렉토리 경로 입력 (기본: %s, 취소: q): " "$default_mp"
+        read -r mp </dev/tty
+        [ "$mp" = "q" ] || [ "$mp" = "Q" ] && { echo "마운트를 건너뜁니다."; return 0; }
+        [ -z "$mp" ] && mp="$default_mp"
+        case "$mp" in
+        /*) ;;
+        *)
+            RED1; echo "[!] 절대 경로('/'로 시작)로 입력하세요. 예: /mnt/disk1"; NC
+            continue
+            ;;
+        esac
+        if [ "$mp" = "/" ]; then
+            RED1; echo "[!] 루트('/')에는 마운트할 수 없습니다."; NC
+            continue
+        fi
+        if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$mp" 2>/dev/null; then
+            RED1; echo "[!] '$mp' 는 이미 다른 장치가 마운트되어 있습니다. 다른 경로를 입력하세요."; NC
+            continue
+        fi
+        break
+    done
+
+    mkdir -p "$mp" || { RED1; echo "[!] 디렉토리 생성 실패: $mp"; NC; return 1; }
+    echo ">>> mount $target_dev $mp"
+    if ! mount "$target_dev" "$mp"; then
+        RED1; echo "[!] 마운트 실패: $target_dev -> $mp"; NC
+        return 1
+    fi
+    GRN1; echo "[OK] 마운트 완료: $target_dev -> $mp"; NC
+    df -h "$mp"
+
+    echo
+    printf "/etc/fstab 에 부팅 시 자동 마운트를 등록할까요? [Y/n]: "
+    read -r ans </dev/tty
+    case "$ans" in
+    [nN]*)
+        echo "[-] /etc/fstab 등록을 건너뜁니다."
+        return 0
+        ;;
+    esac
+
+    uuid="$(blkid -o value -s UUID "$target_dev" 2>/dev/null)"
+    fstype="$(blkid -o value -s TYPE "$target_dev" 2>/dev/null)"
+    [ -z "$fstype" ] && fstype="auto"
+
+    if [ -n "$uuid" ]; then
+        fstab_dev="UUID=$uuid"
+    else
+        fstab_dev="$target_dev"
+    fi
+
+    # 중복 체크 (주석 제외)
+    if grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | awk -v d="$fstab_dev" -v m="$mp" '$1==d || $2==m {found=1} END{exit !found}'; then
+        YEL1; echo "[!] /etc/fstab 에 이미 동일한 장치($fstab_dev) 또는 경로($mp)가 등록되어 있어 추가를 건너뜁니다."; NC
+        return 0
+    fi
+
+    bak="/etc/fstab.bak.$(date +%Y%m%d_%H%M%S)"
+    cp -a /etc/fstab "$bak" 2>/dev/null && echo "[백업] $bak"
+    entry="$(printf "%s\t%s\t%s\tdefaults,noatime,nofail\t0 2" "$fstab_dev" "$mp" "$fstype")"
+    echo "$entry" >>/etc/fstab
+    GRN1; echo "[OK] /etc/fstab 등록 완료:"; NC
+    echo "  $entry"
+    echo ">>> mount -a 검증 중..."
+    if mount -a; then
+        GRN1; echo "[OK] mount -a 검증 통과!"; NC
+    else
+        RED1; echo "[!] mount -a 경고 발생! /etc/fstab 을 확인하세요. (백업: $bak)"; NC
+    fi
+    return 0
+}
+
+# 전천후 디스크 마법사 메인 함수
+disksetup() {
+    if [ "$(id -u)" -ne 0 ]; then
+        RED1; echo "[!] disksetup 은 root 권한으로 실행해야 합니다."; NC
+        return 1
+    fi
+    if ! command -v lsblk >/dev/null 2>&1; then
+        RED1; echo "[!] lsblk 명령어가 필요합니다."; NC
+        return 1
+    fi
+
+    local -a free_names=()
+    local -a free_sizes=()
+    local -a free_models=()
+    local -a free_reasons=()
+    local -a free_details=()
+    local -a busy_lines=()
+    local line name size model tran st state reason detail
+    local idx=0 sel sel_name sel_dev sel_size sel_model sel_reason sel_detail
+    local mode fstype label part1 default_mp
+
+    echo
+    CYN1
+    echo "=========================================================================="
+    echo "  [disksetup] 전천후 디스크 초기화 / LVM / LVM-Thin / 포맷 / 마운트 마법사"
+    echo "=========================================================================="
+    NC
+
+    # 1. 물리 디스크 스캔 (구버전 lsblk 호환: -P key=value 대신 -dn -o NAME,TYPE,SIZE,MODEL)
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        case "$name" in
+        loop* | ram* | sr* | fd* | zram* | dm-* | md*) continue ;;
+        esac
+        size="$(lsblk -dn -o SIZE "/dev/$name" 2>/dev/null | awk '{print $1}')"
+        model="$(lsblk -dn -o MODEL "/dev/$name" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        [ -z "$model" ] && model="-"
+
+        st="$(_disksetup_status "$name")"
+        state="${st%%|*}"
+        local rest="${st#*|}"
+        reason="${rest%%|*}"
+        detail="${rest#*|}"
+
+        if [ "$state" = "FREE" ]; then
+            free_names[${#free_names[@]}]="$name"
+            free_sizes[${#free_sizes[@]}]="$size"
+            free_models[${#free_models[@]}]="$model"
+            free_reasons[${#free_reasons[@]}]="$reason"
+            free_details[${#free_details[@]}]="$detail"
+        else
+            busy_lines[${#busy_lines[@]}]="$(printf "  [보호] /dev/%-10s  %-8s  %-22s  %s" "$name" "$size" "${model:0:22}" "$reason")"
+        fi
+    done < <(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk" {print $1}')
+
+    # 보호 디스크(사용 중) 요약 표시
+    if [ "${#busy_lines[@]}" -gt 0 ]; then
+        WHT; echo "[사용 중 / 보호 디스크 (선택 불가 - 안전 보호)]"; NC
+        local bl
+        for bl in "${busy_lines[@]}"; do
+            printf "\033[90m%s\033[0m\n" "$bl"
+        done
+        echo
+    fi
+
+    # 선택 가능한 미사용/미마운트 디스크 목록 표시
+    GRN1; echo "[선택 가능한 미사용 / 미마운트 디스크]"; NC
+    if [ "${#free_names[@]}" -eq 0 ]; then
+        YEL1
+        echo "  작업 가능한 미마운트/미파티션 디스크가 없습니다."
+        echo "  (현재 모든 물리 디스크가 마운트되었거나 LVM/ZFS/RAID/Swap 으로 사용 중입니다.)"
+        NC
+        echo
+        echo "참고용 전체 블록 장치 현황:"
+        lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL 2>/dev/null || lsblk
+        return 0
+    fi
+
+    printf "  %-4s %-15s %-9s %-22s %-14s %s\n" "번호" "장치" "용량" "모델" "상태" "파티션/상세"
+    echo "  ------------------------------------------------------------------------------"
+    idx=0
+    while [ "$idx" -lt "${#free_names[@]}" ]; do
+        local num=$((idx + 1))
+        local color="\033[1;32m"
+        case "${free_reasons[$idx]}" in
+        UNMOUNTED*) color="\033[1;33m" ;;
+        ORPHAN-PV*) color="\033[1;36m" ;;
+        esac
+        printf "  ${color}[%2d]\033[0m /dev/%-10s %-9s %-22s %-14s %s\n" \
+            "$num" "${free_names[$idx]}" "${free_sizes[$idx]}" "${free_models[$idx]:0:22}" \
+            "${free_reasons[$idx]}" "${free_details[$idx]}"
+        idx=$((idx + 1))
+    done
+    echo "  ------------------------------------------------------------------------------"
+    echo "  (팁: 'a' 입력 시 전체 lsblk 트리 보기, 'q' 또는 Enter 로 종료)"
+
+    # 2. 디스크 번호 선택
+    while true; do
+        printf "작업할 디스크 번호 선택 [1-%d / a / q]: " "${#free_names[@]}"
+        read -r sel </dev/tty
+        case "$sel" in
+        "" | q | Q | 0)
+            echo "[-] disksetup 을 종료합니다."
+            return 0
+            ;;
+        a | A)
+            echo
+            lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL 2>/dev/null || lsblk
+            echo
+            continue
+            ;;
+        *[!0-9]*)
+            RED1; echo "[!] 1 ~ ${#free_names[@]} 사이의 번호를 입력하세요."; NC
+            continue
+            ;;
+        esac
+        if [ "$sel" -ge 1 ] && [ "$sel" -le "${#free_names[@]}" ]; then
+            idx=$((sel - 1))
+            sel_name="${free_names[$idx]}"
+            sel_dev="/dev/$sel_name"
+            sel_size="${free_sizes[$idx]}"
+            sel_model="${free_models[$idx]}"
+            sel_reason="${free_reasons[$idx]}"
+            sel_detail="${free_details[$idx]}"
+            break
+        fi
+        RED1; echo "[!] 1 ~ ${#free_names[@]} 사이의 번호를 입력하세요."; NC
+    done
+
+    # 선택 직후 안전 재검증
+    st="$(_disksetup_status "$sel_name")"
+    if [ "${st%%|*}" != "FREE" ]; then
+        RED1; echo "[!] 안전 차단: $sel_dev 상태가 변경되어 사용 중($st)입니다. 작업을 중단합니다."; NC
+        return 1
+    fi
+
+    echo
+    YEL1
+    echo ">>> 선택된 디스크: $sel_dev ($sel_size / $sel_model)"
+    echo "    현재 상태: $sel_reason | $sel_detail"
+    NC
+    echo
+    CYN1; echo "[수행할 작업을 선택하세요]"; NC
+    echo "  [1] 기존 파티션 그대로 마운트 (+ /etc/fstab 자동 등록)  [데이터 보존]"
+    echo "  [2] GPT 단일 파티션 + ext4 포맷 + 마운트 (+ fstab)       [가장 많이 씀]"
+    echo "  [3] GPT 단일 파티션 + xfs / btrfs 포맷 + 마운트 (+ fstab)"
+    echo "  [4] LVM-Thin 전체 세팅: 파티션(lvm) -> PV -> VG -> Thin Pool (+ Proxmox 등록)"
+    echo "  [5] LVM 일반 볼륨 세팅: 파티션(lvm) -> PV -> VG -> LV -> 포맷 + 마운트 (+ fstab)"
+    echo "  [6] PV만 생성 (pvcreate) / 기존 VG에 확장 (vgextend)"
+    echo "  [7] 디스크 완전 초기화 (wipefs + 파티션 테이블 삭제 -> 생디스크화)"
+    echo "  [0] 취소 / 종료"
+    echo
+    printf "작업 번호 선택 [0-7]: "
+    read -r mode </dev/tty
+
+    case "$mode" in
+    "" | 0 | q | Q)
+        echo "[-] 작업을 취소했습니다."
+        return 0
+        ;;
+
+    # ------------------------------------------------------------------
+    # [1] 기존 파티션 바로 마운트 (포맷 없이 데이터 보존)
+    # ------------------------------------------------------------------
+    1)
+        local -a parts_arr=()
+        local p p_sz p_fs p_sel target_part
+        while IFS= read -r p; do
+            [ -n "$p" ] && parts_arr[${#parts_arr[@]}]="$p"
+        done < <(lsblk -nr -o NAME,TYPE "$sel_dev" 2>/dev/null | awk '$2=="part" {print $1}')
+
+        if [ "${#parts_arr[@]}" -eq 0 ]; then
+            # 파티션 없이 디스크 자체에 FS가 있는 경우 지원
+            local raw_fs
+            raw_fs="$(lsblk -dn -o FSTYPE "$sel_dev" 2>/dev/null | awk 'NF {print $1}')"
+            if [ -n "$raw_fs" ]; then
+                target_part="$sel_dev"
+                echo "[안내] 파티션은 없지만 장치 자체에 $raw_fs 파일시스템이 감지되어 $sel_dev 을 마운트합니다."
+            else
+                RED1; echo "[!] $sel_dev 에 마운트할 기존 파티션이나 파일시스템이 없습니다. [2]~[5]번으로 먼저 구성하세요."; NC
+                return 1
+            fi
+        elif [ "${#parts_arr[@]}" -eq 1 ]; then
+            target_part="/dev/${parts_arr[0]}"
+            p_fs="$(lsblk -dn -o FSTYPE "$target_part" 2>/dev/null | awk '{print $1}')"
+            echo "[선택됨] 단일 파티션 자동 선택: $target_part (FS: ${p_fs:-unknown})"
+        else
+            echo
+            CYN1; echo "[마운트할 파티션 선택]"; NC
+            idx=0
+            while [ "$idx" -lt "${#parts_arr[@]}" ]; do
+                p="/dev/${parts_arr[$idx]}"
+                p_sz="$(lsblk -dn -o SIZE "$p" 2>/dev/null | awk '{print $1}')"
+                p_fs="$(lsblk -dn -o FSTYPE "$p" 2>/dev/null | awk '{print $1}')"
+                printf "  [%d] %-16s  %-8s  FS: %s\n" "$((idx + 1))" "$p" "$p_sz" "${p_fs:-none}"
+                idx=$((idx + 1))
+            done
+            printf "파티션 번호 [1-%d]: " "${#parts_arr[@]}"
+            read -r p_sel </dev/tty
+            case "$p_sel" in
+            "" | *[!0-9]*)
+                echo "[-] 취소했습니다."
+                return 0
+                ;;
+            esac
+            if [ "$p_sel" -lt 1 ] || [ "$p_sel" -gt "${#parts_arr[@]}" ]; then
+                echo "[-] 취소했습니다."
+                return 0
+            fi
+            target_part="/dev/${parts_arr[$((p_sel - 1))]}"
+        fi
+
+        p_fs="$(lsblk -dn -o FSTYPE "$target_part" 2>/dev/null | awk '{print $1}')"
+        if [ -z "$p_fs" ]; then
+            RED1; echo "[!] $target_part 에 파일시스템이 감지되지 않습니다(포맷 필요). [2] 또는 [3]번을 이용하세요."; NC
+            return 1
+        fi
+        _disksetup_mount_and_fstab "$target_part" "/mnt/${target_part##*/}"
+        ;;
+
+    # ------------------------------------------------------------------
+    # [2] GPT + ext4 포맷 + 마운트 / [3] GPT + xfs or btrfs 포맷 + 마운트
+    # ------------------------------------------------------------------
+    2 | 3)
+        if [ "$mode" = "2" ]; then
+            fstype="ext4"
+        else
+            echo
+            echo "  [1] xfs"
+            echo "  [2] btrfs"
+            echo "  [3] ext4"
+            printf "파일시스템 선택 [1-3, 기본 1(xfs)]: "
+            local fs_sel
+            read -r fs_sel </dev/tty
+            case "$fs_sel" in
+            "" | 1) fstype="xfs" ;;
+            2) fstype="btrfs" ;;
+            3) fstype="ext4" ;;
+            *) echo "[-] 취소했습니다."; return 0 ;;
+            esac
+        fi
+
+        if ! command -v "mkfs.$fstype" >/dev/null 2>&1; then
+            RED1; echo "[!] mkfs.$fstype 명령어가 설치되어 있지 않습니다. (예: e2fsprogs / xfsprogs / btrfs-progs)"; NC
+            return 1
+        fi
+
+        printf "볼륨 레이블 입력 (선택사항, 생략: Enter): "
+        read -r label </dev/tty
+        part1="$(_disksetup_part1 "$sel_dev")"
+
+        echo
+        CYN1; echo "[실행 계획 미리보기]"; NC
+        echo "  1) 디스크 초기화 & GPT 단일 파티션 생성: $sel_dev -> $part1 (100%)"
+        echo "  2) 파일시스템 포맷: mkfs.$fstype $part1 ${label:+(label: $label)}"
+        echo "  3) 마운트 & /etc/fstab 등록"
+
+        _disksetup_confirm_destructive "$sel_name" "$sel_dev 전체 초기화 후 $fstype 포맷" || return 1
+
+        echo ">>> [1/3] GPT 파티션 생성 중..."
+        _disksetup_mkpart_gpt "$sel_dev" "linux" || return 1
+
+        echo ">>> [2/3] mkfs.$fstype 포맷 중..."
+        case "$fstype" in
+        ext4)
+            if [ -n "$label" ]; then
+                mkfs.ext4 -F -L "$label" "$part1" || return 1
+            else
+                mkfs.ext4 -F "$part1" || return 1
+            fi
+            ;;
+        xfs)
+            if [ -n "$label" ]; then
+                mkfs.xfs -f -L "$label" "$part1" || return 1
+            else
+                mkfs.xfs -f "$part1" || return 1
+            fi
+            ;;
+        btrfs)
+            if [ -n "$label" ]; then
+                mkfs.btrfs -f -L "$label" "$part1" || return 1
+            else
+                mkfs.btrfs -f "$part1" || return 1
+            fi
+            ;;
+        esac
+        GRN1; echo "[OK] 포맷 완료: $part1 ($fstype)"; NC
+
+        default_mp="/mnt/${label:-$sel_name}"
+        _disksetup_mount_and_fstab "$part1" "$default_mp"
+        ;;
+
+    # ------------------------------------------------------------------
+    # [4] LVM-Thin 전체 세팅 (+ Proxmox pvesm 등록 옵션)
+    # ------------------------------------------------------------------
+    4)
+        if ! command -v pvcreate >/dev/null 2>&1 || ! command -v lvcreate >/dev/null 2>&1; then
+            RED1; echo "[!] lvm2 도구(pvcreate/vgcreate/lvcreate)가 설치되어 있지 않습니다."; NC
+            return 1
+        fi
+
+        local pv_mode="part" pv_target vg_action="new" vg_name thin_pool thin_size
+        local -a exist_vgs=()
+
+        if [ "$sel_reason" = "ORPHAN-PV" ]; then
+            pv_mode="orphan"
+            pv_target="$sel_detail"
+            CYN1; echo "[안내] 기존 고아 PV($pv_target)를 재사용합니다."; NC
+        else
+            echo
+            echo "  [1] GPT 1번 파티션 생성(lvm 플래그) 후 PV 생성 (권장)"
+            echo "  [2] 디스크 전체($sel_dev)에 파티션 없이 직접 PV 생성"
+            printf "PV 생성 방식 [1-2, 기본 1]: "
+            local pm_sel
+            read -r pm_sel </dev/tty
+            case "$pm_sel" in
+            2)
+                pv_mode="raw"
+                pv_target="$sel_dev"
+                ;;
+            *)
+                pv_mode="part"
+                pv_target="$(_disksetup_part1 "$sel_dev")"
+                ;;
+            esac
+        fi
+
+        # 기존 VG 목록 조회
+        while IFS= read -r line; do
+            [ -n "$line" ] && exist_vgs[${#exist_vgs[@]}]="$line"
+        done < <(vgs --noheadings -o vg_name 2>/dev/null | awk '{print $1}')
+
+        echo
+        if [ "${#exist_vgs[@]}" -gt 0 ]; then
+            echo "  [1] 새 Volume Group(VG) 생성"
+            echo "  [2] 기존 VG 확장 (현재 VG: ${exist_vgs[*]})"
+            printf "VG 방식 선택 [1-2, 기본 1]: "
+            local vga_sel
+            read -r vga_sel </dev/tty
+            if [ "$vga_sel" = "2" ]; then
+                vg_action="extend"
+                idx=0
+                while [ "$idx" -lt "${#exist_vgs[@]}" ]; do
+                    printf "    [%d] %s\n" "$((idx + 1))" "${exist_vgs[$idx]}"
+                    idx=$((idx + 1))
+                done
+                printf "확장할 기존 VG 번호 [1-%d]: " "${#exist_vgs[@]}"
+                local vgi
+                read -r vgi </dev/tty
+                case "$vgi" in
+                "" | *[!0-9]*)
+                    echo "[-] 취소했습니다."
+                    return 0
+                    ;;
+                esac
+                if [ "$vgi" -lt 1 ] || [ "$vgi" -gt "${#exist_vgs[@]}" ]; then
+                    echo "[-] 취소했습니다."
+                    return 0
+                fi
+                vg_name="${exist_vgs[$((vgi - 1))]}"
+            fi
+        fi
+
+        if [ "$vg_action" = "new" ]; then
+            local def_vg="vg_${sel_name}"
+            printf "새 VG 이름 입력 (기본: %s): " "$def_vg"
+            read -r vg_name </dev/tty
+            [ -z "$vg_name" ] && vg_name="$def_vg"
+        fi
+
+        printf "Thin Pool 이름 입력 (기본: thinpool): "
+        read -r thin_pool </dev/tty
+        [ -z "$thin_pool" ] && thin_pool="thinpool"
+
+        printf "Thin Pool 용량 입력 (기본: 100%%FREE, 예: 100%%FREE / 95%%FREE / 400G): "
+        read -r thin_size </dev/tty
+        [ -z "$thin_size" ] && thin_size="100%FREE"
+
+        echo
+        CYN1; echo "[실행 계획 미리보기 - LVM-Thin]"; NC
+        if [ "$pv_mode" = "part" ]; then
+            echo "  1) GPT 파티션(lvm) 생성: $sel_dev -> $pv_target"
+            echo "  2) PV 생성: pvcreate -f $pv_target"
+        elif [ "$pv_mode" = "raw" ]; then
+            echo "  1) 디스크 시그니처 초기화: $sel_dev"
+            echo "  2) PV 생성: pvcreate -f $pv_target"
+        else
+            echo "  1) 기존 고아 PV 사용: $pv_target"
+        fi
+        if [ "$vg_action" = "new" ]; then
+            echo "  3) VG 생성: vgcreate $vg_name $pv_target"
+        else
+            echo "  3) VG 확장: vgextend $vg_name $pv_target"
+        fi
+        if [[ "$thin_size" == *%* ]]; then
+            echo "  4) Thin Pool 생성: lvcreate -l $thin_size --thinpool $thin_pool $vg_name"
+        else
+            echo "  4) Thin Pool 생성: lvcreate -L $thin_size --thinpool $thin_pool $vg_name"
+        fi
+
+        _disksetup_confirm_destructive "$sel_name" "$sel_dev LVM-Thin ($vg_name/$thin_pool) 구성" || return 1
+
+        if [ "$pv_mode" = "part" ]; then
+            _disksetup_mkpart_gpt "$sel_dev" "lvm" || return 1
+            pvcreate -ff -y "$pv_target" || return 1
+        elif [ "$pv_mode" = "raw" ]; then
+            _disksetup_wipe_disk "$sel_dev" || return 1
+            pvcreate -ff -y "$pv_target" || return 1
+        fi
+
+        if [ "$vg_action" = "new" ]; then
+            vgcreate "$vg_name" "$pv_target" || return 1
+        else
+            vgextend "$vg_name" "$pv_target" || return 1
+        fi
+
+        if [[ "$thin_size" == *%* ]]; then
+            lvcreate -l "$thin_size" --thinpool "$thin_pool" "$vg_name" || return 1
+        else
+            lvcreate -L "$thin_size" --thinpool "$thin_pool" "$vg_name" || return 1
+        fi
+
+        GRN1; echo "[OK] LVM-Thin Pool 생성 완료!"; NC
+        pvs; vgs; lvs "$vg_name/$thin_pool"
+
+        # Proxmox VE 자동 감지 -> pvesm lvmthin 스토리지 등록 옵션
+        if command -v pvesm >/dev/null 2>&1; then
+            echo
+            CYN1; echo "[Proxmox VE 감지됨] pvesm lvmthin 스토리지로 바로 등록할 수 있습니다."; NC
+            printf "Proxmox 스토리지로 등록할까요? [Y/n]: "
+            local pve_ans pve_id
+            read -r pve_ans </dev/tty
+            case "$pve_ans" in
+            [nN]*) ;;
+            *)
+                local def_id="${vg_name#vg_}"
+                [ -z "$def_id" ] && def_id="$vg_name"
+                printf "Proxmox 스토리지 ID 입력 (기본: %s): " "$def_id"
+                read -r pve_id </dev/tty
+                [ -z "$pve_id" ] && pve_id="$def_id"
+                echo ">>> pvesm add lvmthin $pve_id --vgname $vg_name --thinpool $thin_pool --content images,rootdir"
+                if pvesm add lvmthin "$pve_id" --vgname "$vg_name" --thinpool "$thin_pool" --content images,rootdir; then
+                    GRN1; echo "[OK] Proxmox 스토리지 등록 완료: $pve_id"; NC
+                    pvesm status
+                else
+                    RED1; echo "[!] pvesm add lvmthin 실패 (위 오류 확인)"; NC
+                fi
+                ;;
+            esac
+        fi
+
+        # 선택: Thin LV 생성 + 포맷 + 마운트 옵션
+        echo
+        printf "이 Thin Pool 안에 일반 마운트용 Thin LV도 바로 생성/포맷/마운트할까요? [y/N]: "
+        local tlv_ans tlv_name tlv_vsize tlv_fs
+        read -r tlv_ans </dev/tty
+        case "$tlv_ans" in
+        [yY]*)
+            printf "Thin LV 이름 입력 (기본: lv_data): "
+            read -r tlv_name </dev/tty
+            [ -z "$tlv_name" ] && tlv_name="lv_data"
+            printf "Thin LV 가상 크기 입력 (예: 200G / 500G): "
+            read -r tlv_vsize </dev/tty
+            [ -z "$tlv_vsize" ] && { echo "[-] 크기가 비어 Thin LV 생성을 건너뜁니다."; return 0; }
+            printf "포맷 파일시스템 (ext4 / xfs, 기본 ext4): "
+            read -r tlv_fs </dev/tty
+            [ -z "$tlv_fs" ] && tlv_fs="ext4"
+            lvcreate -V "$tlv_vsize" -T "$vg_name/$thin_pool" -n "$tlv_name" || return 1
+            if [ "$tlv_fs" = "xfs" ]; then
+                mkfs.xfs -f "/dev/$vg_name/$tlv_name" || return 1
+            else
+                mkfs.ext4 -F "/dev/$vg_name/$tlv_name" || return 1
+            fi
+            _disksetup_mount_and_fstab "/dev/$vg_name/$tlv_name" "/mnt/$tlv_name"
+            ;;
+        esac
+        ;;
+
+    # ------------------------------------------------------------------
+    # [5] LVM 일반 볼륨 세팅: PV -> VG -> LV -> 포맷 + 마운트 (+ fstab)
+    # ------------------------------------------------------------------
+    5)
+        if ! command -v pvcreate >/dev/null 2>&1 || ! command -v lvcreate >/dev/null 2>&1; then
+            RED1; echo "[!] lvm2 도구(pvcreate/vgcreate/lvcreate)가 설치되어 있지 않습니다."; NC
+            return 1
+        fi
+
+        local vg_name lv_name lv_size lv_fs pv_target
+        if [ "$sel_reason" = "ORPHAN-PV" ]; then
+            pv_target="$sel_detail"
+        else
+            pv_target="$(_disksetup_part1 "$sel_dev")"
+        fi
+
+        local def_vg="vg_${sel_name}"
+        printf "VG 이름 입력 (기존 VG면 확장, 신규면 생성 / 기본: %s): " "$def_vg"
+        read -r vg_name </dev/tty
+        [ -z "$vg_name" ] && vg_name="$def_vg"
+
+        printf "LV 이름 입력 (기본: lv_data): "
+        read -r lv_name </dev/tty
+        [ -z "$lv_name" ] && lv_name="lv_data"
+
+        printf "LV 용량 입력 (기본: 100%%FREE, 예: 100%%FREE / 200G): "
+        read -r lv_size </dev/tty
+        [ -z "$lv_size" ] && lv_size="100%FREE"
+
+        printf "포맷 파일시스템 (ext4 / xfs, 기본: ext4): "
+        read -r lv_fs </dev/tty
+        [ -z "$lv_fs" ] && lv_fs="ext4"
+        if ! command -v "mkfs.$lv_fs" >/dev/null 2>&1; then
+            RED1; echo "[!] mkfs.$lv_fs 명령어가 없습니다."; NC
+            return 1
+        fi
+
+        local vg_exists=0
+        vgs "$vg_name" >/dev/null 2>&1 && vg_exists=1
+
+        echo
+        CYN1; echo "[실행 계획 미리보기 - LVM 일반 볼륨]"; NC
+        [ "$sel_reason" != "ORPHAN-PV" ] && echo "  1) GPT 파티션(lvm) & PV 생성: $sel_dev -> $pv_target"
+        if [ "$vg_exists" -eq 1 ]; then
+            echo "  2) 기존 VG 확장: vgextend $vg_name $pv_target"
+        else
+            echo "  2) 새 VG 생성: vgcreate $vg_name $pv_target"
+        fi
+        echo "  3) LV 생성: /dev/$vg_name/$lv_name ($lv_size)"
+        echo "  4) 포맷($lv_fs) & 마운트 & /etc/fstab 등록"
+
+        _disksetup_confirm_destructive "$sel_name" "$sel_dev LVM 일반 볼륨(/dev/$vg_name/$lv_name) 구성" || return 1
+
+        if [ "$sel_reason" != "ORPHAN-PV" ]; then
+            _disksetup_mkpart_gpt "$sel_dev" "lvm" || return 1
+            pvcreate -ff -y "$pv_target" || return 1
+        fi
+        if [ "$vg_exists" -eq 1 ]; then
+            vgextend "$vg_name" "$pv_target" || return 1
+        else
+            vgcreate "$vg_name" "$pv_target" || return 1
+        fi
+
+        if [[ "$lv_size" == *%* ]]; then
+            lvcreate -l "$lv_size" -n "$lv_name" "$vg_name" || return 1
+        else
+            lvcreate -L "$lv_size" -n "$lv_name" "$vg_name" || return 1
+        fi
+
+        if [ "$lv_fs" = "xfs" ]; then
+            mkfs.xfs -f "/dev/$vg_name/$lv_name" || return 1
+        else
+            mkfs.ext4 -F "/dev/$vg_name/$lv_name" || return 1
+        fi
+        GRN1; echo "[OK] LV 생성 및 $lv_fs 포맷 완료: /dev/$vg_name/$lv_name"; NC
+
+        _disksetup_mount_and_fstab "/dev/$vg_name/$lv_name" "/mnt/$lv_name"
+        ;;
+
+    # ------------------------------------------------------------------
+    # [6] PV만 생성 (pvcreate) / 기존 VG에 확장 (vgextend)
+    # ------------------------------------------------------------------
+    6)
+        if ! command -v pvcreate >/dev/null 2>&1; then
+            RED1; echo "[!] lvm2 도구(pvcreate)가 설치되어 있지 않습니다."; NC
+            return 1
+        fi
+
+        local pv_target vg_name=""
+        local -a exist_vgs=()
+        if [ "$sel_reason" = "ORPHAN-PV" ]; then
+            pv_target="$sel_detail"
+            echo "[안내] 이미 고아 PV($pv_target) 상태입니다."
+        else
+            pv_target="$(_disksetup_part1 "$sel_dev")"
+        fi
+
+        while IFS= read -r line; do
+            [ -n "$line" ] && exist_vgs[${#exist_vgs[@]}]="$line"
+        done < <(vgs --noheadings -o vg_name 2>/dev/null | awk '{print $1}')
+
+        if [ "${#exist_vgs[@]}" -gt 0 ]; then
+            echo
+            echo "  [0] PV만 생성 (VG 확장 안 함)"
+            idx=0
+            while [ "$idx" -lt "${#exist_vgs[@]}" ]; do
+                printf "  [%d] PV 생성 후 기존 VG '%s' 에 확장(vgextend)\n" "$((idx + 1))" "${exist_vgs[$idx]}"
+                idx=$((idx + 1))
+            done
+            printf "선택 [0-%d, 기본 0]: " "${#exist_vgs[@]}"
+            local vgi
+            read -r vgi </dev/tty
+            case "$vgi" in
+            "" | *[!0-9]*) ;;
+            *)
+                if [ "$vgi" -ge 1 ] && [ "$vgi" -le "${#exist_vgs[@]}" ]; then
+                    vg_name="${exist_vgs[$((vgi - 1))]}"
+                fi
+                ;;
+            esac
+        fi
+
+        echo
+        CYN1; echo "[실행 계획 미리보기 - PV / VG 확장]"; NC
+        [ "$sel_reason" != "ORPHAN-PV" ] && echo "  1) GPT 파티션(lvm) & pvcreate -ff -y $pv_target"
+        [ -n "$vg_name" ] && echo "  2) vgextend $vg_name $pv_target"
+
+        _disksetup_confirm_destructive "$sel_name" "$sel_dev PV 생성${vg_name:+ 및 VG($vg_name) 확장}" || return 1
+
+        if [ "$sel_reason" != "ORPHAN-PV" ]; then
+            _disksetup_mkpart_gpt "$sel_dev" "lvm" || return 1
+            pvcreate -ff -y "$pv_target" || return 1
+        fi
+        if [ -n "$vg_name" ]; then
+            vgextend "$vg_name" "$pv_target" || return 1
+        fi
+        GRN1; echo "[OK] 작업 완료!"; NC
+        pvs; vgs
+        ;;
+
+    # ------------------------------------------------------------------
+    # [7] 디스크 완전 초기화 (wipefs + 파티션 테이블 제거)
+    # ------------------------------------------------------------------
+    7)
+        echo
+        CYN1; echo "[실행 계획 미리보기 - 완전 초기화]"; NC
+        echo "  1) 하위 파티션 및 $sel_dev 시그니처 제거 (wipefs -a / sgdisk --zap-all)"
+        echo "  2) 커널 파티션 테이블 갱신 (partprobe)"
+
+        _disksetup_confirm_destructive "$sel_name" "$sel_dev 완전 초기화 (모든 파티션/시그니처 삭제)" || return 1
+
+        _disksetup_wipe_disk "$sel_dev" || return 1
+        GRN1; echo "[OK] $sel_dev 완전 초기화 완료 (생디스크 상태)"; NC
+        lsblk "$sel_dev"
+        ;;
+
+    *)
+        RED1; echo "[!] 잘못된 작업 번호입니다."; NC
+        return 1
+        ;;
+    esac
+}
+
 # 명령어 사용가능여부 체크 acmd curl -m3 -o
 able() { command -v "$1" &>/dev/null && return 0 || return 1; }
 
