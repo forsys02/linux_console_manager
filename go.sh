@@ -2120,14 +2120,7 @@ menufunc() {
                 _m_disp_nums[${#_m_disp_nums[@]}]="$menu_idx"
             done < <(print_menulist) # %%% 모음 가져와서 파싱
 
-            _m_disp_lines[${#_m_disp_lines[@]}]=""
-            _m_disp_nums[${#_m_disp_nums[@]}]=""
-            if [ -z "$title_of_menu_sub" ]; then
-                _m_disp_lines[${#_m_disp_lines[@]}]="$(printf "\e[1m%-3s\e[0m \x1b[1;30m${_mb_dia}\x1b[0m Exit [q]" "0.")"
-            else
-                _m_disp_lines[${#_m_disp_lines[@]}]="0.  Exit [q]"
-            fi
-            _m_disp_nums[${#_m_disp_nums[@]}]=""
+            # 0 / q 종료 기능은 입력 핸들러에서 그대로 유지 (화면 2줄 절약을 위해 0. Exit [q] 표시 생략)
 
             local _TS_LINES="" _TS_COLS="" _m_painted=0 _m_peeked=0 _m_term_lines _m_term_cols
             _get_term_size
