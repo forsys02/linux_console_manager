@@ -2612,7 +2612,7 @@ menufunc() {
                             fi
                             local _hl_badge=""
                             if [ -n "${_IDX_HILITE_KW:-}" ]; then
-                                _hl_badge="$(printf '  \x1b[1;30;43m [I] %s \x1b[0m' "$_IDX_HILITE_KW")"
+                                _hl_badge="$(printf '  \x1b[1;37;41m [I] %s \x1b[0m' "$_IDX_HILITE_KW")"
                             fi
                             _cl_hdr_buf="$(printf '\x1b[38;5;75m%s\x1b[0m :: %s\n' "$_cl_dline" "$cmdloop")"$'\n'
                             _cl_hdr_buf="${_cl_hdr_buf}$(printf '* \x1b[1;37;45m %s CMDs \x1b[0m %s \x1b[1;33;44m pwd: %s \033[0m  \x1b[1;36m%s\x1b[0m%b\n' "$title_of_menu" "$flow" "$(pwd)" "$_vmode_badge" "$_hl_badge")"$'\n'
@@ -2728,7 +2728,7 @@ menufunc() {
                                         if printf '%s\n' "$_easy_line" | grep -qiF -- "$_IDX_HILITE_KW" 2>/dev/null; then
                                             _easy_line="$(printf '%s\n' "$_easy_line" | _idx_hilite_ansi "$_IDX_HILITE_KW")"
                                         elif printf '%s\n' "$c_cmd" | grep -qiF -- "$_IDX_HILITE_KW" 2>/dev/null; then
-                                            _easy_line="${_easy_line} $(printf '\033[1;30;43m[%s]\033[0m' "$_IDX_HILITE_KW")"
+                                            _easy_line="${_easy_line} $(printf '\033[1;37;41m[%s]\033[0m' "$_IDX_HILITE_KW")"
                                         fi
                                     fi
                                     _cl_disp_lines[${#_cl_disp_lines[@]}]="$_easy_line"
@@ -7136,7 +7136,7 @@ _idx_hilite_ansi() {
                 break
             }
             orig = substr(str, pos, mlen)
-            res = res substr(str, 1, pos - 1) "\033[1;30;43m" orig "\033[0m" cur_ansi
+            res = res substr(str, 1, pos - 1) "\033[1;37;41m" orig "\033[0m" cur_ansi
             str = substr(str, pos + mlen)
         }
         return res
