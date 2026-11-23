@@ -5910,7 +5910,15 @@ disksetup() {
 
     # 2. 디스크 번호 선택
     local range_hint="1"
-    [ "${#free_names[@]}" -gt 1 ] && range_hint="1-${#free_names[@]}"
+    if [ "${#free_names[@]}" -ge 2 ] && [ "${#free_names[@]}" -le 4 ]; then
+        local r_i=2
+        while [ "$r_i" -le "${#free_names[@]}" ]; do
+            range_hint="$range_hint / $r_i"
+            r_i=$((r_i + 1))
+        done
+    elif [ "${#free_names[@]}" -gt 4 ]; then
+        range_hint="1~${#free_names[@]}"
+    fi
     while true; do
         printf "작업할 디스크 번호 선택 [%s / a / q]: " "$range_hint"
         read -r sel </dev/tty
@@ -5966,7 +5974,7 @@ disksetup() {
     echo "  [7] 디스크 완전 초기화 (wipefs + 파티션 테이블 삭제 -> 생디스크화)"
     echo "  [0] 취소 / 종료"
     echo
-    printf "작업 번호 선택 [0-7]: "
+    printf "작업 번호 선택 [0~7]: "
     read -r mode </dev/tty
 
     case "$mode" in
@@ -6011,7 +6019,7 @@ disksetup() {
                 printf "  [%d] %-16s  %-8s  FS: %s\n" "$((idx + 1))" "$p" "$p_sz" "${p_fs:-none}"
                 idx=$((idx + 1))
             done
-            printf "파티션 번호 [1-%d]: " "${#parts_arr[@]}"
+            printf "파티션 번호 [1~%d]: " "${#parts_arr[@]}"
             read -r p_sel </dev/tty
             case "$p_sel" in
             "" | *[!0-9]*)
@@ -6048,7 +6056,7 @@ disksetup() {
             echo "  [1] xfs"
             echo "  [2] btrfs"
             echo "  [3] ext4"
-            printf "파일시스템 선택 [1-3, 기본 1(xfs)]: "
+            printf "파일시스템 선택 [1~3, 기본 1(xfs)]: "
             local fs_sel
             read -r fs_sel </dev/tty
             case "$fs_sel" in
@@ -6129,7 +6137,7 @@ disksetup() {
             echo
             echo "  [1] GPT 1번 파티션 생성(lvm 플래그) 후 PV 생성 (권장)"
             echo "  [2] 디스크 전체($sel_dev)에 파티션 없이 직접 PV 생성"
-            printf "PV 생성 방식 [1-2, 기본 1]: "
+            printf "PV 생성 방식 [1/2, 기본 1]: "
             local pm_sel
             read -r pm_sel </dev/tty
             case "$pm_sel" in
@@ -6153,7 +6161,7 @@ disksetup() {
         if [ "${#exist_vgs[@]}" -gt 0 ]; then
             echo "  [1] 새 Volume Group(VG) 생성"
             echo "  [2] 기존 VG 확장 (현재 VG: ${exist_vgs[*]})"
-            printf "VG 방식 선택 [1-2, 기본 1]: "
+            printf "VG 방식 선택 [1/2, 기본 1]: "
             local vga_sel
             read -r vga_sel </dev/tty
             if [ "$vga_sel" = "2" ]; then
@@ -6163,7 +6171,7 @@ disksetup() {
                     printf "    [%d] %s\n" "$((idx + 1))" "${exist_vgs[$idx]}"
                     idx=$((idx + 1))
                 done
-                printf "확장할 기존 VG 번호 [1-%d]: " "${#exist_vgs[@]}"
+                printf "확장할 기존 VG 번호 [1~%d]: " "${#exist_vgs[@]}"
                 local vgi
                 read -r vgi </dev/tty
                 case "$vgi" in
@@ -6404,7 +6412,7 @@ disksetup() {
                 printf "  [%d] PV 생성 후 기존 VG '%s' 에 확장(vgextend)\n" "$((idx + 1))" "${exist_vgs[$idx]}"
                 idx=$((idx + 1))
             done
-            printf "선택 [0-%d, 기본 0]: " "${#exist_vgs[@]}"
+            printf "선택 [0~%d, 기본 0]: " "${#exist_vgs[@]}"
             local vgi
             read -r vgi </dev/tty
             case "$vgi" in
