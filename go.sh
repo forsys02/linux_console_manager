@@ -666,12 +666,12 @@ menu_keyhelp() { # detail 몇줄 (? 입력 시 표시, 72칸 이내)
     if [ "$GOLANG" = "kr" ]; then
         ko "==============================================\n"
         ko "  이동  [b]뒤로 [bb]2 [bbb]3 [m]메인 [ESC]위 < > 메뉴  [ ] 페이지\n"
-        ko "  기능  [V]보기전환 [A]전체보기 [e]파일 [h]이력 [conf]설정 [?번호]설명\n"
+        ko "  기능  [I]색인 [V]보기 [A]전체 [e]파일 [h]이력 [conf]설정 [?번호]설명\n"
         ko "  언어  [L]한글(L k)/English(L e)  [kr]인코딩변환(글자깨질때)\n"
     else
         ko "==============================================\n"
         ko "  move  [b]back [bb]x2 [bbb]x3 [m]main [ESC]up < > menu  [ ] page\n"
-        ko "  tool  [V]view-mode [A]all [e]file [h]hist [conf]set [?N]info\n"
+        ko "  tool  [I]index [V]view [A]all [e]file [h]hist [conf]set [?N]info\n"
         ko "  lang  [L]Korean(L k)/English(L e) [kr]encoding(fix garbled)\n"
     fi
 }
@@ -689,15 +689,15 @@ menu_prompt() { # $1=최대번호 $2=스크롤여부(0|1) (? 는 항상 help 로
     fi
     if [ "$GOLANG" = "kr" ]; then
         if [ "$_has_pg" = "1" ]; then
-            ko ">>> 선택 [0-%s]  [%s]이동 [%s]페이지 [Enter]실행 %s [F]상세 [?]도움 : " "$1" "$_arr" "$_lr" "$_vtxt"
+            ko ">>> 선택 [0-%s]  [%s]이동 [%s]페이지 [Enter]실행 %s [I]색인 [F]상세 [?]도움 : " "$1" "$_arr" "$_lr" "$_vtxt"
         else
-            ko ">>> 선택 [0-%s]  [%s]이동 [Enter]실행 %s [F]상세 [?]도움 [q]종료 : " "$1" "$_arr" "$_vtxt"
+            ko ">>> 선택 [0-%s]  [%s]이동 [Enter]실행 %s [I]색인 [F]상세 [?]도움 [q]종료 : " "$1" "$_arr" "$_vtxt"
         fi
     else
         if [ "$_has_pg" = "1" ]; then
-            printf '>>> Select [0-%s]  [%s]Move [%s]Page [Enter]Go %s [F]Detail [?]Help : ' "$1" "$_arr" "$_lr" "$_vtxt"
+            printf '>>> Select [0-%s]  [%s]Move [%s]Page [Enter]Go %s [I]Index [F]Detail [?]Help : ' "$1" "$_arr" "$_lr" "$_vtxt"
         else
-            printf '>>> Select [0-%s]  [%s]Move [Enter]Go %s [F]Detail [?]Help [q]Quit : ' "$1" "$_arr" "$_vtxt"
+            printf '>>> Select [0-%s]  [%s]Move [Enter]Go %s [I]Index [F]Detail [?]Help [q]Quit : ' "$1" "$_arr" "$_vtxt"
         fi
     fi
 }
@@ -3578,7 +3578,7 @@ menufunc() {
                     # case 자체가 실행되지 않았음 → 숫자인지 먼저 expr 로 확인한다
                     if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '^[0-9]\+$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
                         case "$cmd_choice" in
-                            "]" | "[" | "A" | "all") ;;
+                            "]" | "[" | "A" | "all" | "I") ;;
                             *)
                                 YEL1
                                 echo
@@ -3637,6 +3637,14 @@ menufunc() {
                             ;;
                         str | search)
                             "$cmd_choice" $cmd_choice1
+                            continue
+                            ;;
+                        I)
+                            if menu_index_search "$cmd_choice1"; then
+                                savescut
+                                menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
+                                return 0
+                            fi
                             continue
                             ;;
                         ff | fff | ffc | fffc | F)
@@ -3988,6 +3996,13 @@ menufunc() {
                 ;;
             V | v)
                 goview_toggle
+                continue
+                ;;
+            I)
+                if menu_index_search "$choice1"; then
+                    savescut
+                    menufunc "$(scutsub "$_IDX_TARGET_SCUT")" "$(scuttitle "$_IDX_TARGET_SCUT")" "$(notscutrelay "$_IDX_TARGET_SCUT")"
+                fi
                 continue
                 ;;
             L)
@@ -6781,6 +6796,270 @@ str() {
     fi
 }
 search() { [ "$1" ] && str $1; }
+
+# [I] 메뉴 색인 검색 (명령어 빈도수 + 제목/설명 매칭 정렬 후 번호 선택으로 즉시 이동)
+#   - 사용: I [Enter] 후 검색어 입력, 또는 "I tailscale" / "I find" 처럼 바로 인자 전달
+#   - 반환: 선택 성공 시 전역 _IDX_TARGET_SCUT 설정 후 return 0 / 취소 시 return 1
+#   - 호환: Bash 2.05+ / 구 GNU awk / UTF-8 & EUC-KR / 한글 & 영문(GOLANG)
+menu_index_search() {
+    _IDX_TARGET_SCUT=""
+    local _kw="$1"
+    local _mi_ifs="$IFS"
+    local _dl _hl _br
+    if [ "${GOTERM_ENC:-}" = "euckr" ]; then
+        _dl="================================================================================"
+        _hl="--------------------------------------------------------------------------------"
+        _br="L"
+    else
+        _dl="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        _hl="────────────────────────────────────────────────────────────────────────────────"
+        _br="└"
+    fi
+
+    while true; do
+        if [ -z "$_kw" ]; then
+            local _p_in="" _in1="" _in2="" _irc=0
+            if [ "$GOLANG" = "kr" ]; then
+                _p_in="$(ko '>>> [I] 색인 검색어 (명령어/키워드, [Enter/ESC] 취소) : ')"
+            else
+                _p_in=">>> [I] Index search (cmd/keyword, [Enter/ESC] cancel) : "
+            fi
+            menu_read "$_p_in" _in1 _in2
+            _irc=$?
+            if [ "$_irc" -ne 0 ] || [ -z "$_in1" ]; then
+                IFS="$_mi_ifs"
+                return 1
+            fi
+            if [ -n "$_in2" ]; then
+                _kw="${_in1} ${_in2}"
+            else
+                _kw="$_in1"
+            fi
+        fi
+
+        # $env 전체 메뉴 블록을 1패스로 색인 스캔 후 빈도수 내림차순 정렬
+        # 정렬키: 1) 실제 명령어 빈도(cmd_hits) 2) 제목/설명 매칭(meta_hits) 3) 변수명 매칭(var_hits) 4) 원래 메뉴 순서
+        local _raw=""
+        _raw="$(GO_IDX_KW="$_kw" awk '
+        function flush_block(    k_hits) {
+            if (scut != "" && (cmd_hits > 0 || meta_hits > 0 || var_hits > 0)) {
+                printf "%06d\t%06d\t%06d\t%06d\t%s\t%s\t%s\n", cmd_hits, meta_hits, var_hits, (999999 - ord), scut, title, sample
+            }
+            scut = ""; title = ""; sample = ""
+            cmd_hits = 0; meta_hits = 0; var_hits = 0
+            in_blk = 0
+        }
+        BEGIN {
+            kw = tolower(ENVIRON["GO_IDX_KW"])
+            ord = 0; in_blk = 0
+            scut = ""; title = ""; sample = ""
+            cmd_hits = 0; meta_hits = 0; var_hits = 0
+        }
+        /^[[:space:]]*$/ {
+            flush_block()
+            next
+        }
+        /^%%% / {
+            flush_block()
+            ord++
+            in_blk = 1
+            hdr = substr($0, 5)
+            sub(/\r$/, "", hdr)
+            if (match(hdr, /\[[^]]+\]/)) {
+                scut = substr(hdr, RSTART + 1, RLENGTH - 2)
+            }
+            title = hdr
+            sub(/^\{[^}]+\}/, "", title)
+            sub(/^[[:space:]]*>[[:space:]]*/, "", title)
+            sub(/^[[:space:]]+/, "", title)
+            sub(/[[:space:]]+$/, "", title)
+            gsub(/\t/, " ", title)
+            if (kw != "" && index(tolower(title), kw) > 0) {
+                meta_hits++
+            }
+            next
+        }
+        !in_blk { next }
+        /^%%%e / || /^%% / { next }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            if (line ~ /^[[:space:]]*#/) {
+                if (kw != "" && index(tolower(line), kw) > 0) {
+                    meta_hits++
+                }
+                next
+            }
+            if (line ~ /^[[:space:]]*\{submenu_[^}]+\}[[:space:]]*$/) {
+                next
+            }
+            clean_cmd = line
+            gsub(/var[A-Z][A-Za-z0-9_]*/, "", clean_cmd)
+            if (kw != "" && index(tolower(clean_cmd), kw) > 0) {
+                cmd_hits++
+                if (sample == "") {
+                    s = line
+                    sub(/^[[:space:]]+/, "", s)
+                    gsub(/\t/, " ", s)
+                    if (length(s) > 74) s = substr(s, 1, 71) "..."
+                    sample = s
+                }
+            } else if (kw != "" && index(tolower(line), kw) > 0) {
+                var_hits++
+                if (sample == "") {
+                    s = line
+                    sub(/^[[:space:]]+/, "", s)
+                    gsub(/\t/, " ", s)
+                    if (length(s) > 74) s = substr(s, 1, 71) "..."
+                    sample = s
+                }
+            }
+        }
+        END {
+            flush_block()
+        }
+        ' "$env" 2>/dev/null | LC_ALL=C sort -r)"
+
+        if [ -z "$_raw" ]; then
+            echo
+            if [ "$GOLANG" = "kr" ]; then
+                printf '\033[1;33m%s\033[0m\n' "$(ko "  [I] '%s' 에 해당하는 메뉴를 찾지 못했습니다." "$_kw")"
+            else
+                printf '\033[1;33m  [I] No menu matched "%s".\033[0m\n' "$_kw"
+            fi
+            _kw=""
+            continue
+        fi
+
+        unset _idx_scuts _idx_titles _idx_cmds _idx_metas _idx_vars _idx_samples
+        _idx_scuts=()
+        _idx_titles=()
+        _idx_cmds=()
+        _idx_metas=()
+        _idx_vars=()
+        _idx_samples=()
+
+        local _total=0 _max_show=25 _shown=0
+        local _c1 _c2 _c3 _c4 _c5 _c6 _c7
+        while IFS=$'\t' read -r _c1 _c2 _c3 _c4 _c5 _c6 _c7; do
+            [ -z "$_c5" ] && continue
+            _total=$((_total + 1))
+            if [ "$_shown" -lt "$_max_show" ]; then
+                _c1=$((10#${_c1:-0}))
+                _c2=$((10#${_c2:-0}))
+                _c3=$((10#${_c3:-0}))
+                _idx_scuts[${#_idx_scuts[@]}]="$_c5"
+                _idx_titles[${#_idx_titles[@]}]="$_c6"
+                _idx_cmds[${#_idx_cmds[@]}]="$_c1"
+                _idx_metas[${#_idx_metas[@]}]="$_c2"
+                _idx_vars[${#_idx_vars[@]}]="$_c3"
+                _idx_samples[${#_idx_samples[@]}]="$_c7"
+                _shown=$((_shown + 1))
+            fi
+        done <<EOF_IDX
+$_raw
+EOF_IDX
+        IFS="$_mi_ifs"
+
+        # 결과 화면 출력
+        _clear_keep_scrollback
+        printf '\033[38;5;75m%s\033[0m\n' "$_dl"
+        if [ "$GOLANG" = "kr" ]; then
+            if [ "$_total" -gt "$_shown" ]; then
+                printf '\033[1;33m  [I] %s\033[0m\n' "$(ko '색인 검색 결과 : "%s" (총 %d개 메뉴, 상위 %d개 표시)' "$_kw" "$_total" "$_shown")"
+            else
+                printf '\033[1;33m  [I] %s\033[0m\n' "$(ko '색인 검색 결과 : "%s" (총 %d개 메뉴)' "$_kw" "$_total")"
+            fi
+        else
+            if [ "$_total" -gt "$_shown" ]; then
+                printf '\033[1;33m  [I] Index results for "%s" (%d menus, showing top %d)\033[0m\n' "$_kw" "$_total" "$_shown"
+            else
+                printf '\033[1;33m  [I] Index results for "%s" (%d menus)\033[0m\n' "$_kw" "$_total"
+            fi
+        fi
+        printf '\033[38;5;110m%s\033[0m\n' "$_hl"
+
+        local _i=0 _no _sc _ti _ch _mh _vh _sm _badge
+        while [ "$_i" -lt "$_shown" ]; do
+            _no=$((_i + 1))
+            _sc="${_idx_scuts[$_i]}"
+            _ti="${_idx_titles[$_i]}"
+            _ch="${_idx_cmds[$_i]}"
+            _mh="${_idx_metas[$_i]}"
+            _vh="${_idx_vars[$_i]}"
+            _sm="${_idx_samples[$_i]}"
+
+            if [ "$_ch" -gt 0 ]; then
+                if [ "$GOLANG" = "kr" ]; then
+                    _badge="$(printf '\033[1;32m(%s)\033[0m' "$(ko '명령 %d건' "$_ch")")"
+                else
+                    _badge="$(printf '\033[1;32m(%d cmds)\033[0m' "$_ch")"
+                fi
+            elif [ "$_mh" -gt 0 ]; then
+                if [ "$GOLANG" = "kr" ]; then
+                    _badge="$(printf '\033[0;36m(%s)\033[0m' "$(ko '제목/설명 %d건' "$_mh")")"
+                else
+                    _badge="$(printf '\033[0;36m(%d title/desc)\033[0m' "$_mh")"
+                fi
+            else
+                if [ "$GOLANG" = "kr" ]; then
+                    _badge="$(printf '\033[0;33m(%s)\033[0m' "$(ko '변수 %d건' "$_vh")")"
+                else
+                    _badge="$(printf '\033[0;33m(%d var)\033[0m' "$_vh")"
+                fi
+            fi
+
+            printf ' \033[1;37m%2d.\033[0m \033[1;36m[%-8s]\033[0m %s  %b\n' "$_no" "$_sc" "$_ti" "$_badge"
+            if [ -n "$_sm" ]; then
+                printf '     \033[0;37m%s %s\033[0m\n' "$_br" "$_sm"
+            fi
+            _i=$((_i + 1))
+        done
+
+        printf '\033[38;5;110m%s\033[0m\n' "$_hl"
+
+        local _sel_p _sel1="" _sel2="" _src=0
+        if [ "$GOLANG" = "kr" ]; then
+            _sel_p="$(ko '>>> 이동할 번호 [1-%d]  [Enter] 1번  [/검색어] 재검색  [0/q/ESC] 취소 : ' "$_shown")"
+        else
+            _sel_p="$(printf '>>> Select [1-%d]  [Enter] #1  [/keyword] Re-search  [0/q/ESC] Cancel : ' "$_shown")"
+        fi
+
+        while true; do
+            menu_read "$_sel_p" _sel1 _sel2
+            _src=$?
+            if [ "$_src" -ne 0 ] || [ "$_sel1" = "0" ] || [ "$_sel1" = "q" ] || [ "$_sel1" = "Q" ]; then
+                unset _idx_scuts _idx_titles _idx_cmds _idx_metas _idx_vars _idx_samples
+                IFS="$_mi_ifs"
+                return 1
+            fi
+            # 빈 Enter -> 1번으로 바로 이동
+            if [ -z "$_sel1" ]; then
+                _sel1="1"
+            fi
+            # /키워드 -> 재검색
+            case "$_sel1" in
+                /*)
+                    _kw="${_sel1#/}"
+                    [ -n "$_sel2" ] && _kw="${_kw} ${_sel2}"
+                    break
+                    ;;
+            esac
+            # 숫자 선택 확인
+            if expr "$_sel1" : '^[0-9][0-9]*$' >/dev/null 2>&1 && [ "$_sel1" -ge 1 ] && [ "$_sel1" -le "$_shown" ]; then
+                _IDX_TARGET_SCUT="${_idx_scuts[$((_sel1 - 1))]}"
+                unset _idx_scuts _idx_titles _idx_cmds _idx_metas _idx_vars _idx_samples
+                IFS="$_mi_ifs"
+                return 0
+            fi
+            if [ "$GOLANG" = "kr" ]; then
+                printf '  \033[1;33m%s\033[0m\n' "$(ko '1~%d 사이 번호 또는 /검색어, 0(취소)을 입력하세요.' "$_shown")"
+            else
+                printf '  \033[1;33mEnter 1-%d, /keyword, or 0 to cancel.\033[0m\n' "$_shown"
+            fi
+        done
+    done
+}
 
 # flow save and exec go.sh
 savescut() {
