@@ -3063,6 +3063,7 @@ menufunc() {
                             # 선택하지 않으면 메뉴 다시 print // 선택하면 실제 줄번호 부여 -> 루프 2회 돌아서 주석 처리됨
                             # 참고) cmd_choice 변수는 최종 명령줄 화면에서 수신값 choice 변수는 메뉴(서브) 화면에서 수신값
                             # cmd_choice 는 4번 골랐다고 4번이 아니고 4번에 해당되는 줄번호를 가짐
+                            _cl_last_cur="${_cl_nav_cur:-1}"
                             display_choice="$cmd_choice"
                             [ "$cmd_choice" ] && [[ $cmd_choice == [0-9] || $cmd_choice == [1-9][0-9] ]] && [ "$cmd_choice" -gt 0 ] && cmd_choice=${original_indices[$((cmd_choice - 1))]}
                         } # end of choice_list()
@@ -3125,6 +3126,7 @@ menufunc() {
                                 continue
                             elif [ $card_rc -eq 2 ]; then
                                 # e (설정 편집)
+                                _CONF_CUR_ITEM="${display_choice:-1}"
                                 conf
                                 cmd_choice=""
                                 chosen_command=""
@@ -3636,6 +3638,7 @@ menufunc() {
                         # 화면 프롬프트에 안내되지만 이전에는 case 가 없어 동작하지 않던 키들
                         conf | conf1 | confb | confmy | conff | confc | conffc | pconf)
                             saveVAR
+                            [ "$cmd_choice" = "conf" ] && [ -z "$cmd_choice1" ] && _CONF_CUR_ITEM="${_cl_last_cur:-1}"
                             "$cmd_choice" $cmd_choice1
                             continue
                             ;;
@@ -4104,6 +4107,7 @@ menufunc() {
 
                 # 메뉴/설정 바로가기 (CMD 화면과 동일하게 동작하도록 통일)
                 elif [ -z "$choice1" ] && case "$choice" in conf | conf1 | confb | confmy | conff | confc | conffc | pconf | str | search | ff | ffc | fffc | format) true ;; *) false ;; esac; then
+                    [ "$choice" = "conf" ] && [ -n "${_m_nav_cur:-}" ] && _CONF_CUR_MENU_KEY="${_m_item_keys[$_m_nav_cur]-}"
                     "$choice" $choice1
 
                 # 실제 리눅스 명령이 들어온 경우 실행
@@ -5908,15 +5912,166 @@ EOF
 ;;
 "
 }
+# 지정 파일의 특정 줄 번호로 백업 후 vim 점프
+_conf_open_line() {
+    local _f="$1" _ln="$2"
+    [ ! -f "$_f" ] && return 1
+    rbackup "$_f"
+    if [ -n "$_ln" ] && [ "$_ln" -gt 0 ] 2>/dev/null; then
+        vim +"$_ln" -c "silent! normal! zt" "$_f" || vi +"$_ln" "$_f" || nano +"$_ln" "$_f"
+    else
+        vim "$_f" || vi "$_f" || nano "$_f"
+    fi
+}
+
+# go.env / go.sh / go.my.env 에서 함수 정의(fn() / function fn) 파일 및 줄 번호 탐색
+_conf_find_func_loc() {
+    local _fn="$1" _f="" _ln=""
+    [ -z "$_fn" ] && return 1
+    _CONF_FUNC_FILE=""
+    _CONF_FUNC_LINE=""
+    for _f in "$envorg" "$gofile" "$envorg2"; do
+        [ -f "$_f" ] || continue
+        _ln=$(awk -v fn="$_fn" '
+            $0 ~ "^[[:space:]]*" fn "[[:space:]]*\\(\\)" || $0 ~ "^[[:space:]]*function[[:space:]]+" fn "([[:space:]]|\\(|$)" {
+                print NR; exit
+            }
+        ' "$_f" 2>/dev/null)
+        if [ -n "$_ln" ]; then
+            _CONF_FUNC_FILE="$_f"
+            _CONF_FUNC_LINE="$_ln"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# go.env 에서 현재 챕터([scut] 또는 title_of_menu) 내 해당 명령어 줄 번호(NR) 탐색
+_conf_find_cmd_line() {
+    local _f="$1" _sc="$2" _raw="$3" _ttl="${4:-}" _ln=""
+    [ -f "$_f" ] || return 1
+    [ -z "$_raw" ] && return 1
+    _ln=$(awk -v sc="$_sc" -v ttl="$_ttl" -v target="$_raw" '
+        BEGIN {
+            in_blk = 0; hit = 0; fb = 0
+            # 영문 모드(:e -> :) 변환 대비 비교용 문자열
+            t_alt = target
+            if (substr(t_alt, 1, 2) == ": ") t_alt = ":e " substr(t_alt, 3)
+        }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+        }
+        !in_blk {
+            if (sc != "" && line ~ "^%%% .*\\[" sc "\\]") { in_blk = 1; next }
+            if (sc == "" && ttl != "" && index(line, "%%% ") == 1 && index(line, ttl) > 0) { in_blk = 1; next }
+            next
+        }
+        in_blk && line == "" { exit }
+        in_blk {
+            if (line == target || line == t_alt) { hit = NR; exit }
+            if (fb == 0 && index(line, target) > 0) fb = NR
+        }
+        END {
+            if (hit > 0) print hit
+            else if (fb > 0) print fb
+        }
+    ' "$_f" 2>/dev/null)
+    if [ -n "$_ln" ]; then
+        printf '%s' "$_ln"
+        return 0
+    fi
+    return 1
+}
+
+# 화면 번호(1..N)에 해당하는 항목을 판별해 서브메뉴 / 함수 정의 / 명령어 줄로 바로 점프
+_conf_edit_cmd() {
+    local _disp="$1" _orig="" _raw="" _body="" _tok="" _ln=""
+    [ -z "$_disp" ] && return 1
+    _orig="${original_indices[$((_disp - 1))]-}"
+    [ -z "$_orig" ] && return 1
+    _raw="${chosen_commands[$((_orig - 1))]-}"
+    [ -z "$_raw" ] && return 1
+
+    # _cmd_kind_badge 와 동일한 방식으로 명령어 첫 토큰 추출
+    _body="${_raw#!!!}"
+    _body="${_body#"${_body%%[![:space:]]*}"}"
+    case "$_body" in
+        :[[:space:]]*\;*)
+            _body="${_body#*;}"
+            _body="${_body#;}"
+            _body="${_body#"${_body%%[![:space:]]*}"}"
+            ;;
+    esac
+    _body="${_body%"${_body##*[![:space:]]}"}"
+    _tok="${_body%%[[:space:]]*}"
+
+    # 1) 서브메뉴 단축키([→메뉴]) -> 해당 서브메뉴 챕터로 점프
+    if [ -n "$_tok" ] && [ "$_tok" = "$_body" ] && st "$_tok" >/dev/null 2>&1; then
+        if grep -q "^%%% .*\[${_tok}\]" "$envorg" 2>/dev/null; then
+            vi2 "$envorg" "$_tok"
+            return 0
+        elif [ -f "$envorg2" ] && grep -q "^%%% .*\[${_tok}\]" "$envorg2" 2>/dev/null; then
+            vi2 "$envorg2" "$_tok"
+            return 0
+        fi
+    fi
+
+    # 2) 함수 메뉴([fn]) -> go.env / go.sh 내 함수 정의 위치로 점프
+    if [ -n "$_tok" ] && declare -F "$_tok" >/dev/null 2>&1; then
+        if _conf_find_func_loc "$_tok"; then
+            _conf_open_line "$_CONF_FUNC_FILE" "$_CONF_FUNC_LINE"
+            return 0
+        fi
+    fi
+
+    # 3) 일반 명령어 -> 현재 챕터 내 해당 명령어 줄로 바로 점프
+    _ln="$(_conf_find_cmd_line "$envorg" "$scut" "$_raw" "${title_of_menu:-}")"
+    if [ -n "$_ln" ]; then
+        _conf_open_line "$envorg" "$_ln"
+        return 0
+    fi
+    if [ -f "$envorg2" ]; then
+        _ln="$(_conf_find_cmd_line "$envorg2" "$scut" "$_raw" "${title_of_menu:-}")"
+        if [ -n "$_ln" ]; then
+            _conf_open_line "$envorg2" "$_ln"
+            return 0
+        fi
+    fi
+
+    # 폴백: 현재 챕터 헤더
+    vi2 "$envorg" "$scut"
+}
+
 # vi2 envorg && restart go.sh
 conf() {
     #readxy $cmd_choice1
     saveVAR
-    if [ -n "$1" ]; then
-        vi2 "$envorg" $1 $cmd_choice1
-    else
-        vi2 "$envorg" $scut $cmd_choice1
+    local _arg="$1" _handled=0
+    if [ -z "$_arg" ]; then
+        if [ -n "${_CONF_CUR_ITEM:-}" ]; then
+            _conf_edit_cmd "$_CONF_CUR_ITEM" && _handled=1
+        elif [ -n "${_CONF_CUR_MENU_KEY:-}" ]; then
+            vi2 "$envorg" "$_CONF_CUR_MENU_KEY" $cmd_choice1
+            _handled=1
+        fi
+    elif expr "$_arg" : '^[1-9][0-9]*$' >/dev/null 2>&1 && [ "${display_idx:-0}" -gt 1 ] 2>/dev/null && [ "$_arg" -lt "$display_idx" ] 2>/dev/null; then
+        _conf_edit_cmd "$_arg" && _handled=1
     fi
+    if [ "$_handled" -eq 0 ]; then
+        if [ -n "$_arg" ]; then
+            if grep -q "^%%% .*\[${_arg}\]" "$envorg" 2>/dev/null; then
+                vi2 "$envorg" "$_arg" $cmd_choice1
+            elif declare -F "$_arg" >/dev/null 2>&1 && _conf_find_func_loc "$_arg"; then
+                _conf_open_line "$_CONF_FUNC_FILE" "$_CONF_FUNC_LINE"
+            else
+                vi2 "$envorg" "$_arg" $cmd_choice1
+            fi
+        else
+            vi2 "$envorg" "$scut" $cmd_choice1
+        fi
+    fi
+    unset -v _CONF_CUR_ITEM _CONF_CUR_MENU_KEY _CONF_FUNC_FILE _CONF_FUNC_LINE
     savescut && exec "$gofile" "$scut"
 }
 conf1() {
