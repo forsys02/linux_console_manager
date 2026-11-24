@@ -6567,6 +6567,463 @@ disksetup() {
     esac
 }
 
+# ==============================================================================
+# [isodl] OS ISO 공식 미러 실시간 버전 스크랩 & 자동 다운로더
+#   사용법: isodl [ubuntu|ubuntu-desktop|debian|alma|rocky|virtio|pve|pbs] [-d <저장경로>]
+# ==============================================================================
+_isodl_fetch() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 6 --max-time 15 -A "curl/7.88.1" "$url" 2>/dev/null && return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO- -T 12 -t 2 --user-agent="curl/7.88.1" "$url" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+# 구버전 리눅스(sort -V 미지원) 호환 버전 역순 정렬
+_isodl_vsort_desc() {
+    if [ "$(printf '1.2\n1.10\n' | sort -V 2>/dev/null | head -n 1)" = "1.2" ]; then
+        sort -V -r
+    else
+        awk '{
+            orig = $0
+            s = $0
+            key = ""
+            while (match(s, /[0-9]+/)) {
+                pre = substr(s, 1, RSTART - 1)
+                num = substr(s, RSTART, RLENGTH)
+                key = key pre sprintf("%08d", num + 0)
+                s = substr(s, RSTART + RLENGTH)
+            }
+            key = key s
+            print key "\t" orig
+        }' | sort -r | cut -f2-
+    fi
+}
+
+# HTML에서 href="..." 값만 추출 (POSIX sed 호환)
+_isodl_hrefs() {
+    sed -n 's/.*href="\([^"]*\)".*/\1/p'
+}
+
+# Ubuntu Server / Desktop 스크랩 ($1: server|desktop)
+_isodl_scrape_ubuntu() {
+    local kind="${1:-server}"
+    local base_url="https://releases.ubuntu.com"
+    local html dirs ver sub_html iso_pat iso
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    # 메이저 릴리즈 디렉토리(XX.XX/)만 추출 후 최신순 상위 6개
+    dirs="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+\.[0-9]+/$' \
+        | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 6)"
+
+    if [ "$kind" = "desktop" ]; then
+        iso_pat='^ubuntu-[0-9][0-9.]*-desktop-amd64\.iso$'
+    else
+        iso_pat='^ubuntu-[0-9][0-9.]*-live-server-amd64\.iso$'
+    fi
+
+    while IFS= read -r ver; do
+        [ -z "$ver" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${ver}/")" || continue
+        iso="$(printf '%s\n' "$sub_html" | _isodl_hrefs \
+            | grep -E "$iso_pat" | grep -v 'beta' \
+            | sort -u | _isodl_vsort_desc | head -n 1)"
+        [ -n "$iso" ] && printf '%s|%s|%s/%s/%s\n' "$ver" "$iso" "$base_url" "$ver" "$iso"
+    done <<EOF
+$dirs
+EOF
+}
+
+# Debian netinst 스크랩 (최신 current + 아카이브 이전 버전/메이저)
+_isodl_scrape_debian() {
+    local cur_url="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
+    local arch_url="https://cdimage.debian.org/cdimage/archive"
+    local cur_html cur_iso cur_ver arch_html vers ver maj
+    local prev_maj="" maj_cnt=0 total_cnt=0
+
+    cur_html="$(_isodl_fetch "${cur_url}/")"
+    if [ -n "$cur_html" ]; then
+        cur_iso="$(printf '%s\n' "$cur_html" | _isodl_hrefs \
+            | grep -E '^debian-[0-9]+\.[0-9]+\.[0-9]+-amd64-netinst\.iso$' \
+            | sort -u | _isodl_vsort_desc | head -n 1)"
+        if [ -n "$cur_iso" ]; then
+            cur_ver="$(printf '%s\n' "$cur_iso" | sed 's/^debian-\([0-9.]*\)-amd64-netinst\.iso$/\1/')"
+            printf '%s (최신)|%s|%s/%s\n' "$cur_ver" "$cur_iso" "$cur_url" "$cur_iso"
+            total_cnt=$((total_cnt + 1))
+        fi
+    fi
+
+    arch_html="$(_isodl_fetch "${arch_url}/")" || return 0
+    vers="$(printf '%s\n' "$arch_html" | _isodl_hrefs \
+        | grep -E '^[0-9]+\.[0-9]+\.[0-9]+/$' \
+        | sed 's#/$##' | sort -u | _isodl_vsort_desc)"
+
+    # 메이저별 상위 2개씩(최신 메이저는 3개) 최대 8개 선별
+    while IFS= read -r ver; do
+        [ -z "$ver" ] && continue
+        [ "$ver" = "$cur_ver" ] && continue
+        maj="${ver%%.*}"
+        if [ "$maj" != "$prev_maj" ]; then
+            prev_maj="$maj"
+            maj_cnt=0
+        fi
+        maj_cnt=$((maj_cnt + 1))
+        if [ "$maj_cnt" -le 2 ]; then
+            printf '%s|%s|%s/%s/amd64/iso-cd/%s\n' \
+                "$ver" "debian-${ver}-amd64-netinst.iso" "$arch_url" "$ver" "debian-${ver}-amd64-netinst.iso"
+            total_cnt=$((total_cnt + 1))
+        fi
+        [ "$total_cnt" -ge 8 ] && break
+    done <<EOF
+$vers
+EOF
+}
+
+# AlmaLinux 스크랩 (메이저 최신 3개 × minimal/dvd/boot)
+_isodl_scrape_alma() {
+    local base_url="https://repo.almalinux.org/almalinux"
+    local html majors maj sub_html isos ed iso
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    majors="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+/$' | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 3)"
+
+    while IFS= read -r maj; do
+        [ -z "$maj" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${maj}/isos/x86_64/")" || continue
+        isos="$(printf '%s\n' "$sub_html" | _isodl_hrefs | sort -u)"
+        for ed in minimal dvd boot; do
+            iso="$(printf '%s\n' "$isos" | grep -E "^AlmaLinux-${maj}\.[0-9]+-x86_64-${ed}\.iso$" | _isodl_vsort_desc | head -n 1)"
+            [ -z "$iso" ] && iso="$(printf '%s\n' "$isos" | grep -E "^AlmaLinux-${maj}-latest-x86_64-${ed}\.iso$" | head -n 1)"
+            [ -n "$iso" ] && printf 'Alma %s (%s)|%s|%s/%s/isos/x86_64/%s\n' "$maj" "$ed" "$iso" "$base_url" "$maj" "$iso"
+        done
+    done <<EOF
+$majors
+EOF
+}
+
+# Rocky Linux 스크랩 (메이저 최신 3개 × minimal/dvd/boot)
+_isodl_scrape_rocky() {
+    local base_url="https://download.rockylinux.org/pub/rocky"
+    local html majors maj sub_html isos ed iso
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    majors="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+/$' | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 3)"
+
+    while IFS= read -r maj; do
+        [ -z "$maj" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${maj}/isos/x86_64/")" || continue
+        isos="$(printf '%s\n' "$sub_html" | _isodl_hrefs | sort -u)"
+        for ed in minimal dvd boot; do
+            if [ "$ed" = "dvd" ]; then
+                iso="$(printf '%s\n' "$isos" | grep -E "^Rocky-${maj}\.[0-9]+-x86_64-dvd1?\.iso$" | _isodl_vsort_desc | head -n 1)"
+                [ -z "$iso" ] && iso="$(printf '%s\n' "$isos" | grep -E "^Rocky-${maj}-latest-x86_64-dvd1?\.iso$" | head -n 1)"
+            else
+                iso="$(printf '%s\n' "$isos" | grep -E "^Rocky-${maj}\.[0-9]+-x86_64-${ed}\.iso$" | _isodl_vsort_desc | head -n 1)"
+                [ -z "$iso" ] && iso="$(printf '%s\n' "$isos" | grep -E "^Rocky-${maj}-latest-x86_64-${ed}\.iso$" | head -n 1)"
+            fi
+            [ -n "$iso" ] && printf 'Rocky %s (%s)|%s|%s/%s/isos/x86_64/%s\n' "$maj" "$ed" "$iso" "$base_url" "$maj" "$iso"
+        done
+    done <<EOF
+$majors
+EOF
+}
+
+# Windows VirtIO Drivers 스크랩 (latest + stable + archive 최신 5개)
+_isodl_scrape_virtio() {
+    local base_url="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads"
+    local html dirs d sub_html iso ver
+
+    printf 'latest (최신)|virtio-win-latest.iso|%s/latest-virtio/virtio-win.iso\n' "$base_url"
+    printf 'stable (안정)|virtio-win-stable.iso|%s/stable-virtio/virtio-win.iso\n' "$base_url"
+
+    html="$(_isodl_fetch "${base_url}/archive-virtio/")" || return 0
+    dirs="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^virtio-win-[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?/$' \
+        | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 5)"
+
+    while IFS= read -r d; do
+        [ -z "$d" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/archive-virtio/${d}/")" || continue
+        iso="$(printf '%s\n' "$sub_html" | _isodl_hrefs \
+            | grep -E '^virtio-win-[0-9].*\.iso$' | sort -u | _isodl_vsort_desc | head -n 1)"
+        [ -z "$iso" ] && iso="$(printf '%s\n' "$sub_html" | _isodl_hrefs | grep -E '^virtio-win\.iso$' | head -n 1)"
+        if [ -n "$iso" ]; then
+            ver="${d#virtio-win-}"
+            printf '%s|%s|%s/archive-virtio/%s/%s\n' "$ver" "$iso" "$base_url" "$d" "$iso"
+        fi
+    done <<EOF
+$dirs
+EOF
+}
+
+# Proxmox VE / Backup Server 스크랩 ($1: pve|pbs)
+_isodl_scrape_proxmox() {
+    local kind="${1:-pve}"
+    local base_url="http://download.proxmox.com/iso"
+    local html pat isos iso ver
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    if [ "$kind" = "pbs" ]; then
+        pat='^proxmox-backup-server_[0-9].*\.iso$'
+    else
+        pat='^proxmox-ve_[0-9].*\.iso$'
+    fi
+
+    isos="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | sed 's#^\./##' | grep -E "$pat" | grep -v 'arm64' \
+        | sort -u | _isodl_vsort_desc | head -n 8)"
+
+    while IFS= read -r iso; do
+        [ -z "$iso" ] && continue
+        ver="$(printf '%s\n' "$iso" | sed 's/^[^_]*_\(.*\)\.iso$/\1/')"
+        printf '%s|%s|%s/%s\n' "$ver" "$iso" "$base_url" "$iso"
+    done <<EOF
+$isos
+EOF
+}
+
+# 메인 인터랙티브 ISO 자동 버전 스크랩 & 다운로더
+isodl() {
+    local save_dir="" distro_arg=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        -d|--dir)
+            save_dir="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "사용법: isodl [배포판] [-d 저장경로]"
+            echo "  배포판: ubuntu, ubuntu-desktop, debian, alma, rocky, virtio, pve, pbs"
+            return 0
+            ;;
+        *)
+            distro_arg="$1"
+            shift
+            ;;
+        esac
+    done
+
+    if [ -z "$save_dir" ]; then
+        if [ -d "/var/lib/vz/template/iso" ] && [ -w "/var/lib/vz/template/iso" ]; then
+            save_dir="/var/lib/vz/template/iso"
+        else
+            save_dir="$(pwd)"
+        fi
+    fi
+
+    if [ ! -d "$save_dir" ]; then
+        RED1; echo "[!] 저장 경로가 존재하지 않습니다: $save_dir"; NC
+        return 1
+    fi
+
+    local distro_key="" distro_name="" dsel raw_list line
+    local -a item_labels=()
+    local -a item_names=()
+    local -a item_urls=()
+    local idx sel pick_label pick_name pick_url
+    local spd_in spd_val out_path dl_rc exist_sz
+
+    while true; do
+        distro_key=""
+        distro_name=""
+
+        if [ -n "$distro_arg" ]; then
+            case "$distro_arg" in
+            ubuntu|ubuntu-server|u|us|1)        distro_key="ubuntu-server";  distro_name="Ubuntu Server" ;;
+            ubuntu-desktop|desktop|ud|2)        distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop" ;;
+            debian|deb|d|3)                     distro_key="debian";         distro_name="Debian (netinst)" ;;
+            alma|almalinux|a|4)                 distro_key="alma";           distro_name="AlmaLinux" ;;
+            rocky|rockylinux|r|5)               distro_key="rocky";          distro_name="Rocky Linux" ;;
+            virtio|win|windows|v|6)             distro_key="virtio";         distro_name="Windows VirtIO Drivers" ;;
+            pve|proxmox|proxmox-ve|7)           distro_key="pve";            distro_name="Proxmox VE" ;;
+            pbs|proxmox-backup|8)               distro_key="pbs";            distro_name="Proxmox Backup Server" ;;
+            *)
+                RED1; echo "[!] 알 수 없는 배포판입니다: $distro_arg"; NC
+                distro_arg=""
+                continue
+                ;;
+            esac
+            distro_arg=""
+        else
+            echo
+            CYN1
+            echo "=========================================================================="
+            echo "  [isodl] OS ISO 공식 미러 실시간 버전 스크랩 & 다운로더"
+            echo "=========================================================================="
+            NC
+            WHT; echo "  저장 경로: $save_dir"; NC
+            echo "--------------------------------------------------------------------------"
+            echo "  1) Ubuntu Server          (LTS / 최신 6개)"
+            echo "  2) Ubuntu Desktop         (LTS / 최신 6개)"
+            echo "  3) Debian                 (netinst 최신 + 이전 메이저)"
+            echo "  4) AlmaLinux              (최신 3개 메이저: minimal / dvd / boot)"
+            echo "  5) Rocky Linux            (최신 3개 메이저: minimal / dvd / boot)"
+            echo "  6) Windows VirtIO Drivers (latest / stable / archive)"
+            echo "  7) Proxmox VE             (PVE 설치 ISO)"
+            echo "  8) Proxmox Backup Server  (PBS 설치 ISO)"
+            echo "  0) 종료 (q)"
+            echo "--------------------------------------------------------------------------"
+            printf ">>> 배포판 선택 [0-8]: "
+            read -r dsel </dev/tty || return 0
+            case "$dsel" in
+            0|q|Q|"") echo "취소되었습니다."; return 0 ;;
+            1) distro_key="ubuntu-server";  distro_name="Ubuntu Server" ;;
+            2) distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop" ;;
+            3) distro_key="debian";         distro_name="Debian (netinst)" ;;
+            4) distro_key="alma";           distro_name="AlmaLinux" ;;
+            5) distro_key="rocky";          distro_name="Rocky Linux" ;;
+            6) distro_key="virtio";         distro_name="Windows VirtIO Drivers" ;;
+            7) distro_key="pve";            distro_name="Proxmox VE" ;;
+            8) distro_key="pbs";            distro_name="Proxmox Backup Server" ;;
+            *)
+                RED1; echo "[!] 0~8 사이 번호를 선택하세요."; NC
+                continue
+                ;;
+            esac
+        fi
+
+        echo
+        YEL1; echo "[...] ${distro_name} 공식 사이트에서 ISO 버전 목록을 조회 중입니다..."; NC
+
+        raw_list=""
+        case "$distro_key" in
+        ubuntu-server)  raw_list="$(_isodl_scrape_ubuntu server)" ;;
+        ubuntu-desktop) raw_list="$(_isodl_scrape_ubuntu desktop)" ;;
+        debian)         raw_list="$(_isodl_scrape_debian)" ;;
+        alma)           raw_list="$(_isodl_scrape_alma)" ;;
+        rocky)          raw_list="$(_isodl_scrape_rocky)" ;;
+        virtio)         raw_list="$(_isodl_scrape_virtio)" ;;
+        pve)            raw_list="$(_isodl_scrape_proxmox pve)" ;;
+        pbs)            raw_list="$(_isodl_scrape_proxmox pbs)" ;;
+        esac
+
+        item_labels=()
+        item_names=()
+        item_urls=()
+
+        while IFS='|' read -r pick_label pick_name pick_url; do
+            [ -z "$pick_url" ] && continue
+            item_labels[${#item_labels[@]}]="$pick_label"
+            item_names[${#item_names[@]}]="$pick_name"
+            item_urls[${#item_urls[@]}]="$pick_url"
+        done <<EOF
+$raw_list
+EOF
+
+        if [ "${#item_urls[@]}" -eq 0 ]; then
+            RED1; echo "[!] ${distro_name} 목록을 가져오지 못했습니다. (네트워크 또는 사이트 구조 변경 확인 필요)"; NC
+            continue
+        fi
+
+        echo
+        CYN1
+        echo "--------------------------------------------------------------------------"
+        echo "  [${distro_name}] 조회된 ISO 목록 (최신순, 총 ${#item_urls[@]}개)"
+        echo "--------------------------------------------------------------------------"
+        NC
+        idx=0
+        while [ "$idx" -lt "${#item_urls[@]}" ]; do
+            out_path="${save_dir}/${item_names[$idx]}"
+            if [ -f "$out_path" ]; then
+                exist_sz="$(ls -lh "$out_path" 2>/dev/null | awk '{print $5}')"
+                printf "  %2d) %-16s  %-44s  \033[1;32m[이미 있음 %s]\033[0m\n" \
+                    "$((idx + 1))" "[${item_labels[$idx]}]" "${item_names[$idx]}" "$exist_sz"
+            else
+                printf "  %2d) %-16s  %s\n" \
+                    "$((idx + 1))" "[${item_labels[$idx]}]" "${item_names[$idx]}"
+            fi
+            idx=$((idx + 1))
+        done
+        echo "--------------------------------------------------------------------------"
+        echo "   b) 배포판 다시 선택   |   0/q) 종료"
+        echo "--------------------------------------------------------------------------"
+
+        printf ">>> 다운로드할 번호 선택 [1-%d, b, q]: " "${#item_urls[@]}"
+        read -r sel </dev/tty || return 0
+
+        case "$sel" in
+        b|B) continue ;;
+        0|q|Q|"") echo "취소되었습니다."; return 0 ;;
+        esac
+
+        if ! printf '%s\n' "$sel" | grep -Eq '^[0-9]+$' || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#item_urls[@]}" ]; then
+            RED1; echo "[!] 잘못된 번호입니다: $sel"; NC
+            continue
+        fi
+
+        idx=$((sel - 1))
+        pick_label="${item_labels[$idx]}"
+        pick_name="${item_names[$idx]}"
+        pick_url="${item_urls[$idx]}"
+        out_path="${save_dir}/${pick_name}"
+
+        echo
+        WHT1; echo "  선택 파일 : $pick_name"; NC
+        echo "  다운 URL  : $pick_url"
+        echo "  저장 경로 : $out_path"
+        echo
+        printf ">>> 속도 제한 [Enter/1:무제한, 2:10m, 3:20m, 4:50m, 5:100m, 직접입력 예:7m]: "
+        read -r spd_in </dev/tty || return 0
+        spd_val=""
+        case "$spd_in" in
+        ""|1|0) spd_val="" ;;
+        2)      spd_val="10m" ;;
+        3)      spd_val="20m" ;;
+        4)      spd_val="50m" ;;
+        5)      spd_val="100m" ;;
+        *)      spd_val="$spd_in" ;;
+        esac
+
+        echo
+        if [ -n "$spd_val" ]; then
+            GRN1; echo "[>>] 다운로드 시작 (속도 제한: ${spd_val}, 이어받기 지원)..."; NC
+        else
+            GRN1; echo "[>>] 다운로드 시작 (속도 무제한, 이어받기 지원)..."; NC
+        fi
+
+        dl_rc=1
+        if command -v wget >/dev/null 2>&1; then
+            if [ -n "$spd_val" ]; then
+                wget -c --limit-rate="$spd_val" -O "$out_path" "$pick_url"
+                dl_rc=$?
+            else
+                wget -c -O "$out_path" "$pick_url"
+                dl_rc=$?
+            fi
+        elif command -v curl >/dev/null 2>&1; then
+            if [ -n "$spd_val" ]; then
+                curl -fSL -C - --limit-rate "$spd_val" -o "$out_path" "$pick_url"
+                dl_rc=$?
+            else
+                curl -fSL -C - -o "$out_path" "$pick_url"
+                dl_rc=$?
+            fi
+        else
+            RED1; echo "[!] wget 또는 curl 이 설치되어 있지 않습니다."; NC
+            return 1
+        fi
+
+        if [ "$dl_rc" -eq 0 ] && [ -s "$out_path" ]; then
+            echo
+            GRN1; echo "[OK] ISO 다운로드 완료!"; NC
+            ls -lh "$out_path"
+            command -v push >/dev/null 2>&1 && push "ISO 다운로드 완료: ${pick_name} (${HOSTNAME})"
+            return 0
+        else
+            echo
+            RED1; echo "[!] ISO 다운로드 실패 (exit=${dl_rc})"; NC
+            [ -f "$out_path" ] && [ ! -s "$out_path" ] && rm -f "$out_path"
+            return 1
+        fi
+    done
+}
+
 # 명령어 사용가능여부 체크 acmd curl -m3 -o
 able() { command -v "$1" &>/dev/null && return 0 || return 1; }
 
