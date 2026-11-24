@@ -6788,22 +6788,181 @@ $isos
 EOF
 }
 
-# 메인 인터랙티브 ISO 자동 버전 스크랩 & 다운로더
+# Ubuntu Cloud Image (.img) 스크랩 (최신 2개 + 짝수년 .04 LTS 최대 6개)
+_isodl_scrape_cloud_ubuntu() {
+    local base_url="https://cloud-images.ubuntu.com/releases"
+    local html dirs ver picked="" cnt=0 sub_html img
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    dirs="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+\.[0-9]+/$' \
+        | sed 's#/$##' | sort -u | _isodl_vsort_desc)"
+
+    # 최신 2개 + 짝수년 .04 LTS 위주로 최대 6개 선별
+    while IFS= read -r ver; do
+        [ -z "$ver" ] && continue
+        local yy="${ver%%.*}" mm="${ver#*.}"
+        if [ "$cnt" -lt 2 ] || { [ "$mm" = "04" ] && [ $((yy % 2)) -eq 0 ]; }; then
+            picked="${picked}${ver}
+"
+            cnt=$((cnt + 1))
+            [ "$cnt" -ge 6 ] && break
+        fi
+    done <<EOF
+$dirs
+EOF
+
+    while IFS= read -r ver; do
+        [ -z "$ver" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${ver}/release/")" || continue
+        img="$(printf '%s\n' "$sub_html" | _isodl_hrefs \
+            | grep -E "^ubuntu-${ver}-server-cloudimg-amd64\.img$" \
+            | sort -u | head -n 1)"
+        if [ -n "$img" ]; then
+            local yy="${ver%%.*}" mm="${ver#*.}" tag="$ver"
+            [ "$mm" = "04" ] && [ $((yy % 2)) -eq 0 ] && tag="${ver} LTS"
+            printf '%s|%s|%s/%s/release/%s\n' "$tag" "$img" "$base_url" "$ver" "$img"
+        fi
+    done <<EOF
+$picked
+EOF
+}
+
+# Debian Cloud Image (.qcow2) 스크랩 (generic + genericcloud, 최신 메이저순)
+_isodl_scrape_cloud_debian() {
+    local base_url="https://cloud.debian.org/images/cloud"
+    local html codenames cn sub_html img num raw=""
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    codenames="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[a-z]+/$' | sed 's#/$##' \
+        | grep -Ev '^(sid|experimental|stretch|buster)$' | sort -u)"
+
+    while IFS= read -r cn; do
+        [ -z "$cn" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${cn}/latest/")" || continue
+        for pat in 'debian-[0-9]+-generic-amd64\.qcow2' 'debian-[0-9]+-genericcloud-amd64\.qcow2'; do
+            img="$(printf '%s\n' "$sub_html" | _isodl_hrefs | grep -E "^${pat}$" | sort -u | head -n 1)"
+            if [ -n "$img" ]; then
+                num="$(printf '%s\n' "$img" | sed 's/^debian-\([0-9]*\)-.*/\1/')"
+                local ed="generic"
+                case "$img" in *genericcloud*) ed="genericcloud" ;; esac
+                raw="${raw}${num}|Debian ${num} (${cn}/${ed})|${img}|${base_url}/${cn}/latest/${img}
+"
+            fi
+        done
+    done <<EOF
+$codenames
+EOF
+
+    printf '%s' "$raw" | _isodl_vsort_desc | cut -d'|' -f2- | head -n 8
+}
+
+# AlmaLinux Cloud Image (.qcow2) 스크랩 (메이저 최신 3개 × GenericCloud + ext4)
+_isodl_scrape_cloud_alma() {
+    local base_url="https://repo.almalinux.org/almalinux"
+    local html majors maj sub_html imgs img
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    majors="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+/$' | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 3)"
+
+    while IFS= read -r maj; do
+        [ -z "$maj" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${maj}/cloud/x86_64/images/")" || continue
+        imgs="$(printf '%s\n' "$sub_html" | _isodl_hrefs | sort -u)"
+
+        img="$(printf '%s\n' "$imgs" | grep -E "^AlmaLinux-${maj}-GenericCloud-${maj}\.[0-9]+-.*\.x86_64\.qcow2$" | _isodl_vsort_desc | head -n 1)"
+        [ -z "$img" ] && img="$(printf '%s\n' "$imgs" | grep -E "^AlmaLinux-${maj}-GenericCloud-latest\.x86_64\.qcow2$" | head -n 1)"
+        [ -n "$img" ] && printf 'Alma %s (Cloud)|%s|%s/%s/cloud/x86_64/images/%s\n' "$maj" "$img" "$base_url" "$maj" "$img"
+
+        img="$(printf '%s\n' "$imgs" | grep -E "^AlmaLinux-${maj}-GenericCloud-ext4-${maj}\.[0-9]+-.*\.x86_64\.qcow2$" | _isodl_vsort_desc | head -n 1)"
+        [ -n "$img" ] && printf 'Alma %s (ext4)|%s|%s/%s/cloud/x86_64/images/%s\n' "$maj" "$img" "$base_url" "$maj" "$img"
+    done <<EOF
+$majors
+EOF
+}
+
+# Rocky Linux Cloud Image (.qcow2) 스크랩 (메이저 최신 3개 × Base + LVM)
+_isodl_scrape_cloud_rocky() {
+    local base_url="https://download.rockylinux.org/pub/rocky"
+    local html majors maj sub_html imgs img
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    majors="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '^[0-9]+/$' | sed 's#/$##' | sort -u | _isodl_vsort_desc | head -n 3)"
+
+    while IFS= read -r maj; do
+        [ -z "$maj" ] && continue
+        sub_html="$(_isodl_fetch "${base_url}/${maj}/images/x86_64/")" || continue
+        imgs="$(printf '%s\n' "$sub_html" | _isodl_hrefs | sort -u)"
+
+        img="$(printf '%s\n' "$imgs" | grep -E "^Rocky-${maj}-GenericCloud-Base-${maj}\.[0-9]+-.*\.x86_64\.qcow2$" | _isodl_vsort_desc | head -n 1)"
+        [ -z "$img" ] && img="$(printf '%s\n' "$imgs" | grep -E "^Rocky-${maj}-GenericCloud-Base\.latest\.x86_64\.qcow2$" | head -n 1)"
+        [ -n "$img" ] && printf 'Rocky %s (Base)|%s|%s/%s/images/x86_64/%s\n' "$maj" "$img" "$base_url" "$maj" "$img"
+
+        img="$(printf '%s\n' "$imgs" | grep -E "^Rocky-${maj}-GenericCloud-LVM-${maj}\.[0-9]+-.*\.x86_64\.qcow2$" | _isodl_vsort_desc | head -n 1)"
+        [ -n "$img" ] && printf 'Rocky %s (LVM)|%s|%s/%s/images/x86_64/%s\n' "$maj" "$img" "$base_url" "$maj" "$img"
+    done <<EOF
+$majors
+EOF
+}
+
+# Proxmox LXC 컨테이너 템플릿 (.tar.zst/.tar.xz) 스크랩 ($1: 배포판 필터 선택)
+_isodl_scrape_lxc() {
+    local filt="$1"
+    local base_url="http://download.proxmox.com/images/system"
+    local html files f label
+    html="$(_isodl_fetch "${base_url}/")" || return 1
+
+    files="$(printf '%s\n' "$html" | _isodl_hrefs \
+        | grep -E '_amd64\.tar\.(zst|xz)$' \
+        | sort -u | _isodl_vsort_desc)"
+
+    if [ -n "$filt" ]; then
+        files="$(printf '%s\n' "$files" | grep -i "^${filt}")"
+    else
+        # 전체 조회 시 주요 6개 배포판별로 최신 3개씩 균등 선별
+        local d picked=""
+        for d in ubuntu debian almalinux rockylinux alpine centos; do
+            picked="${picked}$(printf '%s\n' "$files" | grep -E "^${d}-" | head -n 3)
+"
+        done
+        files="$picked"
+    fi
+
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        label="$(printf '%s\n' "$f" | sed 's/^\([^_]*\)_.*/\1/')"
+        printf '%s|%s|%s/%s\n' "$label" "$f" "$base_url" "$f"
+    done <<EOF
+$files
+EOF
+}
+
+# 메인 인터랙티브 OS 이미지 자동 버전 스크랩 & 다운로더 (ISO / Cloud Image / LXC)
 isodl() {
-    local save_dir="" distro_arg=""
+    local save_dir="" custom_dir=0 distro_arg="" lxc_filt=""
     while [ $# -gt 0 ]; do
         case "$1" in
         -d|--dir)
             save_dir="$2"
+            custom_dir=1
             shift 2
             ;;
         -h|--help)
-            echo "사용법: isodl [배포판] [-d 저장경로]"
-            echo "  배포판: ubuntu, ubuntu-desktop, debian, alma, rocky, virtio, pve, pbs"
+            echo "사용법: isodl [대상] [-d 저장경로]"
+            echo "  ISO   : ubuntu, ubuntu-desktop, debian, alma, rocky, virtio, pve, pbs"
+            echo "  Cloud : cloud-ubuntu, cloud-debian, cloud-alma, cloud-rocky (또는 clouddl)"
+            echo "  LXC   : lxc [ubuntu|debian|alma|rocky|alpine] (또는 lxcdl)"
             return 0
             ;;
         *)
-            distro_arg="$1"
+            if [ -z "$distro_arg" ]; then
+                distro_arg="$1"
+            else
+                lxc_filt="$1"
+            fi
             shift
             ;;
         esac
@@ -6822,7 +6981,7 @@ isodl() {
         return 1
     fi
 
-    local distro_key="" distro_name="" dsel raw_list line
+    local distro_key="" distro_name="" dsel raw_list target_dir
     local -a item_labels=()
     local -a item_names=()
     local -a item_urls=()
@@ -6832,19 +6991,25 @@ isodl() {
     while true; do
         distro_key=""
         distro_name=""
+        target_dir="$save_dir"
 
         if [ -n "$distro_arg" ]; then
             case "$distro_arg" in
-            ubuntu|ubuntu-server|u|us|1)        distro_key="ubuntu-server";  distro_name="Ubuntu Server" ;;
-            ubuntu-desktop|desktop|ud|2)        distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop" ;;
-            debian|deb|d|3)                     distro_key="debian";         distro_name="Debian (netinst)" ;;
-            alma|almalinux|a|4)                 distro_key="alma";           distro_name="AlmaLinux" ;;
-            rocky|rockylinux|r|5)               distro_key="rocky";          distro_name="Rocky Linux" ;;
+            ubuntu|ubuntu-server|u|us|1)        distro_key="ubuntu-server";  distro_name="Ubuntu Server ISO" ;;
+            ubuntu-desktop|desktop|ud|2)        distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop ISO" ;;
+            debian|deb|d|3)                     distro_key="debian";         distro_name="Debian ISO (netinst)" ;;
+            alma|almalinux|a|4)                 distro_key="alma";           distro_name="AlmaLinux ISO" ;;
+            rocky|rockylinux|r|5)               distro_key="rocky";          distro_name="Rocky Linux ISO" ;;
             virtio|win|windows|v|6)             distro_key="virtio";         distro_name="Windows VirtIO Drivers" ;;
-            pve|proxmox|proxmox-ve|7)           distro_key="pve";            distro_name="Proxmox VE" ;;
-            pbs|proxmox-backup|8)               distro_key="pbs";            distro_name="Proxmox Backup Server" ;;
+            pve|proxmox|proxmox-ve|7)           distro_key="pve";            distro_name="Proxmox VE ISO" ;;
+            pbs|proxmox-backup|8)               distro_key="pbs";            distro_name="Proxmox Backup Server ISO" ;;
+            cloud-ubuntu|cu|9)                  distro_key="cloud-ubuntu";   distro_name="Ubuntu Cloud Image (.img)" ;;
+            cloud-debian|cd|10)                 distro_key="cloud-debian";   distro_name="Debian Cloud Image (.qcow2)" ;;
+            cloud-alma|ca|11)                   distro_key="cloud-alma";     distro_name="AlmaLinux Cloud Image (.qcow2)" ;;
+            cloud-rocky|cr|12)                  distro_key="cloud-rocky";    distro_name="Rocky Linux Cloud Image (.qcow2)" ;;
+            lxc|ct|13)                          distro_key="lxc";            distro_name="Proxmox LXC Template (.tar.zst/.xz)" ;;
             *)
-                RED1; echo "[!] 알 수 없는 배포판입니다: $distro_arg"; NC
+                RED1; echo "[!] 알 수 없는 대상입니다: $distro_arg"; NC
                 distro_arg=""
                 continue
                 ;;
@@ -6854,42 +7019,62 @@ isodl() {
             echo
             CYN1
             echo "=========================================================================="
-            echo "  [isodl] OS ISO 공식 미러 실시간 버전 스크랩 & 다운로더"
+            echo "  [isodl] OS 이미지 실시간 버전 스크랩 & 다운로더 (ISO / Cloud / LXC)"
             echo "=========================================================================="
             NC
-            WHT; echo "  저장 경로: $save_dir"; NC
+            WHT; echo "  저장 경로: $save_dir  (LXC는 /var/lib/vz/template/cache 자동 사용)"; NC
             echo "--------------------------------------------------------------------------"
-            echo "  1) Ubuntu Server          (LTS / 최신 6개)"
-            echo "  2) Ubuntu Desktop         (LTS / 최신 6개)"
-            echo "  3) Debian                 (netinst 최신 + 이전 메이저)"
-            echo "  4) AlmaLinux              (최신 3개 메이저: minimal / dvd / boot)"
-            echo "  5) Rocky Linux            (최신 3개 메이저: minimal / dvd / boot)"
-            echo "  6) Windows VirtIO Drivers (latest / stable / archive)"
-            echo "  7) Proxmox VE             (PVE 설치 ISO)"
-            echo "  8) Proxmox Backup Server  (PBS 설치 ISO)"
-            echo "  0) 종료 (q)"
+            YEL1; echo "  [설치용 ISO]"; NC
+            echo "   1) Ubuntu Server          (LTS / 최신 6개)"
+            echo "   2) Ubuntu Desktop         (LTS / 최신 6개)"
+            echo "   3) Debian                 (netinst 최신 + 이전 메이저)"
+            echo "   4) AlmaLinux              (최신 3개 메이저: minimal / dvd / boot)"
+            echo "   5) Rocky Linux            (최신 3개 메이저: minimal / dvd / boot)"
+            echo "   6) Windows VirtIO Drivers (latest / stable / archive)"
+            echo "   7) Proxmox VE             (PVE 설치 ISO)"
+            echo "   8) Proxmox Backup Server  (PBS 설치 ISO)"
+            GRN1; echo "  [바로 쓰는 Cloud Image (.qcow2 / .img - Cloud-Init)]"; NC
+            echo "   9) Ubuntu Cloud Image     (.img - 최신 + LTS)"
+            echo "  10) Debian Cloud Image     (.qcow2 - generic / genericcloud)"
+            echo "  11) AlmaLinux Cloud Image  (.qcow2 - GenericCloud 10/9/8)"
+            echo "  12) Rocky Linux Cloud      (.qcow2 - GenericCloud Base/LVM 10/9/8)"
+            MAG1; echo "  [바로 쓰는 LXC 컨테이너 템플릿 (.tar.zst / .tar.xz)]"; NC
+            echo "  13) Proxmox LXC Template   (Ubuntu/Debian/Alma/Rocky/Alpine 등)"
+            echo "   0) 종료 (q)"
             echo "--------------------------------------------------------------------------"
-            printf ">>> 배포판 선택 [0-8]: "
+            printf ">>> 배포판 선택 [0-13]: "
             read -r dsel </dev/tty || return 0
             case "$dsel" in
             0|q|Q|"") echo "취소되었습니다."; return 0 ;;
-            1) distro_key="ubuntu-server";  distro_name="Ubuntu Server" ;;
-            2) distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop" ;;
-            3) distro_key="debian";         distro_name="Debian (netinst)" ;;
-            4) distro_key="alma";           distro_name="AlmaLinux" ;;
-            5) distro_key="rocky";          distro_name="Rocky Linux" ;;
-            6) distro_key="virtio";         distro_name="Windows VirtIO Drivers" ;;
-            7) distro_key="pve";            distro_name="Proxmox VE" ;;
-            8) distro_key="pbs";            distro_name="Proxmox Backup Server" ;;
+            1)  distro_key="ubuntu-server";  distro_name="Ubuntu Server ISO" ;;
+            2)  distro_key="ubuntu-desktop"; distro_name="Ubuntu Desktop ISO" ;;
+            3)  distro_key="debian";         distro_name="Debian ISO (netinst)" ;;
+            4)  distro_key="alma";           distro_name="AlmaLinux ISO" ;;
+            5)  distro_key="rocky";          distro_name="Rocky Linux ISO" ;;
+            6)  distro_key="virtio";         distro_name="Windows VirtIO Drivers" ;;
+            7)  distro_key="pve";            distro_name="Proxmox VE ISO" ;;
+            8)  distro_key="pbs";            distro_name="Proxmox Backup Server ISO" ;;
+            9)  distro_key="cloud-ubuntu";   distro_name="Ubuntu Cloud Image (.img)" ;;
+            10) distro_key="cloud-debian";   distro_name="Debian Cloud Image (.qcow2)" ;;
+            11) distro_key="cloud-alma";     distro_name="AlmaLinux Cloud Image (.qcow2)" ;;
+            12) distro_key="cloud-rocky";    distro_name="Rocky Linux Cloud Image (.qcow2)" ;;
+            13) distro_key="lxc";            distro_name="Proxmox LXC Template (.tar.zst/.xz)" ;;
             *)
-                RED1; echo "[!] 0~8 사이 번호를 선택하세요."; NC
+                RED1; echo "[!] 0~13 사이 번호를 선택하세요."; NC
                 continue
                 ;;
             esac
         fi
 
+        # LXC 템플릿은 -d 지정이 없으면 Proxmox 표준 cache 경로 자동 사용
+        if [ "$distro_key" = "lxc" ] && [ "$custom_dir" -eq 0 ]; then
+            if [ -d "/var/lib/vz/template/cache" ] && [ -w "/var/lib/vz/template/cache" ]; then
+                target_dir="/var/lib/vz/template/cache"
+            fi
+        fi
+
         echo
-        YEL1; echo "[...] ${distro_name} 공식 사이트에서 ISO 버전 목록을 조회 중입니다..."; NC
+        YEL1; echo "[...] ${distro_name} 공식 사이트에서 버전 목록을 조회 중입니다..."; NC
 
         raw_list=""
         case "$distro_key" in
@@ -6901,6 +7086,11 @@ isodl() {
         virtio)         raw_list="$(_isodl_scrape_virtio)" ;;
         pve)            raw_list="$(_isodl_scrape_proxmox pve)" ;;
         pbs)            raw_list="$(_isodl_scrape_proxmox pbs)" ;;
+        cloud-ubuntu)   raw_list="$(_isodl_scrape_cloud_ubuntu)" ;;
+        cloud-debian)   raw_list="$(_isodl_scrape_cloud_debian)" ;;
+        cloud-alma)     raw_list="$(_isodl_scrape_cloud_alma)" ;;
+        cloud-rocky)    raw_list="$(_isodl_scrape_cloud_rocky)" ;;
+        lxc)            raw_list="$(_isodl_scrape_lxc "$lxc_filt")"; lxc_filt="" ;;
         esac
 
         item_labels=()
@@ -6924,18 +7114,19 @@ EOF
         echo
         CYN1
         echo "--------------------------------------------------------------------------"
-        echo "  [${distro_name}] 조회된 ISO 목록 (최신순, 총 ${#item_urls[@]}개)"
+        echo "  [${distro_name}] 조회된 목록 (최신순, 총 ${#item_urls[@]}개)"
+        echo "  저장 경로: ${target_dir}"
         echo "--------------------------------------------------------------------------"
         NC
         idx=0
         while [ "$idx" -lt "${#item_urls[@]}" ]; do
-            out_path="${save_dir}/${item_names[$idx]}"
+            out_path="${target_dir}/${item_names[$idx]}"
             if [ -f "$out_path" ]; then
                 exist_sz="$(ls -lh "$out_path" 2>/dev/null | awk '{print $5}')"
-                printf "  %2d) %-16s  %-44s  \033[1;32m[이미 있음 %s]\033[0m\n" \
+                printf "  %2d) %-22s  %-44s  \033[1;32m[이미 있음 %s]\033[0m\n" \
                     "$((idx + 1))" "[${item_labels[$idx]}]" "${item_names[$idx]}" "$exist_sz"
             else
-                printf "  %2d) %-16s  %s\n" \
+                printf "  %2d) %-22s  %s\n" \
                     "$((idx + 1))" "[${item_labels[$idx]}]" "${item_names[$idx]}"
             fi
             idx=$((idx + 1))
@@ -6961,7 +7152,7 @@ EOF
         pick_label="${item_labels[$idx]}"
         pick_name="${item_names[$idx]}"
         pick_url="${item_urls[$idx]}"
-        out_path="${save_dir}/${pick_name}"
+        out_path="${target_dir}/${pick_name}"
 
         echo
         WHT1; echo "  선택 파일 : $pick_name"; NC
@@ -7011,17 +7202,58 @@ EOF
 
         if [ "$dl_rc" -eq 0 ] && [ -s "$out_path" ]; then
             echo
-            GRN1; echo "[OK] ISO 다운로드 완료!"; NC
+            GRN1; echo "[OK] 다운로드 완료!"; NC
             ls -lh "$out_path"
-            command -v push >/dev/null 2>&1 && push "ISO 다운로드 완료: ${pick_name} (${HOSTNAME})"
+            command -v push >/dev/null 2>&1 && push "OS 이미지 다운로드 완료: ${pick_name} (${HOSTNAME})"
             return 0
         else
             echo
-            RED1; echo "[!] ISO 다운로드 실패 (exit=${dl_rc})"; NC
+            RED1; echo "[!] 다운로드 실패 (exit=${dl_rc})"; NC
             [ -f "$out_path" ] && [ ! -s "$out_path" ] && rm -f "$out_path"
             return 1
         fi
     done
+}
+
+# 바로 쓰는 Cloud Image (.qcow2 / .img) 전용 단축 함수
+clouddl() {
+    case "$1" in
+    ubuntu|u) shift; isodl cloud-ubuntu "$@" ;;
+    debian|d) shift; isodl cloud-debian "$@" ;;
+    alma|a)   shift; isodl cloud-alma "$@" ;;
+    rocky|r)  shift; isodl cloud-rocky "$@" ;;
+    -h|--help)
+        echo "사용법: clouddl [ubuntu|debian|alma|rocky] [-d 저장경로]"
+        return 0
+        ;;
+    "")
+        echo
+        GRN1; echo "  [clouddl] 바로 쓰는 Cloud Image (.qcow2 / .img) 선택"; NC
+        echo "  1) Ubuntu Cloud Image (.img)"
+        echo "  2) Debian Cloud Image (.qcow2)"
+        echo "  3) AlmaLinux Cloud Image (.qcow2)"
+        echo "  4) Rocky Linux Cloud Image (.qcow2)"
+        echo "  0) 취소"
+        local csel
+        printf ">>> 선택 [0-4]: "
+        read -r csel </dev/tty || return 0
+        case "$csel" in
+        1) isodl cloud-ubuntu ;;
+        2) isodl cloud-debian ;;
+        3) isodl cloud-alma ;;
+        4) isodl cloud-rocky ;;
+        *) return 0 ;;
+        esac
+        ;;
+    *)
+        isodl "$@"
+        ;;
+    esac
+}
+
+# 바로 쓰는 Proxmox LXC 컨테이너 템플릿 전용 단축 함수
+lxcdl() {
+    isodl lxc "$@"
 }
 
 # 명령어 사용가능여부 체크 acmd curl -m3 -o
