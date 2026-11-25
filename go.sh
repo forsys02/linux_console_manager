@@ -602,7 +602,7 @@ process_commands() {
         echo "=============================================="
         # unset var_value var_name
         unset -v var_value var_name
-        echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "$command" && NC
+        echo && [ ! "$nodone" ] && echo -n "--> " && YEL && echo "${command//@@//}" && NC
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
         #if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then
@@ -1032,7 +1032,7 @@ cmd_desc_peek() {
                 printf '\x1b[1;36m  -- command unfolded, %s steps --\x1b[0m\n' "$_un"
                 printf '%s\n' "$_uq"
             else
-                printf '\x1b[1;30m  --> %s\x1b[0m\n' "$_qc"
+                printf '\x1b[1;30m  --> %s\x1b[0m\n' "${_qc//@@//}"
             fi
         fi
     else
@@ -3216,7 +3216,7 @@ menufunc() {
                                 cmd_is_danger=1
                                 chosen_command=${chosen_command#* }
                                 chosen_command=${chosen_command#!!!}
-                                echo -e "--> \x1b[1;31m$chosen_command\x1b[0m"
+                                echo -e "--> \x1b[1;31m${chosen_command//@@//}\x1b[0m"
                                 echo
                                 printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
                             else
@@ -3242,7 +3242,7 @@ menufunc() {
                                 [ -z "$cmd" ] && cancel=yes
                             fi
 
-                            echo -e "--> \x1b[1;36;40m$cmd\x1b[0m"
+                            echo -e "--> \x1b[1;36;40m${cmd//@@//}\x1b[0m"
 
                             # 동일한 var 는 제외하고 read // awk '!seen[$0]++'
                             # noDanger
@@ -9904,6 +9904,7 @@ cat3() {
 }
 vi3() {
     [ $# -eq 0 ] && echo "Usage: vi3 file1 [file2 ...]" && return 1
+    if [ $# -eq 1 ]; then [ -f "$1" ] && vi2 "$1" || echo "'$1' not found"; return $?; fi
     select f in "$@" "Cancel"; do
         [ "$f" = "Cancel" ] && break
         [ -n "$f" ] && [ -f "$f" ] && vi2 "$f" || echo "'$f' not found"
@@ -9911,7 +9912,7 @@ vi3() {
     done
 }
 vi2() {
-    [ ! -f "$1" ] && echo "Canceled..." && return 1
+    [ ! -f "$1" ] && echo "File not found on $(hostname): $1" && return 1
     rbackup "$1"
     # 문자열 찾고 그 위치에서 편집
     #if [ -n "$2" ]; then vim -c "autocmd VimEnter * silent! execute '/^%%% .*\[$2\]'" "$1"; else vim "$1" || vi "$1"; fi
@@ -11518,6 +11519,833 @@ EOF
         ;;
 
     esac
+}
+
+# ==============================================================================
+# Proxmox Cluster Merge & VMID Auto-Remap Toolkit (pve_merge_*)
+#   1) pve_merge_setup        : A(Target) / B(Joining) 호스트 등록 & SSH 확인
+#   2) pve_merge_check        : 충돌(호스트명/클러스터/VMID/스토리지/스냅샷) 일괄 점검 (읽기전용)
+#   3) pve_merge_plan         : B 노드 VMID 자동 변경 계획 검토 (Dry-Run, 읽기전용)
+#   4) pve_merge_apply_vmid   : B 노드 VMID 일괄 자동 변경 실행 (실제 변경)
+#   5) pve_merge_join_dryrun  : 클러스터 합치기 사전 검토 (Dry-Run, 읽기전용)
+#   6) pve_merge_join         : conf 임시이동 -> 클러스터 조인 -> conf/스토리지 원복
+#   7) pve_merge_restore_conf : 백업된 conf 비상 원복
+# ==============================================================================
+PVE_MERGE_STATE="${HOME:-/root}/.pve_merge.env"
+PVE_MERGE_PLAN_FILE="/tmp/pve_merge_plan.tsv"
+
+_pvem_load_state() {
+    PVE_MERGE_A=""
+    PVE_MERGE_B=""
+    PVE_MERGE_OFFSET="200"
+    PVE_MERGE_SSH_USER="root"
+    [ -f "$PVE_MERGE_STATE" ] && . "$PVE_MERGE_STATE"
+}
+
+_pvem_require_state() {
+    _pvem_load_state
+    if [ -z "$PVE_MERGE_A" ] || [ -z "$PVE_MERGE_B" ]; then
+        RED1; echo "[!] A/B 호스트가 등록되지 않았습니다. 먼저 1단계(pve_merge_setup)를 실행하세요."; NC
+        return 1
+    fi
+    return 0
+}
+
+_pvem_is_local() {
+    local target="$1"
+    [ "$target" = "local" ] || [ "$target" = "localhost" ] || [ "$target" = "127.0.0.1" ] && return 0
+    local h_short h_fqdn h_ips ip
+    h_short="$(hostname -s 2>/dev/null)"
+    h_fqdn="$(hostname -f 2>/dev/null)"
+    h_ips="$(hostname -I 2>/dev/null)"
+    [ -n "$h_short" ] && [ "$target" = "$h_short" ] && return 0
+    [ -n "$h_fqdn" ] && [ "$target" = "$h_fqdn" ] && return 0
+    for ip in $h_ips; do
+        [ "$target" = "$ip" ] && return 0
+    done
+    return 1
+}
+
+_pvem_run() {
+    local host="$1"
+    shift
+    local cmd="$*"
+    if _pvem_is_local "$host"; then
+        bash -c "$cmd"
+    else
+        ssh -n -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new \
+            -o ControlMaster=no \
+            "${PVE_MERGE_SSH_USER:-root}@${host}" "$cmd"
+    fi
+}
+
+_pvem_check_ssh() {
+    local label="$1" host="$2" out
+    if _pvem_is_local "$host"; then
+        return 0
+    fi
+    out="$(ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new \
+        "${PVE_MERGE_SSH_USER:-root}@${host}" "echo OK" 2>&1)"
+    if [ "$out" != "OK" ]; then
+        RED1; echo "[FAIL] ${label} 호스트(${host}) SSH 키 인증 접속 실패!"; NC
+        echo "  원인: $out"
+        YEL1; echo "  해결: ssh-copy-id ${PVE_MERGE_SSH_USER:-root}@${host} 로 키를 등록하거나, 양쪽 키가 있는 서버에서 실행하세요."; NC
+        return 1
+    fi
+    return 0
+}
+
+_pvem_require_ready() {
+    _pvem_require_state || return 1
+    _pvem_check_ssh "A" "$PVE_MERGE_A" || return 1
+    _pvem_check_ssh "B" "$PVE_MERGE_B" || return 1
+    return 0
+}
+
+_pvem_run_tty() {
+    local host="$1"
+    shift
+    local cmd="$*"
+    if _pvem_is_local "$host"; then
+        bash -c "$cmd"
+    else
+        ssh -t -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new \
+            "${PVE_MERGE_SSH_USER:-root}@${host}" "$cmd"
+    fi
+}
+
+_pvem_list_guests() {
+    # Output format: VMID|TYPE|STATUS|NAME|CONF_PATH
+    local host="$1"
+    _pvem_run "$host" '
+        for d in /etc/pve/qemu-server /etc/pve/lxc; do
+            [ -d "$d" ] || continue
+            t="qemu"
+            [ "$d" = "/etc/pve/lxc" ] && t="lxc"
+            for f in "$d"/*.conf; do
+                [ -e "$f" ] || continue
+                b="$(basename "$f")"
+                case "$b" in
+                    *[!0-9]*.conf) continue ;;
+                esac
+                id="${b%.conf}"
+                case "$id" in ""|*[!0-9]*) continue ;; esac
+                if [ "$t" = "qemu" ]; then
+                    name="$(awk -F": *" "/^name:/{print \$2; exit}" "$f" 2>/dev/null)"
+                    st="$(qm status "$id" 2>/dev/null | awk "{print \$2}")"
+                else
+                    name="$(awk -F": *" "/^hostname:/{print \$2; exit}" "$f" 2>/dev/null)"
+                    st="$(pct status "$id" 2>/dev/null | awk "{print \$2}")"
+                fi
+                [ -z "$name" ] && name="-"
+                [ -z "$st" ] && st="unknown"
+                printf "%s|%s|%s|%s|%s\n" "$id" "$t" "$st" "$name" "$f"
+            done
+        done | sort -t"|" -k1,1n
+    '
+}
+
+_pvem_list_nonstandard_confs() {
+    local host="$1"
+    _pvem_run "$host" '
+        for d in /etc/pve/qemu-server /etc/pve/lxc; do
+            [ -d "$d" ] || continue
+            for f in "$d"/*; do
+                [ -e "$f" ] || continue
+                b="$(basename "$f")"
+                if ! printf "%s\n" "$b" | grep -Eq "^[0-9]+\.conf$"; then
+                    printf "%s\n" "$f"
+                fi
+            done
+        done
+    '
+}
+
+_pvem_parse_storages() {
+    # Output format: NAME|TYPE|DETAIL|NODES
+    local host="$1"
+    _pvem_run "$host" '
+        [ -f /etc/pve/storage.cfg ] || exit 0
+        awk "
+            /^[a-zA-Z0-9_-]+:[ \t]+/ {
+                if (name != \"\") print name \"|\" type \"|\" detail \"|\" nodes
+                split(\$0, a, \":[ \t]+\")
+                type = a[1]; name = a[2]; detail = \"\"; nodes = \"ALL\"
+                next
+            }
+            /^[ \t]+path[ \t]+/ { detail = detail (detail?\",\":\"\") \"path=\" \$2 }
+            /^[ \t]+vgname[ \t]+/ { detail = detail (detail?\",\":\"\") \"vg=\" \$2 }
+            /^[ \t]+thinpool[ \t]+/ { detail = detail (detail?\",\":\"\") \"pool=\" \$2 }
+            /^[ \t]+pool[ \t]+/ { detail = detail (detail?\",\":\"\") \"zpool=\" \$2 }
+            /^[ \t]+nodes[ \t]+/ { nodes = \$2 }
+            END { if (name != \"\") print name \"|\" type \"|\" detail \"|\" nodes }
+        " /etc/pve/storage.cfg
+    '
+}
+
+# 1단계: A/B 호스트 등록 및 SSH 연결 테스트
+pve_merge_setup() {
+    _pvem_load_state
+    local arg_a="$1" arg_b="$2" arg_off="$3"
+    local in_a in_b in_off
+
+    CYN1; echo "======================================================================"
+    echo " [1단계] Proxmox 클러스터 합치기 - A(대상) / B(합류) 호스트 등록"
+    echo "======================================================================"; NC
+
+    if [ -n "$arg_a" ] && [ -n "$arg_b" ]; then
+        PVE_MERGE_A="$arg_a"
+        PVE_MERGE_B="$arg_b"
+        [ -n "$arg_off" ] && PVE_MERGE_OFFSET="$arg_off"
+    else
+        printf "  A 호스트 (유지할 마스터/클러스터 노드) [%s]: " "${PVE_MERGE_A:-예: pve1.example.com}"
+        read -r in_a </dev/tty
+        [ -n "$in_a" ] && PVE_MERGE_A="$in_a"
+
+        printf "  B 호스트 (합류할 노드 - VMID 변경 대상) [%s]: " "${PVE_MERGE_B:-예: pve2.example.com}"
+        read -r in_b </dev/tty
+        [ -n "$in_b" ] && PVE_MERGE_B="$in_b"
+
+        printf "  충돌 VMID 자동 할당 시작 번호 [%s]: " "${PVE_MERGE_OFFSET:-200}"
+        read -r in_off </dev/tty
+        [ -n "$in_off" ] && PVE_MERGE_OFFSET="$in_off"
+    fi
+
+    if [ -z "$PVE_MERGE_A" ] || [ -z "$PVE_MERGE_B" ]; then
+        RED1; echo "[!] A, B 호스트를 모두 입력해야 합니다."; NC
+        return 1
+    fi
+    if [ "$PVE_MERGE_A" = "$PVE_MERGE_B" ]; then
+        RED1; echo "[!] A 와 B 호스트가 동일합니다."; NC
+        return 1
+    fi
+    case "$PVE_MERGE_OFFSET" in
+        ""|*[!0-9]*) PVE_MERGE_OFFSET=200 ;;
+    esac
+
+    cat > "$PVE_MERGE_STATE" <<EOF
+PVE_MERGE_A='$PVE_MERGE_A'
+PVE_MERGE_B='$PVE_MERGE_B'
+PVE_MERGE_OFFSET='$PVE_MERGE_OFFSET'
+PVE_MERGE_SSH_USER='${PVE_MERGE_SSH_USER:-root}'
+EOF
+    chmod 600 "$PVE_MERGE_STATE" 2>/dev/null
+
+    echo ""
+    GRN1; echo "[OK] 저장 완료: $PVE_MERGE_STATE"; NC
+    echo "  - Host A (Target/Master) : $PVE_MERGE_A"
+    echo "  - Host B (Joining/Remap) : $PVE_MERGE_B"
+    echo "  - VMID 시작 번호         : $PVE_MERGE_OFFSET"
+    echo ""
+    echo "[연결 테스트]"
+    local ver_a ver_b
+    ver_a="$(_pvem_run "$PVE_MERGE_A" 'printf "%s | %s" "$(hostname -s)" "$(pveversion 2>/dev/null)"' 2>&1)"
+    if [ $? -eq 0 ]; then
+        GRN1; echo "  [OK] A ($PVE_MERGE_A) -> $ver_a"; NC
+    else
+        RED1; echo "  [FAIL] A ($PVE_MERGE_A) SSH 접속 실패: $ver_a"; NC
+        return 1
+    fi
+    ver_b="$(_pvem_run "$PVE_MERGE_B" 'printf "%s | %s" "$(hostname -s)" "$(pveversion 2>/dev/null)"' 2>&1)"
+    if [ $? -eq 0 ]; then
+        GRN1; echo "  [OK] B ($PVE_MERGE_B) -> $ver_b"; NC
+    else
+        RED1; echo "  [FAIL] B ($PVE_MERGE_B) SSH 접속 실패: $ver_b"; NC
+        return 1
+    fi
+}
+
+# 2단계: 충돌 및 사전 조건 일괄 점검 (100% 읽기 전용)
+pve_merge_check() {
+    _pvem_require_ready || return 1
+
+    local blockers=0 warns=0
+    CYN1; echo "======================================================================"
+    echo " [2단계] A / B 일괄 충돌 점검 (100% 읽기 전용)"
+    echo "   A (Target)  : $PVE_MERGE_A"
+    echo "   B (Joining) : $PVE_MERGE_B"
+    echo "======================================================================"; NC
+
+    # 1) 호스트명 & PVE 버전
+    local hn_a hn_b ver_a ver_b ip_a ip_b
+    hn_a="$(_pvem_run "$PVE_MERGE_A" 'hostname -s')"
+    hn_b="$(_pvem_run "$PVE_MERGE_B" 'hostname -s')"
+    ver_a="$(_pvem_run "$PVE_MERGE_A" 'pveversion 2>/dev/null')"
+    ver_b="$(_pvem_run "$PVE_MERGE_B" 'pveversion 2>/dev/null')"
+    ip_a="$(_pvem_run "$PVE_MERGE_A" 'hostname -I 2>/dev/null | tr " " "\n" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | head -n1')"
+    ip_b="$(_pvem_run "$PVE_MERGE_B" 'hostname -I 2>/dev/null | tr " " "\n" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | head -n1')"
+
+    echo ""
+    YEL1; echo "[1/6] 호스트명 & 버전 비교"; NC
+    echo "  - A: node=$hn_a  ip=$ip_a  ver=$ver_a"
+    echo "  - B: node=$hn_b  ip=$ip_b  ver=$ver_b"
+    if [ "$hn_a" = "$hn_b" ]; then
+        RED1; echo "  [BLOCK] 호스트명이 동일합니다 ($hn_a == $hn_b). B 노드 호스트명 변경 필수!"; NC
+        blockers=$((blockers + 1))
+    else
+        GRN1; echo "  [OK] 호스트명 중복 없음 ($hn_a != $hn_b)"; NC
+    fi
+    local maj_a maj_b
+    maj_a="$(printf '%s' "$ver_a" | sed -n 's#pve-manager/\([0-9]*\)\..*#\1#p')"
+    maj_b="$(printf '%s' "$ver_b" | sed -n 's#pve-manager/\([0-9]*\)\..*#\1#p')"
+    if [ -n "$maj_a" ] && [ -n "$maj_b" ] && [ "$maj_a" != "$maj_b" ]; then
+        YEL1; echo "  [WARN] PVE 메이저 버전 차이 (A: $maj_a vs B: $maj_b)"; NC
+        warns=$((warns + 1))
+    fi
+
+    # 2) 클러스터 상태
+    echo ""
+    YEL1; echo "[2/6] 클러스터 상태 (corosync)"; NC
+    local cl_a cl_b
+    cl_a="$(_pvem_run "$PVE_MERGE_A" 'if [ -f /etc/pve/corosync.conf ]; then pvecm status 2>/dev/null | awk "/^Name:/{n=\$2} /^Nodes:/{c=\$2} END{printf \"CLUSTER:%s(nodes=%s)\", n, c}"; else echo "STANDALONE"; fi')"
+    cl_b="$(_pvem_run "$PVE_MERGE_B" 'if [ -f /etc/pve/corosync.conf ]; then pvecm status 2>/dev/null | awk "/^Name:/{n=\$2} /^Nodes:/{c=\$2} END{printf \"CLUSTER:%s(nodes=%s)\", n, c}"; else echo "STANDALONE"; fi')"
+    echo "  - A 상태: $cl_a"
+    echo "  - B 상태: $cl_b"
+    if [ "$cl_a" = "STANDALONE" ]; then
+        YEL1; echo "  [WARN] A 노드가 아직 단독(Standalone)입니다. 합치기 전에 A에서 'pvecm create <클러스터명>' 이 필요합니다."; NC
+        warns=$((warns + 1))
+    fi
+    case "$cl_b" in
+        CLUSTER:*)
+            RED1; echo "  [BLOCK] B 노드가 이미 클러스터($cl_b)에 속해 있습니다! 조인 전 B 노드 클러스터 리셋(corosync 초기화) 필수!"; NC
+            blockers=$((blockers + 1))
+            ;;
+        STANDALONE)
+            GRN1; echo "  [OK] B 노드는 단독(Standalone) 상태 (조인 가능)"; NC
+            ;;
+    esac
+
+    # 3) VMID 목록 & 충돌 매트릭스
+    echo ""
+    YEL1; echo "[3/6] VMID 충돌 검사 (QEMU + LXC 통합 비교)"; NC
+    local list_a list_b
+    list_a="$(_pvem_list_guests "$PVE_MERGE_A")"
+    list_b="$(_pvem_list_guests "$PVE_MERGE_B")"
+    local cnt_a cnt_b
+    cnt_a="$(printf '%s\n' "$list_a" | grep -c '|' 2>/dev/null)"
+    cnt_b="$(printf '%s\n' "$list_b" | grep -c '|' 2>/dev/null)"
+    echo "  - A 게스트 수: ${cnt_a:-0}개 | B 게스트 수: ${cnt_b:-0}개"
+
+    local conflicts="" conflict_cnt=0 running_conflicts=0
+    local line_b bid bt bst bname bconf match_a at ast aname
+    while IFS='|' read -r bid bt bst bname bconf; do
+        [ -z "$bid" ] && continue
+        match_a="$(printf '%s\n' "$list_a" | awk -F'|' -v id="$bid" '$1==id {print; exit}')"
+        if [ -n "$match_a" ]; then
+            at="$(printf '%s' "$match_a" | cut -d'|' -f2)"
+            ast="$(printf '%s' "$match_a" | cut -d'|' -f3)"
+            aname="$(printf '%s' "$match_a" | cut -d'|' -f4)"
+            conflict_cnt=$((conflict_cnt + 1))
+            conflicts="${conflicts}${bid}|${bt}|${bst}|${bname}
+"
+            local cross=""
+            [ "$at" != "$bt" ] && cross=" [QEMU<->LXC 교차충돌!]"
+            RED1; printf "  [CONFLICT] VMID %-5s | A: %-4s %-8s (%s)  <-->  B: %-4s %-8s (%s)%s\n" \
+                "$bid" "$at" "$ast" "$aname" "$bt" "$bst" "$bname" "$cross"; NC
+            [ "$bst" = "running" ] && running_conflicts=$((running_conflicts + 1))
+        fi
+    done <<EOF
+$list_b
+EOF
+    if [ "$conflict_cnt" -eq 0 ]; then
+        GRN1; echo "  [OK] 충돌하는 VMID 없음!"; NC
+    else
+        YEL1; echo "  [WARN] 총 ${conflict_cnt}개 VMID 충돌 감지 (3단계 Dry-Run 검토 필요)"; NC
+        warns=$((warns + 1))
+        if [ "$running_conflicts" -gt 0 ]; then
+            YEL1; echo "  [WARN] 충돌 대상 중 B 노드에서 현재 실행 중(running): ${running_conflicts}개 (변경 전 정지 필요)"; NC
+        fi
+    fi
+
+    # 4) 충돌 대상의 스냅샷 / Linked Clone(base-) / 비표준 파일 검사
+    echo ""
+    YEL1; echo "[4/6] B 노드 스냅샷 / Linked Clone(base-) / 비표준 설정파일 검사"; NC
+    if [ "$conflict_cnt" -gt 0 ]; then
+        local cid ct cst cname
+        while IFS='|' read -r cid ct cst cname; do
+            [ -z "$cid" ] && continue
+            local cpath="/etc/pve/qemu-server/${cid}.conf"
+            [ "$ct" = "lxc" ] && cpath="/etc/pve/lxc/${cid}.conf"
+            local has_snap has_base linked_refs
+            has_snap="$(_pvem_run "$PVE_MERGE_B" "grep -Ec '^\[.+\]$' '$cpath' 2>/dev/null")"
+            has_base="$(_pvem_run "$PVE_MERGE_B" "lvs --noheadings -o vg_name,lv_name 2>/dev/null | grep -E 'base-${cid}-disk-' || true")"
+            linked_refs="$(_pvem_run "$PVE_MERGE_B" "grep -lE 'base-${cid}-disk-' /etc/pve/qemu-server/*.conf /etc/pve/lxc/*.conf 2>/dev/null | grep -v '/${cid}\.conf$' || true")"
+            if [ "${has_snap:-0}" -gt 0 ]; then
+                YEL1; echo "  [WARN] B VMID $cid ($cname): 스냅샷 섹션 ${has_snap}개 존재 (리네임 전 스냅샷 정리 권장)"; NC
+                warns=$((warns + 1))
+            fi
+            if [ -n "$has_base" ]; then
+                YEL1; echo "  [WARN] B VMID $cid ($cname): 템플릿/베이스 볼륨 존재 -> $(echo "$has_base" | tr '\n' ' ')"; NC
+                warns=$((warns + 1))
+            fi
+            if [ -n "$linked_refs" ]; then
+                RED1; echo "  [BLOCK] B VMID $cid 의 base 볼륨을 다른 VM이 참조 중: $linked_refs"; NC
+                blockers=$((blockers + 1))
+            fi
+        done <<EOF
+$conflicts
+EOF
+    else
+        GRN1; echo "  [OK] 충돌 VMID 없어 스냅샷/베이스 리스크 없음"; NC
+    fi
+
+    local nonstd_b
+    nonstd_b="$(_pvem_list_nonstandard_confs "$PVE_MERGE_B")"
+    if [ -n "$nonstd_b" ]; then
+        YEL1; echo "  [WARN] B 노드에 비표준 파일(.bak/.mask 등) 존재 (조인 전 백업 후 함께 정리 권장):"; NC
+        printf '%s\n' "$nonstd_b" | sed 's/^/         - /'
+        warns=$((warns + 1))
+    else
+        GRN1; echo "  [OK] B 노드 비표준 설정 파일 없음"; NC
+    fi
+
+    # 5) 스토리지 비교
+    echo ""
+    YEL1; echo "[5/6] 스토리지(storage.cfg) 비교"; NC
+    local st_a st_b
+    st_a="$(_pvem_parse_storages "$PVE_MERGE_A")"
+    st_b="$(_pvem_parse_storages "$PVE_MERGE_B")"
+    local sname stype sdet snodes match_sa sa_type sa_det
+    while IFS='|' read -r sname stype sdet snodes; do
+        [ -z "$sname" ] && continue
+        match_sa="$(printf '%s\n' "$st_a" | awk -F'|' -v n="$sname" '$1==n {print; exit}')"
+        if [ -z "$match_sa" ]; then
+            CYN1; printf "  [B전용] %-16s (%-7s) %-28s nodes=%s  -> 조인 후 A storage.cfg 병합 필요\n" \
+                "$sname" "$stype" "$sdet" "$snodes"; NC
+        else
+            sa_type="$(printf '%s' "$match_sa" | cut -d'|' -f2)"
+            sa_det="$(printf '%s' "$match_sa" | cut -d'|' -f3)"
+            if [ "$sa_type" != "$stype" ] || [ "$sa_det" != "$sdet" ]; then
+                RED1; printf "  [충돌!] %-16s A(%s %s) != B(%s %s)\n" "$sname" "$sa_type" "$sa_det" "$stype" "$sdet"; NC
+                blockers=$((blockers + 1))
+            else
+                GRN1; printf "  [공통]  %-16s (%-7s) %s\n" "$sname" "$stype" "$sdet"; NC
+            fi
+        fi
+    done <<EOF
+$st_b
+EOF
+
+    # 6) 종합 판정
+    echo ""
+    CYN1; echo "----------------------------------------------------------------------"; NC
+    if [ "$blockers" -gt 0 ]; then
+        RED1; echo " [종합 판정: BLOCKED] 선결 차단 항목 ${blockers}건 / 주의 ${warns}건 (위 [BLOCK] 해소 후 조인 진행)"; NC
+    elif [ "$warns" -gt 0 ]; then
+        YEL1; echo " [종합 판정: WARN] 차단 항목 없음 / 주의 ${warns}건 (3단계 VMID 검토로 진행 가능)"; NC
+    else
+        GRN1; echo " [종합 판정: PASS] 충돌 및 차단 항목 없음! 바로 클러스터 합치기 가능"; NC
+    fi
+    CYN1; echo "----------------------------------------------------------------------"; NC
+}
+
+# 3단계: B 노드 VMID 자동 변경 계획 검토 (Dry-Run, 100% 읽기 전용)
+pve_merge_plan() {
+    _pvem_require_ready || return 1
+
+    CYN1; echo "======================================================================"
+    echo " [3단계] B 노드 VMID 자동 변경 검토 (DRY-RUN - 실제 변경 없음)"
+    echo "   A: $PVE_MERGE_A  |  B: $PVE_MERGE_B  |  시작번호: ${PVE_MERGE_OFFSET:-200}"
+    echo "======================================================================"; NC
+
+    local list_a list_b
+    list_a="$(_pvem_list_guests "$PVE_MERGE_A")"
+    list_b="$(_pvem_list_guests "$PVE_MERGE_B")"
+
+    # 사용 중인 모든 VMID 집합 (A 게스트 + B 게스트 + B LVM/ZFS 볼륨 내 ID)
+    local b_vol_ids used_ids
+    b_vol_ids="$(_pvem_run "$PVE_MERGE_B" '
+        lvs --noheadings -o lv_name 2>/dev/null | grep -Eo "(vm|base|subvol)-[0-9]+-" | grep -Eo "[0-9]+"
+        zfs list -H -o name 2>/dev/null | grep -Eo "(vm|base|subvol)-[0-9]+-" | grep -Eo "[0-9]+"
+    ' | sort -un)"
+    used_ids="$(printf '%s\n%s\n%s\n' \
+        "$(printf '%s\n' "$list_a" | cut -d'|' -f1)" \
+        "$(printf '%s\n' "$list_b" | cut -d'|' -f1)" \
+        "$b_vol_ids" | grep -E '^[0-9]+$' | sort -un)"
+
+    # B 스토리지 디렉토리 경로 목록 (dir 타입)
+    local b_dir_paths
+    b_dir_paths="$(_pvem_run "$PVE_MERGE_B" 'awk "/^[ \t]+path[ \t]+/{print \$2}" /etc/pve/storage.cfg 2>/dev/null | sort -u')"
+
+    : > "$PVE_MERGE_PLAN_FILE"
+    local next_id="${PVE_MERGE_OFFSET:-200}"
+    local planned=0
+    local bid bt bst bname bconf match_a
+
+    while IFS='|' read -r bid bt bst bname bconf; do
+        [ -z "$bid" ] && continue
+        match_a="$(printf '%s\n' "$list_a" | awk -F'|' -v id="$bid" '$1==id {print; exit}')"
+        [ -z "$match_a" ] && continue
+
+        # 빈 새 VMID 탐색
+        while printf '%s\n' "$used_ids" | grep -qx "$next_id"; do
+            next_id=$((next_id + 1))
+        done
+        local new_id="$next_id"
+        used_ids="${used_ids}
+${new_id}"
+        next_id=$((next_id + 1))
+        planned=$((planned + 1))
+
+        printf '%s\t%s\t%s\t%s\t%s\n' "$bid" "$new_id" "$bt" "$bst" "$bname" >> "$PVE_MERGE_PLAN_FILE"
+
+        echo ""
+        YEL1; printf "▶ [매핑 #%d] B 노드 %s %s (%s)  ==>  새 VMID: %s  (현재상태: %s)\n" \
+            "$planned" "$bt" "$bid" "$bname" "$new_id" "$bst"; NC
+
+        if [ "$bst" = "running" ]; then
+            echo "   [1. 정지]   $( [ "$bt" = "qemu" ] && echo "qm" || echo "pct" ) shutdown $bid"
+        fi
+
+        # B 노드 LVM 볼륨 탐색 (다른 VM이 참조 중인 base- 볼륨은 보호하여 제외)
+        local lvs_hit ext_base_refs
+        ext_base_refs="$(_pvem_run "$PVE_MERGE_B" "grep -lE 'base-${bid}-disk-' /etc/pve/qemu-server/*.conf /etc/pve/lxc/*.conf 2>/dev/null | grep -v '/${bid}\.conf$' || true")"
+        lvs_hit="$(_pvem_run "$PVE_MERGE_B" "lvs --noheadings -o vg_name,lv_name 2>/dev/null | awk '\$2 ~ /^(vm|base|subvol)-${bid}-/{print \$1\"|\"\$2}'")"
+        if [ -n "$lvs_hit" ]; then
+            local vg lv new_lv
+            while IFS='|' read -r vg lv; do
+                [ -z "$lv" ] && continue
+                case "$lv" in
+                    base-*)
+                        if [ -n "$ext_base_refs" ]; then
+                            RED1; echo "   [2. SKIP]   ${vg}/${lv} (다른 VM 참조 중: $(echo "$ext_base_refs" | tr '\n' ' ') -> 안전상 변경 제외)"; NC
+                            continue
+                        fi
+                        ;;
+                esac
+                new_lv="$(printf '%s' "$lv" | sed -E "s/^(vm|base|subvol)-${bid}-/\1-${new_id}-/")"
+                echo "   [2. LVM]    lvrename ${vg}/${lv} ${vg}/${new_lv}"
+            done <<EOF2
+$lvs_hit
+EOF2
+        fi
+
+        # B 노드 ZFS 볼륨 탐색
+        local zfs_hit
+        zfs_hit="$(_pvem_run "$PVE_MERGE_B" "zfs list -H -o name 2>/dev/null | grep -E '/(vm|base|subvol)-${bid}-' || true")"
+        if [ -n "$zfs_hit" ]; then
+            local zv new_zv
+            while IFS= read -r zv; do
+                [ -z "$zv" ] && continue
+                new_zv="$(printf '%s' "$zv" | sed -E "s#/(vm|base|subvol)-${bid}-#/\1-${new_id}-#")"
+                echo "   [2. ZFS]    zfs rename ${zv} ${new_zv}"
+            done <<EOF2
+$zfs_hit
+EOF2
+        fi
+
+        # B 노드 Directory 이미지 폴더 탐색
+        local dpath dir_hit
+        while IFS= read -r dpath; do
+            [ -z "$dpath" ] && continue
+            dir_hit="$(_pvem_run "$PVE_MERGE_B" "[ -d '${dpath}/images/${bid}' ] && echo '${dpath}/images/${bid}' || true")"
+            if [ -n "$dir_hit" ]; then
+                echo "   [2. DIR]    mv ${dpath}/images/${bid} ${dpath}/images/${new_id}  (+ 내부 파일명 치환)"
+            fi
+        done <<EOF2
+$b_dir_paths
+EOF2
+
+        # conf 치환 미리보기
+        local new_conf="${bconf%/*}/${new_id}.conf"
+        echo "   [3. CONF]   mv ${bconf} ${new_conf}"
+        local conf_refs
+        conf_refs="$(_pvem_run "$PVE_MERGE_B" "grep -E '(vm|base|subvol)-${bid}-|/${bid}/' '$bconf' 2>/dev/null || true")"
+        if [ -n "$conf_refs" ]; then
+            while IFS= read -r cl; do
+                [ -z "$cl" ] && continue
+                echo "               치환: $cl"
+            done <<EOF2
+$conf_refs
+EOF2
+        fi
+
+        # 방화벽 파일
+        local has_fw
+        has_fw="$(_pvem_run "$PVE_MERGE_B" "[ -f '/etc/pve/firewall/${bid}.fw' ] && echo YES || true")"
+        [ "$has_fw" = "YES" ] && echo "   [4. FW]     mv /etc/pve/firewall/${bid}.fw /etc/pve/firewall/${new_id}.fw"
+    done <<EOF
+$list_b
+EOF
+
+    echo ""
+    CYN1; echo "----------------------------------------------------------------------"; NC
+    if [ "$planned" -eq 0 ]; then
+        GRN1; echo " [결과] 충돌하는 VMID가 없어 변경할 항목이 없습니다!"; NC
+    else
+        GRN1; echo " [DRY-RUN 완료] 총 ${planned}개 변경 계획이 생성되었습니다."; NC
+        echo "  - 계획표 저장됨: $PVE_MERGE_PLAN_FILE"
+        echo "  - 실제 변경은 전혀 수행되지 않았습니다. 검토 후 4단계 메뉴에서 실행하세요."
+    fi
+    CYN1; echo "----------------------------------------------------------------------"; NC
+}
+
+# 4단계: B 노드 VMID 일괄 자동 변경 실행 (실제 변경)
+pve_merge_apply_vmid() {
+    _pvem_require_ready || return 1
+
+    if [ ! -s "$PVE_MERGE_PLAN_FILE" ]; then
+        YEL1; echo "[!] 저장된 변경 계획표가 없습니다. 먼저 3단계(Dry-Run 검토)를 실행합니다..."; NC
+        pve_merge_plan || return 1
+        [ ! -s "$PVE_MERGE_PLAN_FILE" ] && return 0
+    fi
+
+    echo ""
+    RED1; echo "======================================================================"
+    echo " [4단계 - 주의!] B 노드($PVE_MERGE_B) VMID 실제 일괄 변경"
+    echo "======================================================================"; NC
+    echo "적용 예정 매핑표 ($PVE_MERGE_PLAN_FILE):"
+    awk -F'\t' '{printf "  - [%s] %s (%s)  -->  %s\n", $3, $1, $5, $2}' "$PVE_MERGE_PLAN_FILE"
+    echo ""
+    printf "정말로 B 노드(%s)에 위 변경을 실행하시겠습니까? (진행하려면 APPLY 입력): " "$PVE_MERGE_B"
+    local ans
+    read -r ans </dev/tty
+    if [ "$ans" != "APPLY" ]; then
+        YEL1; echo "[취소됨] 변경을 수행하지 않았습니다."; NC
+        return 0
+    fi
+
+    local ts bdir
+    ts="$(date +%Y%m%d_%H%M%S)"
+    bdir="/root/pve_merge_vmid_bak_${ts}"
+    echo "[*] B 노드 설정 사전 백업 중: $bdir"
+    _pvem_run "$PVE_MERGE_B" "mkdir -p '$bdir/qemu-server' '$bdir/lxc' '$bdir/firewall' && cp -a /etc/pve/qemu-server/* '$bdir/qemu-server/' 2>/dev/null; cp -a /etc/pve/lxc/* '$bdir/lxc/' 2>/dev/null; cp -a /etc/pve/firewall/* '$bdir/firewall/' 2>/dev/null; cp -a /etc/pve/storage.cfg '$bdir/' 2>/dev/null; lvs > '$bdir/lvs.before.txt' 2>/dev/null; true"
+
+    local old_id new_id gtype gst gname
+    while IFS="$(printf '\t')" read -r old_id new_id gtype gst gname; do
+        [ -z "$old_id" ] && continue
+        CYN1; echo ""; echo ">>> 처리 중: [$gtype] $old_id ($gname) -> $new_id"; NC
+
+        # 실행 중이면 정지
+        if [ "$gst" = "running" ]; then
+            echo "  - 게스트 정지 시도..."
+            if [ "$gtype" = "qemu" ]; then
+                _pvem_run "$PVE_MERGE_B" "qm shutdown $old_id --timeout 60" || { RED1; echo "  [FAIL] 정지 실패, 건너뜀"; NC; continue; }
+            else
+                _pvem_run "$PVE_MERGE_B" "pct shutdown $old_id --timeout 60" || { RED1; echo "  [FAIL] 정지 실패, 건너뜀"; NC; continue; }
+            fi
+        fi
+
+        # LVM rename (다른 VM이 참조 중인 base- 볼륨은 안전상 자동 제외)
+        _pvem_run "$PVE_MERGE_B" "
+            ext_refs=\"\$(grep -lE 'base-${old_id}-disk-' /etc/pve/qemu-server/*.conf /etc/pve/lxc/*.conf 2>/dev/null | grep -v '/${old_id}\.conf$' || true)\"
+            lvs --noheadings -o vg_name,lv_name 2>/dev/null | awk '\$2 ~ /^(vm|base|subvol)-${old_id}-/{print \$1\"|\"\$2}' | while IFS='|' read -r vg lv; do
+                [ -z \"\$lv\" ] && continue
+                case \"\$lv\" in
+                    base-*)
+                        if [ -n \"\$ext_refs\" ]; then
+                            echo \"  - [SKIP] \${vg}/\${lv} (외부 VM 참조 중 -> 보호)\"
+                            continue
+                        fi
+                        ;;
+                esac
+                new_lv=\"\$(printf '%s' \"\$lv\" | sed -E 's/^(vm|base|subvol)-${old_id}-/\1-${new_id}-/')\"
+                echo \"  - lvrename \${vg}/\${lv} -> \${vg}/\${new_lv}\"
+                lvrename \"\${vg}/\${lv}\" \"\${vg}/\${new_lv}\"
+            done
+        " || { RED1; echo "  [FAIL] LVM rename 오류"; NC; return 1; }
+
+        # ZFS rename
+        _pvem_run "$PVE_MERGE_B" "
+            zfs list -H -o name 2>/dev/null | grep -E '/(vm|base|subvol)-${old_id}-' | while IFS= read -r zv; do
+                [ -z \"\$zv\" ] && continue
+                new_zv=\"\$(printf '%s' \"\$zv\" | sed -E 's#/(vm|base|subvol)-${old_id}-#/\1-${new_id}-#')\"
+                echo \"  - zfs rename \${zv} -> \${new_zv}\"
+                zfs rename \"\$zv\" \"\$new_zv\"
+            done
+        "
+
+        # Directory images rename
+        _pvem_run "$PVE_MERGE_B" "
+            awk '/^[ \t]+path[ \t]+/{print \$2}' /etc/pve/storage.cfg 2>/dev/null | sort -u | while IFS= read -r dp; do
+                [ -d \"\${dp}/images/${old_id}\" ] || continue
+                echo \"  - mv \${dp}/images/${old_id} -> \${dp}/images/${new_id}\"
+                mv \"\${dp}/images/${old_id}\" \"\${dp}/images/${new_id}\"
+                for f in \"\${dp}/images/${new_id}\"/*; do
+                    [ -e \"\$f\" ] || continue
+                    bf=\"\$(basename \"\$f\")\"
+                    nbf=\"\$(printf '%s' \"\$bf\" | sed -E 's/^(vm|base|subvol)-${old_id}-/\1-${new_id}-/')\"
+                    [ \"\$bf\" != \"\$nbf\" ] && mv \"\$f\" \"\${dp}/images/${new_id}/\${nbf}\"
+                done
+            done
+        "
+
+        # conf 이동 및 치환
+        local cdir="/etc/pve/qemu-server"
+        [ "$gtype" = "lxc" ] && cdir="/etc/pve/lxc"
+        _pvem_run "$PVE_MERGE_B" "
+            sed -E \
+                -e 's/(vm|base|subvol)-${old_id}-/\1-${new_id}-/g' \
+                -e 's#/${old_id}/#/${new_id}/#g' \
+                '${cdir}/${old_id}.conf' > '${cdir}/${new_id}.conf' && \
+            rm -f '${cdir}/${old_id}.conf'
+            [ -f '/etc/pve/firewall/${old_id}.fw' ] && mv '/etc/pve/firewall/${old_id}.fw' '/etc/pve/firewall/${new_id}.fw'
+            true
+        "
+        GRN1; echo "  [OK] $old_id -> $new_id 완료"; NC
+    done < "$PVE_MERGE_PLAN_FILE"
+
+    rm -f "$PVE_MERGE_PLAN_FILE"
+    echo ""
+    GRN1; echo "[완료] B 노드 VMID 일괄 변경이 끝났습니다! (백업: $bdir)"; NC
+    echo "  -> 이제 2단계(일괄 점검)를 다시 실행해 충돌 0건인지 확인하세요."
+}
+
+# 5단계: 클러스터 합치기 사전 검토 (Dry-Run, 100% 읽기 전용)
+pve_merge_join_dryrun() {
+    _pvem_require_ready || return 1
+
+    CYN1; echo "======================================================================"
+    echo " [5단계] 클러스터 합치기 사전 검토 (DRY-RUN - 실제 변경 없음)"
+    echo "   A (Master)  : $PVE_MERGE_A"
+    echo "   B (Joining) : $PVE_MERGE_B"
+    echo "======================================================================"; NC
+
+    local hn_a hn_b ip_a cl_a cl_b
+    hn_a="$(_pvem_run "$PVE_MERGE_A" 'hostname -s')"
+    hn_b="$(_pvem_run "$PVE_MERGE_B" 'hostname -s')"
+    ip_a="$(_pvem_run "$PVE_MERGE_A" 'hostname -I 2>/dev/null | tr " " "\n" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | head -n1')"
+    cl_a="$(_pvem_run "$PVE_MERGE_A" '[ -f /etc/pve/corosync.conf ] && echo CLUSTER || echo STANDALONE')"
+    cl_b="$(_pvem_run "$PVE_MERGE_B" '[ -f /etc/pve/corosync.conf ] && echo CLUSTER || echo STANDALONE')"
+
+    echo "[사전 상태]"
+    echo "  - A: node=$hn_a  ip=$ip_a  mode=$cl_a"
+    echo "  - B: node=$hn_b  mode=$cl_b"
+    [ "$cl_a" = "STANDALONE" ] && { YEL1; echo "  [필요] A 노드에서 먼저 'pvecm create <클러스터명>' 실행 필요"; NC; }
+    [ "$cl_b" = "CLUSTER" ] && { RED1; echo "  [차단] B 노드가 기존 클러스터에 속해 있음 -> 먼저 B 노드 'node reset' (corosync 초기화) 필요!"; NC; }
+
+    echo ""
+    echo "[합치기 실행 시 B 노드($PVE_MERGE_B)에서 수행될 작업 순서]"
+    local b_confs
+    b_confs="$(_pvem_run "$PVE_MERGE_B" 'ls -1 /etc/pve/qemu-server/* /etc/pve/lxc/* 2>/dev/null || true')"
+    local b_cnt
+    b_cnt="$(printf '%s\n' "$b_confs" | grep -c '/' 2>/dev/null)"
+    echo "  1. B 노드 설정 전체 백업 -> /root/pve_merge_join_<시각>/"
+    echo "  2. B 노드 게스트 conf 파일 ${b_cnt:-0}개 임시 이동 (빈 노드 상태 만들기)"
+    echo "  3. B 노드에서 조인 실행: pvecm add ${ip_a}"
+    echo "  4. 조인 확인 후 백업된 conf 를 /etc/pve/nodes/${hn_b}/{qemu-server,lxc}/ 로 원복"
+    echo "  5. B 전용 스토리지 블록을 /etc/pve/storage.cfg 에 병합:"
+
+    local st_a st_b sname
+    st_a="$(_pvem_parse_storages "$PVE_MERGE_A" | cut -d'|' -f1)"
+    st_b="$(_pvem_parse_storages "$PVE_MERGE_B" | cut -d'|' -f1)"
+    while IFS= read -r sname; do
+        [ -z "$sname" ] && continue
+        if ! printf '%s\n' "$st_a" | grep -qx "$sname"; then
+            CYN1; echo "     + 스토리지 병합 대상: $sname (nodes $hn_b)"; NC
+        fi
+    done <<EOF
+$st_b
+EOF
+    echo ""
+    GRN1; echo "[DRY-RUN 완료] 실제 변경은 수행되지 않았습니다."; NC
+}
+
+# 6단계: 클러스터 합치기 실행 (conf 임시이동 -> pvecm add -> conf & 스토리지 원복)
+pve_merge_join() {
+    _pvem_require_ready || return 1
+
+    local hn_b ip_a cl_a cl_b
+    hn_b="$(_pvem_run "$PVE_MERGE_B" 'hostname -s')"
+    ip_a="$(_pvem_run "$PVE_MERGE_A" 'hostname -I 2>/dev/null | tr " " "\n" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | head -n1')"
+    cl_a="$(_pvem_run "$PVE_MERGE_A" '[ -f /etc/pve/corosync.conf ] && echo CLUSTER || echo STANDALONE')"
+    cl_b="$(_pvem_run "$PVE_MERGE_B" '[ -f /etc/pve/corosync.conf ] && echo CLUSTER || echo STANDALONE')"
+
+    if [ "$cl_a" != "CLUSTER" ]; then
+        RED1; echo "[!] A 노드($PVE_MERGE_A)가 아직 클러스터가 아닙니다. 먼저 A에서 'pvecm create <이름>' 을 실행하세요."; NC
+        return 1
+    fi
+    if [ "$cl_b" = "CLUSTER" ]; then
+        RED1; echo "[!] B 노드($PVE_MERGE_B)가 이미 다른 클러스터에 속해 있습니다. 먼저 B 노드의 corosync 를 초기화하세요."; NC
+        return 1
+    fi
+
+    # VMID 충돌 0건 재확인
+    local list_a list_b dup
+    list_a="$(_pvem_list_guests "$PVE_MERGE_A" | cut -d'|' -f1)"
+    list_b="$(_pvem_list_guests "$PVE_MERGE_B" | cut -d'|' -f1)"
+    dup="$(comm -12 <(printf '%s\n' "$list_a" | sort -u) <(printf '%s\n' "$list_b" | sort -u) 2>/dev/null | tr '\n' ' ')"
+    if [ -n "${dup// /}" ]; then
+        RED1; echo "[!] 아직 충돌 VMID가 남아 있습니다: $dup (먼저 3~4단계로 VMID를 변경하세요)"; NC
+        return 1
+    fi
+
+    RED1; echo "======================================================================"
+    echo " [6단계 - 주의!] Proxmox 클러스터 합치기 실행"
+    echo "   B($PVE_MERGE_B / $hn_b)  ==>  A($PVE_MERGE_A / $ip_a)"
+    echo "======================================================================"; NC
+    printf "정말로 B 노드의 conf를 임시 이동하고 클러스터에 합치시겠습니까? (JOIN 입력): "
+    local ans
+    read -r ans </dev/tty
+    if [ "$ans" != "JOIN" ]; then
+        YEL1; echo "[취소됨] 클러스터 합치기를 중단했습니다."; NC
+        return 0
+    fi
+
+    local ts bdir
+    ts="$(date +%Y%m%d_%H%M%S)"
+    bdir="/root/pve_merge_join_${ts}"
+
+    echo "[1/4] B 노드 conf 및 storage.cfg 백업 + 임시 이동 ($bdir)"
+    _pvem_run "$PVE_MERGE_B" "
+        mkdir -p '$bdir/qemu-server' '$bdir/lxc' '$bdir/firewall' && \
+        cp -a /etc/pve/storage.cfg '$bdir/storage.cfg' 2>/dev/null; \
+        cp -a /etc/pve/firewall/* '$bdir/firewall/' 2>/dev/null; \
+        mv /etc/pve/qemu-server/* '$bdir/qemu-server/' 2>/dev/null; \
+        mv /etc/pve/lxc/* '$bdir/lxc/' 2>/dev/null; \
+        true
+    " || { RED1; echo "[FAIL] 백업/이동 실패"; NC; return 1; }
+
+    echo "[2/4] B 노드에서 pvecm add $ip_a 실행 (SSH 비밀번호/지문 확인 필요할 수 있음)"
+    if ! _pvem_run_tty "$PVE_MERGE_B" "pvecm add $ip_a"; then
+        RED1; echo "[FAIL] pvecm add 실패! 백업에서 B 노드 conf 를 원복합니다..."; NC
+        _pvem_run "$PVE_MERGE_B" "
+            cp -a '$bdir/qemu-server/'* /etc/pve/qemu-server/ 2>/dev/null; \
+            cp -a '$bdir/lxc/'* /etc/pve/lxc/ 2>/dev/null; true
+        "
+        return 1
+    fi
+
+    echo "[3/4] 조인 성공! B 노드 conf 및 방화벽 원복 중..."
+    sleep 3
+    _pvem_run "$PVE_MERGE_B" "
+        cp -a '$bdir/qemu-server/'*.conf '/etc/pve/nodes/${hn_b}/qemu-server/' 2>/dev/null; \
+        cp -a '$bdir/lxc/'*.conf '/etc/pve/nodes/${hn_b}/lxc/' 2>/dev/null; \
+        cp -a '$bdir/firewall/'*.fw '/etc/pve/firewall/' 2>/dev/null; \
+        true
+    "
+
+    echo "[4/4] B 전용 스토리지 확인 및 안내"
+    YEL1; echo "  * B 노드의 원본 storage.cfg 백업 위치: ${PVE_MERGE_B}:${bdir}/storage.cfg"; NC
+    echo "  * A 노드의 /etc/pve/storage.cfg 에 B 전용 스토리지(nodes $hn_b)가 빠져있다면 병합하세요."
+    echo ""
+    GRN1; echo "[완료] 클러스터 상태 확인:"; NC
+    _pvem_run "$PVE_MERGE_A" "pvecm status; echo; pvecm nodes"
+}
+
+# 7단계: 백업된 conf 비상 원복
+pve_merge_restore_conf() {
+    _pvem_require_state || return 1
+    CYN1; echo "[7단계] B 노드($PVE_MERGE_B) 백업 목록 확인"; NC
+    local baks
+    baks="$(_pvem_run "$PVE_MERGE_B" 'ls -1dt /root/pve_merge_join_* /root/pve_merge_vmid_bak_* 2>/dev/null || true')"
+    if [ -z "$baks" ]; then
+        YEL1; echo "  [!] B 노드에 pve_merge 백업 디렉토리가 없습니다."; NC
+        return 0
+    fi
+    echo "$baks" | nl -w2 -s'. '
+    printf "원복할 백업 전체 경로를 입력하세요 (취소=Enter): "
+    local sel
+    read -r sel </dev/tty
+    [ -z "$sel" ] && return 0
+    local hn_b
+    hn_b="$(_pvem_run "$PVE_MERGE_B" 'hostname -s')"
+    _pvem_run "$PVE_MERGE_B" "
+        cp -a '${sel}/qemu-server/'*.conf '/etc/pve/nodes/${hn_b}/qemu-server/' 2>/dev/null; \
+        cp -a '${sel}/lxc/'*.conf '/etc/pve/nodes/${hn_b}/lxc/' 2>/dev/null; \
+        true
+    "
+    GRN1; echo "[OK] conf 원복 완료 ($sel -> /etc/pve/nodes/${hn_b}/)"; NC
 }
 
 template_copy() {
