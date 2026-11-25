@@ -1263,9 +1263,9 @@ render_item_easy() {
 
     _easy_sync_badges
 
-    # 1. 배지 결정 (Bash 2 내장 case 로 fork 없이 판별)
+    # 1. 배지 결정 (Bash 2 내장 case 로 fork 없이 판별 - 줄 앞/중간 !!! 모두 감지)
     local _trim_cmd="${c_cmd#"${c_cmd%%[![:space:]]*}"}"
-    if [ "${_trim_cmd:0:3}" = "!!!" ] || [[ "$c_cmd" == *"unban --all"* ]] || { [[ "$c_cmd" == *"unban"* ]] && rx_match "$c_cmd" '(unban[[:space:]]+--all)'; }; then
+    if [ "${_trim_cmd:0:3}" = "!!!" ] || case "$c_cmd" in *" !!! "*|*" !!!"|*";!!!"*|*"; !!!"*) true ;; *) false ;; esac || [[ "$c_cmd" == *"unban --all"* ]] || { [[ "$c_cmd" == *"unban"* ]] && rx_match "$c_cmd" '(unban[[:space:]]+--all)'; }; then
         badge="$_EASY_B_WARN"
     else
         case "$c_cmd" in
@@ -1378,11 +1378,10 @@ show_cmd_card() {
 
     _easy_sync_badges
 
-    # 위험 판단 (render_item_easy 와 동일 기준 유지)
-    if rx_match "$cmd" '^[[:space:]]*!!!'; then
+    # 위험 판단 (render_item_easy 와 동일 기준 유지 - 줄 앞/중간 !!! 모두 감지)
+    if rx_match "$cmd" '(^|[[:space:];])!!!([[:space:]]|$)'; then
         is_danger=1
-        cmd="${cmd#*!!!}"
-        cmd="${cmd# }"
+        cmd="$(printf '%s\n' "$cmd" | sed -e 's/^[[:space:]]*!!![[:space:]]*//' -e 's/\([[:space:];]\)!!![[:space:]]*/\1/g')"
         badge="$_EASY_B_WARN"
     elif rx_match "$cmd" '(unban[[:space:]]+--all)'; then
         is_danger=1
@@ -3198,11 +3197,10 @@ menufunc() {
                                 # i (인자 없이 인터랙티브 실행)
                                 skip_vars=1
                             fi
-                            # 실행 승인 (0 또는 3)
-                            if rx_match "$chosen_command" '^[[:space:]]*!!!'; then
+                            # 실행 승인 (0 또는 3) - 줄 앞/중간 !!! 모두 감지 후 쏙 제거
+                            if rx_match "$chosen_command" '(^|[[:space:];])!!!([[:space:]]|$)'; then
                                 cmd_is_danger=1
-                                chosen_command=${chosen_command#* }
-                                chosen_command=${chosen_command#!!!}
+                                chosen_command="$(printf '%s\n' "$chosen_command" | sed -e 's/^[[:space:]]*!!![[:space:]]*//' -e 's/\([[:space:];]\)!!![[:space:]]*/\1/g')"
                             fi
                             cfm=y
                         else
@@ -3213,11 +3211,10 @@ menufunc() {
                                 printf '%s\n' "${sel_desc:-${chosen_desc-}}" | sed -e 's/^/\x1b[1;37m  /' -e 's/$/\x1b[0m/'
                                 echo
                             fi
-                            # Danger 판단
-                            if [ "$(echo "$chosen_command" | awk '{print $1}')" == "!!!" ]; then
+                            # Danger 판단 (줄 앞/중간 어디에 !!! 가 있어도 감지 후 쏙 제거)
+                            if rx_match "$chosen_command" '(^|[[:space:];])!!!([[:space:]]|$)'; then
                                 cmd_is_danger=1
-                                chosen_command=${chosen_command#* }
-                                chosen_command=${chosen_command#!!!}
+                                chosen_command="$(printf '%s\n' "$chosen_command" | sed -e 's/^[[:space:]]*!!![[:space:]]*//' -e 's/\([[:space:];]\)!!![[:space:]]*/\1/g')"
                                 echo -e "--> \x1b[1;31m${chosen_command//@@//}\x1b[0m"
                                 echo
                                 printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
