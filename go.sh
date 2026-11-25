@@ -265,6 +265,8 @@ golang_filter() { # $1 = kr|en   (성공 0 / 실패 1)
             else if (s ~ /^#h /)   { t="D"; sd="kr"; n="#h " substr(s,4) }
             else if (s ~ /^#e /)   { t="C"; sd="en"; n="# "   substr(s,4) }
             else if (s ~ /^# /)    { t="C"; sd="kr"; n="# "   substr(s,3) }
+            else if (s ~ /^!!! :e /) { t="L"; sd="en"; n="!!! : " substr(s,8) }
+            else if (s ~ /^!!! : /)  { t="L"; sd="kr"; n="!!! : " substr(s,7) }
             else if (s ~ /^:e /)   { t="L"; sd="en"; n=": "   substr(s,4) }
             else if (s ~ /^: /)    { t="L"; sd="kr"; n=": "   substr(s,3) }
             else                   { t="X"; sd="";  n=s }
