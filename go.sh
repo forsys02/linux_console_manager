@@ -2698,6 +2698,24 @@ menufunc() {
                             [ "$_vp_h" -lt 5 ] && _vp_h=5
 
                             # 전체 항목 렌더링 (페이지 분할 없이 스크롤 뷰포트에서 슬라이싱)
+                            # [규칙] 널명령(: 라벨) 색상: 256색 터미널=금색(220), ANSI 16색=밝은 노란색(1;33)
+                            local _nullabel_clr='\x1b[1;33m' _has_256c=0 _tc_n=""
+                            case "${COLORTERM:-}" in
+                                truecolor|24bit) _has_256c=1 ;;
+                            esac
+                            if [ "$_has_256c" -eq 0 ]; then
+                                case "${TERM:-}" in
+                                    *256color*|*truecolor*|*direct*|alacritty|kitty|xterm-kitty|wezterm|foot*)
+                                        _has_256c=1 ;;
+                                    *)
+                                        _tc_n="$(tput colors 2>/dev/null)"
+                                        case "$_tc_n" in
+                                            [0-9]*) [ "$_tc_n" -ge 256 ] 2>/dev/null && _has_256c=1 ;;
+                                        esac
+                                        ;;
+                                esac
+                            fi
+                            [ "$_has_256c" -eq 1 ] && _nullabel_clr='\x1b[1;38;5;220m'
                             local _pending_hdr_lines="" _cl_nl=$'\n'
                             for ((item = 1; item <= ${#chosen_commands[@]}; item++)); do
 
@@ -2835,7 +2853,7 @@ menufunc() {
 
                                     # [규칙] 널명령(: 라벨) 색칠 분리
                                     #  ': 라벨 ; 명령' 의 라벨은 색칠 규칙 대상에서 완전히 제외하고,
-                                    #  명령 부분만 색칠한 뒤 라벨을 파란색으로 감싸 다시 붙인다.
+                                    #  명령 부분만 색칠한 뒤 라벨을 금색(256색) / 노란색(ANSI 16색)으로 감싸 다시 붙인다.
                                     local _pi_pfx _kbadge _rendered _fold_w
                                     _fold_w=$((_term_cols > 30 ? _term_cols - 8 : 22))
                                     [ "$_fold_w" -gt 126 ] && _fold_w=126
@@ -2857,7 +2875,7 @@ menufunc() {
                                         -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' \
                                         -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' \
                                         -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' \
-                                        -e '/^__NULLABEL__/ { x; s/;.*$//; G; s/__NULLABEL__;//; s/\n/;/; s/^\([^;]*\);/\x1b[1;34m\1\x1b[0m;/; }' \
+                                        -e '/^__NULLABEL__/ { x; s/;.*$//; G; s/__NULLABEL__;//; s/\n/;/; s/^\([^;]*\);/'"${_nullabel_clr}"'\1\x1b[0m;/; }' \
                                         -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' \
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
