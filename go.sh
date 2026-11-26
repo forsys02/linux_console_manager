@@ -12384,6 +12384,301 @@ pve_merge_restore_conf() {
     GRN1; echo "[OK] conf 원복 완료 ($sel -> /etc/pve/nodes/${hn_b}/)"; NC
 }
 
+# ==============================================================================
+# Locale & Timezone 자동감지 관리 (Debian/Ubuntu/Alma/Rocky/CentOS 5~9 범용)
+# ==============================================================================
+_locale_detect_os() {
+    _LOC_FAMILY="unknown"
+    _LOC_PRETTY="Unknown Linux"
+    _LOC_PKG=""
+    _LOC_CONF=""
+    _LOC_SYSTEMD=0
+
+    if [ -d /run/systemd/system ] && command -v localectl >/dev/null 2>&1; then
+        _LOC_SYSTEMD=1
+    fi
+
+    if [ -f /etc/os-release ]; then
+        _LOC_PRETTY="$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"')"
+        local _id _id_like _ver_id _major
+        _id="$(grep -E '^ID=' /etc/os-release 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr 'A-Z' 'a-z')"
+        _id_like="$(grep -E '^ID_LIKE=' /etc/os-release 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr 'A-Z' 'a-z')"
+        _ver_id="$(grep -E '^VERSION_ID=' /etc/os-release 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"')"
+        _major="${_ver_id%%.*}"
+        case " $_id $_id_like " in
+            *" debian "*|*" ubuntu "*)
+                _LOC_FAMILY="debian"
+                _LOC_PKG="apt-get"
+                _LOC_CONF="/etc/default/locale"
+                ;;
+            *" rhel "*|*" centos "*|*" fedora "*|*" rocky "*|*" almalinux "*)
+                if command -v dnf >/dev/null 2>&1 || [ "${_major:-0}" -ge 8 ] 2>/dev/null; then
+                    _LOC_FAMILY="rhel8"
+                    _LOC_PKG="dnf"
+                    _LOC_CONF="/etc/locale.conf"
+                elif [ "${_major:-0}" -eq 7 ] 2>/dev/null; then
+                    _LOC_FAMILY="rhel7"
+                    _LOC_PKG="yum"
+                    _LOC_CONF="/etc/locale.conf"
+                else
+                    _LOC_FAMILY="rhel6"
+                    _LOC_PKG="yum"
+                    _LOC_CONF="/etc/sysconfig/i18n"
+                fi
+                ;;
+            *" alpine "*)
+                _LOC_FAMILY="alpine"
+                _LOC_PKG="apk"
+                _LOC_CONF="/etc/profile.d/locale.sh"
+                ;;
+        esac
+    elif [ -f /etc/debian_version ]; then
+        _LOC_FAMILY="debian"
+        _LOC_PRETTY="Debian $(cat /etc/debian_version 2>/dev/null)"
+        _LOC_PKG="apt-get"
+        _LOC_CONF="/etc/default/locale"
+    elif [ -f /etc/redhat-release ]; then
+        _LOC_PRETTY="$(cat /etc/redhat-release 2>/dev/null)"
+        if echo "$_LOC_PRETTY" | grep -qE 'release [56]\.'; then
+            _LOC_FAMILY="rhel6"
+            _LOC_PKG="yum"
+            _LOC_CONF="/etc/sysconfig/i18n"
+        elif echo "$_LOC_PRETTY" | grep -qE 'release 7\.'; then
+            _LOC_FAMILY="rhel7"
+            _LOC_PKG="yum"
+            _LOC_CONF="/etc/locale.conf"
+        else
+            _LOC_FAMILY="rhel8"
+            _LOC_PKG="dnf"
+            _LOC_CONF="/etc/locale.conf"
+        fi
+    fi
+
+    if [ -z "$_LOC_CONF" ]; then
+        if [ -f /etc/default/locale ]; then
+            _LOC_CONF="/etc/default/locale"
+        elif [ -f /etc/locale.conf ]; then
+            _LOC_CONF="/etc/locale.conf"
+        elif [ -f /etc/sysconfig/i18n ]; then
+            _LOC_CONF="/etc/sysconfig/i18n"
+        else
+            _LOC_CONF="/etc/locale.conf"
+        fi
+    fi
+}
+
+locale_status() {
+    _locale_detect_os
+    CYN1; echo "============================================================"
+    echo " [Locale & Timezone 상태 진단]"
+    echo "============================================================"; NC
+    printf "  %-14s : %s (%s)\n" "OS" "$_LOC_PRETTY" "$_LOC_FAMILY"
+    printf "  %-14s : %s (systemd=%s)\n" "패키지/init" "${_LOC_PKG:-none}" "$([ "$_LOC_SYSTEMD" -eq 1 ] && echo 'YES' || echo 'NO')"
+    printf "  %-14s : %s\n" "실효 설정파일" "$_LOC_CONF"
+    printf "  %-14s : LANG=%s | LC_ALL=%s\n" "현재 세션" "${LANG:-<empty>}" "${LC_ALL:-<unset>}"
+    printf "  %-14s : %s\n" "현재 시각" "$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
+
+    echo ""
+    YEL1; echo " [1] 실효 로케일 설정 파일 ($_LOC_CONF)"; NC
+    if [ -f "$_LOC_CONF" ]; then
+        sed 's/^/     /' "$_LOC_CONF"
+    else
+        echo "     (파일 없음)"
+    fi
+
+    if [ "$_LOC_SYSTEMD" -eq 1 ]; then
+        echo ""
+        YEL1; echo " [2] localectl / timedatectl"; NC
+        localectl status 2>/dev/null | sed 's/^/     /'
+        timedatectl 2>/dev/null | grep -E 'Local time|Universal time|Time zone|NTP|synchronized' | sed 's/^/     /'
+    fi
+
+    echo ""
+    YEL1; echo " [3] 설치된 ko / en 로케일 (locale -a)"; NC
+    local _avail
+    _avail="$(locale -a 2>/dev/null | grep -iE '^(ko_KR|en_US|C\.UTF-8)' | tr '\n' ' ')"
+    echo "     ${_avail:-(없음)}"
+}
+
+locale_set() {
+    local _mode="$1"
+    shift 2>/dev/null || true
+    local _with_fonts=0
+    local _arg
+    for _arg in "$@"; do
+        case "$_arg" in
+            --fonts|-f) _with_fonts=1 ;;
+        esac
+    done
+
+    local _target _lang_base _label
+    case "$_mode" in
+        ko|kr|han|ko_KR.UTF-8)
+            _target="ko_KR.UTF-8"
+            _lang_base="ko_KR"
+            _label="한글화"
+            ;;
+        en|us|eng|en_US.UTF-8)
+            _target="en_US.UTF-8"
+            _lang_base="en_US"
+            _label="영어화"
+            ;;
+        *)
+            RED1; echo "사용법: locale_set <ko|en> [--fonts]"; NC
+            return 1
+            ;;
+    esac
+
+    if [ "$(id -u)" -ne 0 ]; then
+        RED1; echo "[!] root 권한이 필요합니다. (sudo 또는 root로 실행)"; NC
+        return 1
+    fi
+
+    _locale_detect_os
+    CYN1; echo "============================================================"
+    echo " [$_label 자동 적용] $_target"
+    echo " OS: $_LOC_PRETTY ($_LOC_FAMILY) | 설정파일: $_LOC_CONF"
+    echo "============================================================"; NC
+
+    case "$_LOC_FAMILY" in
+        debian)
+            # 1) locales 패키지 확보
+            if ! dpkg -s locales >/dev/null 2>&1; then
+                YEL1; echo " -> locales 패키지 설치 중..."; NC
+                DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y locales
+            fi
+            # 2) 선택: 한글 폰트
+            if [ "$_with_fonts" -eq 1 ] && [ "$_lang_base" = "ko_KR" ]; then
+                YEL1; echo " -> 한글 폰트(fonts-nanum, fonts-noto-cjk) 설치 중..."; NC
+                DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-nanum fonts-noto-cjk 2>/dev/null || \
+                DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-nanum 2>/dev/null || true
+                command -v fc-cache >/dev/null 2>&1 && fc-cache -fv >/dev/null 2>&1 || true
+            fi
+            # 3) /etc/locale.gen 주석 해제 및 생성
+            if [ -f /etc/locale.gen ]; then
+                if grep -qE "^[#[:space:]]*${_target}[[:space:]]+UTF-8" /etc/locale.gen; then
+                    sed -i "s/^[#[:space:]]*${_target}[[:space:]]\+UTF-8/${_target} UTF-8/" /etc/locale.gen
+                else
+                    echo "${_target} UTF-8" >> /etc/locale.gen
+                fi
+            fi
+            YEL1; echo " -> locale-gen 실행 중..."; NC
+            locale-gen "$_target" 2>/dev/null || locale-gen
+            # 4) 영구 설정 반영 (충돌 방지: 기존 LC_ALL 제거 후 LANG 설정)
+            if [ -f /etc/default/locale ] && grep -q '^LC_ALL=' /etc/default/locale 2>/dev/null; then
+                sed -i '/^LC_ALL=/d' /etc/default/locale
+            fi
+            if command -v update-locale >/dev/null 2>&1; then
+                update-locale LANG="$_target"
+            elif [ "$_LOC_SYSTEMD" -eq 1 ]; then
+                localectl set-locale LANG="$_target"
+            else
+                echo "LANG=${_target}" > /etc/default/locale
+            fi
+            ;;
+
+        rhel8)
+            # AlmaLinux / Rocky / RHEL / CentOS 8~9 (dnf)
+            local _pkg="glibc-langpack-en"
+            [ "$_lang_base" = "ko_KR" ] && _pkg="glibc-langpack-ko"
+            YEL1; echo " -> dnf install -y $_pkg ..."; NC
+            dnf install -y "$_pkg"
+            if [ "$_lang_base" = "ko_KR" ]; then
+                dnf install -y glibc-gconv-extra 2>/dev/null || true
+            fi
+            if [ "$_LOC_SYSTEMD" -eq 1 ]; then
+                localectl set-locale LANG="$_target"
+            else
+                echo "LANG=\"${_target}\"" > /etc/locale.conf
+            fi
+            ;;
+
+        rhel7)
+            # CentOS / RHEL 7 (yum + systemd)
+            if ! locale -a 2>/dev/null | grep -qi "^${_lang_base}\.utf-\?8$"; then
+                YEL1; echo " -> localedef로 $_target 생성 중..."; NC
+                localedef -i "$_lang_base" -f UTF-8 "$_target"
+            fi
+            if [ "$_LOC_SYSTEMD" -eq 1 ]; then
+                localectl set-locale LANG="$_target"
+            else
+                echo "LANG=\"${_target}\"" > /etc/locale.conf
+            fi
+            ;;
+
+        rhel6)
+            # 구버전 CentOS / RHEL 5~6 (non-systemd, /etc/sysconfig/i18n)
+            if ! locale -a 2>/dev/null | grep -qi "^${_lang_base}\.utf-\?8$"; then
+                YEL1; echo " -> localedef로 $_target 생성 중..."; NC
+                localedef -i "$_lang_base" -f UTF-8 "$_target"
+            fi
+            if [ -f /etc/sysconfig/i18n ]; then
+                cp -a /etc/sysconfig/i18n "/etc/sysconfig/i18n.bak.$(date +%Y%m%d%H%M%S)"
+                if grep -q '^LANG=' /etc/sysconfig/i18n; then
+                    sed -i "s/^LANG=.*/LANG=\"${_target}\"/" /etc/sysconfig/i18n
+                else
+                    echo "LANG=\"${_target}\"" >> /etc/sysconfig/i18n
+                fi
+            else
+                echo "LANG=\"${_target}\"" > /etc/sysconfig/i18n
+            fi
+            ;;
+
+        *)
+            # 기타/최소 리눅스 fallback
+            if ! locale -a 2>/dev/null | grep -qi "^${_lang_base}\.utf-\?8$"; then
+                command -v localedef >/dev/null 2>&1 && localedef -i "$_lang_base" -f UTF-8 "$_target"
+            fi
+            if [ "$_LOC_SYSTEMD" -eq 1 ]; then
+                localectl set-locale LANG="$_target"
+            else
+                echo "LANG=${_target}" > "$_LOC_CONF"
+            fi
+            ;;
+    esac
+
+    # 현재 쉘 세션에도 즉시 적용
+    export LANG="$_target"
+    unset LC_ALL 2>/dev/null || true
+
+    echo ""
+    GRN1; echo "[OK] $_label 완료 -> $_target"; NC
+    echo "  * 실효 설정 ($_LOC_CONF):"
+    [ -f "$_LOC_CONF" ] && sed 's/^/    /' "$_LOC_CONF"
+    echo "  * 새 SSH 접속부터 영구 반영됩니다. (현재 세션 적용 완료: LANG=$LANG)"
+}
+
+timezone_set() {
+    local _tz="${1:-Asia/Seoul}"
+    if [ "$(id -u)" -ne 0 ]; then
+        RED1; echo "[!] root 권한이 필요합니다."; NC
+        return 1
+    fi
+    if [ ! -f "/usr/share/zoneinfo/${_tz}" ]; then
+        RED1; echo "[!] 존재하지 않는 타임존입니다: $_tz"; NC
+        echo "    예시: Asia/Seoul, UTC, America/New_York"
+        return 1
+    fi
+
+    _locale_detect_os
+    if [ "$_LOC_SYSTEMD" -eq 1 ] && command -v timedatectl >/dev/null 2>&1; then
+        timedatectl set-timezone "$_tz"
+    else
+        ln -snf "/usr/share/zoneinfo/${_tz}" /etc/localtime
+        [ -f /etc/timezone ] && echo "$_tz" > /etc/timezone
+        if [ -f /etc/sysconfig/clock ]; then
+            if grep -q '^ZONE=' /etc/sysconfig/clock; then
+                sed -i "s|^ZONE=.*|ZONE=\"${_tz}\"|" /etc/sysconfig/clock
+            else
+                echo "ZONE=\"${_tz}\"" >> /etc/sysconfig/clock
+            fi
+        fi
+    fi
+
+    GRN1; echo "[OK] 타임존 설정 완료: $_tz"; NC
+    echo "  * 현재 시각: $(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
+}
+
 template_copy() {
     local template=$1 && local file_path=$2 && [ -f $file_path ] && rbackup $file_path
     local file_dir
