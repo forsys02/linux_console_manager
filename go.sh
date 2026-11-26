@@ -2875,7 +2875,7 @@ menufunc() {
                                         -e '/^#/! s/\(unsetvar\|unset\|stopped\|stop\|stopall\|allstop\|download\|\<down\>\|disable\|disabled\)/\x1b[31m\1\x1b[0m/g' \
                                         -e '/^#/! s/\(restart\|reload\|autostart\|startall\|start\|update\|upgrade\|\<up\>\|enable\|enabled\)/\x1b[1;32m\1\x1b[0m/g' \
                                         -e '/^#/! s/\(\.\.\.\|;;\)/\x1b[1;36m\1\x1b[0m/g' \
-                                        -e '/^__NULLABEL__/ { x; s/;.*$//; G; s/__NULLABEL__;//; s/\n/;/; s/^\([^;]*\);/'"${_nullabel_clr}"'\1\x1b[0m;/; }' \
+                                        -e '/^__NULLABEL__/ { x; s/;.*$//; s/@@@@//g; s/@@@//g; G; s/__NULLABEL__;//; s/\n/;/; s/^\([^;]*\);/'"${_nullabel_clr}"'\1\x1b[0m;/; }' \
                                         -e '/^ *#/!b a' -e 's/\(\x1b\[0m\)/\x1b[1;36m/g' -e ':a' \
                                         -e 's/# \(.*\)/\x1b[1;36m# \1\x1b[0m/' \
                                         -e 's/#$/\x1b[1;36m#\x1b[0m/')"
