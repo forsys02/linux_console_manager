@@ -2801,39 +2801,42 @@ menufunc() {
                                 else
                                     # 기존 명령어 모드 렌더링
                                     prev_comment=""
-                                    # 명령구문에서 파일경로 추출 /dev /proc 제외한 일반경로 // 주석문 제외
+                                    # 명령구문에서 파일경로 추출 (실제 시스템 경로만, sed패턴/와일드카드/가상FS 제외)
                                     file_paths="$(echo "$c_cmd" | awk '
 /^[[:space:]]*#/ { next }
 {
     for (i = 1; i <= NF; i++) {
         token = $i
-        gsub(/^["'"'"']|["'"'"']$/, "", token)
+        gsub(/^["'"'"'(]+|["'"'"'),;]+$/, "", token)
         gsub(/[^a-zA-Z0-9\/_.-]+$/, "", token)
-        if (token ~ /\$/) continue
+        if (token ~ /[\$\*\?\[\]=<>|]/) continue
         if (token ~ /^https?:\/\//) continue
-        if (token ~ /^\/[^[:space:]]+$/ &&
-            token ~ /\/[^\/]+\/[^\/]+/ &&
-            token !~ /^\/dev\// &&
-            token !~ /^\/proc\// &&
-            token !~ /var[A-Z][a-zA-Z0-9_.-]*/) {
-            cmd = "[ -f \"" token "\" ]"
-            if (system(cmd) == 0)
-                print token
+        if (token ~ /^\/(etc|var|usr|opt|home[0-9]*|root|boot|lib|lib64|sbin|bin|srv|mnt|media|script|backup|data)\/[^[:space:]]+$/ &&
+            token !~ /var[A-Z][a-zA-Z0-9_.-]*/ &&
+            token !~ /\/$/) {
+            print length(token), token
         }
     }
-}')"
+}' | sort -rnk1,1 | awk '!seen[$2]++ { print $2 }')"
                                     _cl_ifs="$IFS"
                                     IFS=$' \n'
-                                    processed_paths=""
+                                    _fp_i=0
+                                    _fp_paths=""
                                     for file_path in $file_paths; do
-                                        if ! echo "$processed_paths" | grep -q -F "$file_path"; then
-                                            [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
-                                            c_cmd="${c_cmd//$file_path/${file_marker}${file_path}${file_marker}}"
-                                            processed_paths="${processed_paths}${file_path}"$'\n'
-                                        fi
+                                        _fp_i=$((_fp_i + 1))
+                                        c_cmd="${c_cmd//$file_path/__FP_${_fp_i}__}"
+                                        _fp_paths="${_fp_paths}${_fp_i} ${file_path}"$'\n'
+                                    done
+                                    IFS=$'\n'
+                                    for _fp_entry in $_fp_paths; do
+                                        [ -z "$_fp_entry" ] && continue
+                                        _fp_idx="${_fp_entry%% *}"
+                                        file_path="${_fp_entry#* }"
+                                        [ ! -e "$file_path" ] && file_marker="@@@" || file_marker="@@@@"
+                                        c_cmd="${c_cmd//__FP_${_fp_idx}__/${file_marker}${file_path}${file_marker}}"
                                     done
                                     IFS="$_cl_ifs"
-                                    unset -v _cl_ifs
+                                    unset -v _cl_ifs _fp_i _fp_paths _fp_entry _fp_idx
 
                                     # ': [1] 라벨 ; 명령' 또는 ': 1. 라벨 ; 명령' 에서 앞의 중복 번호 제거
                                     case "$c_cmd" in
@@ -2862,7 +2865,7 @@ menufunc() {
                                     _rendered="$(echo "$processed_cmd" | fold -sw "$_fold_w" | sed -e '2,$s/^/    /' \
                                         -e '/^\(: \|!!! : \)/ { h; s/^[^;]*;/__NULLABEL__;/; }' \
                                         -e 's/@@@@\([^ ]*\)@@@@/\x1b[1;37m\1\x1b[0m/g' \
-                                        -e 's/@@@\([^ ]*\)@@@/\x1b[1;30m\1\x1b[0m/g' \
+                                        -e 's/@@@\([^ ]*\)@@@/\x1b[1;30;9m\1\x1b[0m/g' \
                                         -e '/^#/! s/\(var[A-Z][a-zA-Z0-9_@-]*__[a-zA-Z0-9_@.-]*\|var[A-Z][a-zA-Z0-9_@-]*\)/\x1b[1;35m\1\x1b[0m/g' \
                                         -e 's/@space@/ /g' \
                                         -e 's/@colon@/:/g' \
