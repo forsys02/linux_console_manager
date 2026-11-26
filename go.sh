@@ -3714,6 +3714,11 @@ menufunc() {
                             return 0
                             ;;
                         # 화면 프롬프트에 안내되지만 이전에는 case 가 없어 동작하지 않던 키들
+                        conf.)
+                            saveVAR
+                            conf_sec $cmd_choice1
+                            continue
+                            ;;
                         conf | conf1 | confb | confmy | conff | confc | conffc | pconf)
                             saveVAR
                             [ "$cmd_choice" = "conf" ] && [ -z "$cmd_choice1" ] && _CONF_CUR_ITEM="${_cl_last_cur:-1}"
@@ -4214,6 +4219,9 @@ menufunc() {
                     choice=""
 
                 # 메뉴/설정 바로가기 (CMD 화면과 동일하게 동작하도록 통일)
+                elif [ "$choice" = "conf." ]; then
+                    conf_sec $choice1
+
                 elif [ -z "$choice1" ] && case "$choice" in conf | conf1 | confb | confmy | conff | confc | conffc | pconf | str | search | ff | ffc | fffc | format) true ;; *) false ;; esac; then
                     [ "$choice" = "conf" ] && [ -n "${_m_nav_cur:-}" ] && _CONF_CUR_MENU_KEY="${_m_item_keys[$_m_nav_cur]-}"
                     "$choice" $choice1
@@ -8135,6 +8143,17 @@ conf() {
         fi
     fi
     unset -v _CONF_CUR_ITEM _CONF_CUR_MENU_KEY _CONF_FUNC_FILE _CONF_FUNC_LINE
+    savescut && exec "$gofile" "$scut"
+}
+# conf. : 원래 conf 동작 (현재 섹션 첫 줄 편집 후 재시작, 인자 지정 시 해당 섹션 첫 줄)
+conf_sec() {
+    saveVAR
+    unset -v _CONF_CUR_ITEM _CONF_CUR_MENU_KEY _CONF_FUNC_FILE _CONF_FUNC_LINE
+    if [ -n "$1" ]; then
+        vi2 "$envorg" "$1"
+    else
+        vi2 "$envorg" "$scut"
+    fi
     savescut && exec "$gofile" "$scut"
 }
 conf1() {
