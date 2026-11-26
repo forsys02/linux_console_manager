@@ -12442,9 +12442,11 @@ _locale_detect_os() {
         _LOC_CONF="/etc/default/locale"
     elif [ -f /etc/redhat-release ]; then
         _LOC_PRETTY="$(cat /etc/redhat-release 2>/dev/null)"
-        if echo "$_LOC_PRETTY" | grep -qE 'release [56]\.'; then
+        if echo "$_LOC_PRETTY" | grep -qi '^Red Hat Linux release' || \
+           echo "$_LOC_PRETTY" | grep -qE 'release [456]\.' || \
+           { [ "$_LOC_SYSTEMD" -eq 0 ] && [ -f /etc/sysconfig/i18n ]; }; then
             _LOC_FAMILY="rhel6"
-            _LOC_PKG="yum"
+            command -v yum >/dev/null 2>&1 && _LOC_PKG="yum" || _LOC_PKG="rpm"
             _LOC_CONF="/etc/sysconfig/i18n"
         elif echo "$_LOC_PRETTY" | grep -qE 'release 7\.'; then
             _LOC_FAMILY="rhel7"
@@ -12472,21 +12474,23 @@ _locale_detect_os() {
 
 locale_status() {
     _locale_detect_os
-    CYN1; echo "============================================================"
-    echo " [Locale & Timezone 상태 진단]"
-    echo "============================================================"; NC
+    CYN1
+    echo "============================================================"
+    ko " [Locale & Timezone 상태 진단]\n"
+    echo "============================================================"
+    NC
     printf "  %-14s : %s (%s)\n" "OS" "$_LOC_PRETTY" "$_LOC_FAMILY"
-    printf "  %-14s : %s (systemd=%s)\n" "패키지/init" "${_LOC_PKG:-none}" "$([ "$_LOC_SYSTEMD" -eq 1 ] && echo 'YES' || echo 'NO')"
-    printf "  %-14s : %s\n" "실효 설정파일" "$_LOC_CONF"
-    printf "  %-14s : LANG=%s | LC_ALL=%s\n" "현재 세션" "${LANG:-<empty>}" "${LC_ALL:-<unset>}"
-    printf "  %-14s : %s\n" "현재 시각" "$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
+    ko "  패키지/init    : %s (systemd=%s)\n" "${_LOC_PKG:-none}" "$([ "$_LOC_SYSTEMD" -eq 1 ] && echo 'YES' || echo 'NO')"
+    ko "  실효 설정파일  : %s\n" "$_LOC_CONF"
+    ko "  현재 세션      : LANG=%s | LC_ALL=%s\n" "${LANG:-<empty>}" "${LC_ALL:-<unset>}"
+    ko "  현재 시각      : %s\n" "$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
 
     echo ""
-    YEL1; echo " [1] 실효 로케일 설정 파일 ($_LOC_CONF)"; NC
+    YEL1; ko " [1] 실효 로케일 설정 파일 (%s)\n" "$_LOC_CONF"; NC
     if [ -f "$_LOC_CONF" ]; then
         sed 's/^/     /' "$_LOC_CONF"
     else
-        echo "     (파일 없음)"
+        ko "     (파일 없음)\n"
     fi
 
     if [ "$_LOC_SYSTEMD" -eq 1 ]; then
@@ -12497,10 +12501,14 @@ locale_status() {
     fi
 
     echo ""
-    YEL1; echo " [3] 설치된 ko / en 로케일 (locale -a)"; NC
+    YEL1; ko " [3] 설치된 ko / en 로케일 (locale -a)\n"; NC
     local _avail
     _avail="$(locale -a 2>/dev/null | grep -iE '^(ko_KR|en_US|C\.UTF-8)' | tr '\n' ' ')"
-    echo "     ${_avail:-(없음)}"
+    if [ -n "$_avail" ]; then
+        printf "     %s\n" "$_avail"
+    else
+        ko "     (없음)\n"
+    fi
 }
 
 locale_set() {
@@ -12514,45 +12522,49 @@ locale_set() {
         esac
     done
 
-    local _target _lang_base _label
+    local _target _lang_base
     case "$_mode" in
         ko|kr|han|ko_KR.UTF-8)
             _target="ko_KR.UTF-8"
             _lang_base="ko_KR"
-            _label="한글화"
             ;;
         en|us|eng|en_US.UTF-8)
             _target="en_US.UTF-8"
             _lang_base="en_US"
-            _label="영어화"
             ;;
         *)
-            RED1; echo "사용법: locale_set <ko|en> [--fonts]"; NC
+            RED1; ko "사용법: locale_set <ko|en> [--fonts]\n"; NC
             return 1
             ;;
     esac
 
     if [ "$(id -u)" -ne 0 ]; then
-        RED1; echo "[!] root 권한이 필요합니다. (sudo 또는 root로 실행)"; NC
+        RED1; ko "[!] root 권한이 필요합니다. (sudo 또는 root로 실행)\n"; NC
         return 1
     fi
 
     _locale_detect_os
-    CYN1; echo "============================================================"
-    echo " [$_label 자동 적용] $_target"
-    echo " OS: $_LOC_PRETTY ($_LOC_FAMILY) | 설정파일: $_LOC_CONF"
-    echo "============================================================"; NC
+    CYN1
+    echo "============================================================"
+    if [ "$_lang_base" = "ko_KR" ]; then
+        ko " [한글화 자동 적용] %s\n" "$_target"
+    else
+        ko " [영어화 자동 적용] %s\n" "$_target"
+    fi
+    ko " OS: %s (%s) | 설정파일: %s\n" "$_LOC_PRETTY" "$_LOC_FAMILY" "$_LOC_CONF"
+    echo "============================================================"
+    NC
 
     case "$_LOC_FAMILY" in
         debian)
             # 1) locales 패키지 확보
             if ! dpkg -s locales >/dev/null 2>&1; then
-                YEL1; echo " -> locales 패키지 설치 중..."; NC
+                YEL1; ko " -> locales 패키지 설치 중...\n"; NC
                 DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y locales
             fi
             # 2) 선택: 한글 폰트
             if [ "$_with_fonts" -eq 1 ] && [ "$_lang_base" = "ko_KR" ]; then
-                YEL1; echo " -> 한글 폰트(fonts-nanum, fonts-noto-cjk) 설치 중..."; NC
+                YEL1; ko " -> 한글 폰트(fonts-nanum, fonts-noto-cjk) 설치 중...\n"; NC
                 DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-nanum fonts-noto-cjk 2>/dev/null || \
                 DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-nanum 2>/dev/null || true
                 command -v fc-cache >/dev/null 2>&1 && fc-cache -fv >/dev/null 2>&1 || true
@@ -12565,7 +12577,7 @@ locale_set() {
                     echo "${_target} UTF-8" >> /etc/locale.gen
                 fi
             fi
-            YEL1; echo " -> locale-gen 실행 중..."; NC
+            YEL1; ko " -> locale-gen 실행 중...\n"; NC
             locale-gen "$_target" 2>/dev/null || locale-gen
             # 4) 영구 설정 반영 (충돌 방지: 기존 LC_ALL 제거 후 LANG 설정)
             if [ -f /etc/default/locale ] && grep -q '^LC_ALL=' /etc/default/locale 2>/dev/null; then
@@ -12599,7 +12611,7 @@ locale_set() {
         rhel7)
             # CentOS / RHEL 7 (yum + systemd)
             if ! locale -a 2>/dev/null | grep -qi "^${_lang_base}\.utf-\?8$"; then
-                YEL1; echo " -> localedef로 $_target 생성 중..."; NC
+                YEL1; ko " -> localedef로 %s 생성 중...\n" "$_target"; NC
                 localedef -i "$_lang_base" -f UTF-8 "$_target"
             fi
             if [ "$_LOC_SYSTEMD" -eq 1 ]; then
@@ -12610,9 +12622,9 @@ locale_set() {
             ;;
 
         rhel6)
-            # 구버전 CentOS / RHEL 5~6 (non-systemd, /etc/sysconfig/i18n)
+            # 구버전 Red Hat Linux / CentOS 5~6 (non-systemd, /etc/sysconfig/i18n)
             if ! locale -a 2>/dev/null | grep -qi "^${_lang_base}\.utf-\?8$"; then
-                YEL1; echo " -> localedef로 $_target 생성 중..."; NC
+                YEL1; ko " -> localedef로 %s 생성 중...\n" "$_target"; NC
                 localedef -i "$_lang_base" -f UTF-8 "$_target"
             fi
             if [ -f /etc/sysconfig/i18n ]; then
@@ -12645,21 +12657,27 @@ locale_set() {
     unset LC_ALL 2>/dev/null || true
 
     echo ""
-    GRN1; echo "[OK] $_label 완료 -> $_target"; NC
-    echo "  * 실효 설정 ($_LOC_CONF):"
+    GRN1
+    if [ "$_lang_base" = "ko_KR" ]; then
+        ko "[OK] 한글화 완료 -> %s\n" "$_target"
+    else
+        ko "[OK] 영어화 완료 -> %s\n" "$_target"
+    fi
+    NC
+    ko "  * 실효 설정 (%s):\n" "$_LOC_CONF"
     [ -f "$_LOC_CONF" ] && sed 's/^/    /' "$_LOC_CONF"
-    echo "  * 새 SSH 접속부터 영구 반영됩니다. (현재 세션 적용 완료: LANG=$LANG)"
+    ko "  * 새 SSH 접속부터 영구 반영됩니다. (현재 세션 적용 완료: LANG=%s)\n" "$LANG"
 }
 
 timezone_set() {
     local _tz="${1:-Asia/Seoul}"
     if [ "$(id -u)" -ne 0 ]; then
-        RED1; echo "[!] root 권한이 필요합니다."; NC
+        RED1; ko "[!] root 권한이 필요합니다.\n"; NC
         return 1
     fi
     if [ ! -f "/usr/share/zoneinfo/${_tz}" ]; then
-        RED1; echo "[!] 존재하지 않는 타임존입니다: $_tz"; NC
-        echo "    예시: Asia/Seoul, UTC, America/New_York"
+        RED1; ko "[!] 존재하지 않는 타임존입니다: %s\n" "$_tz"; NC
+        ko "    예시: Asia/Seoul, UTC, America/New_York\n"
         return 1
     fi
 
@@ -12678,8 +12696,8 @@ timezone_set() {
         fi
     fi
 
-    GRN1; echo "[OK] 타임존 설정 완료: $_tz"; NC
-    echo "  * 현재 시각: $(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
+    GRN1; ko "[OK] 타임존 설정 완료: %s\n" "$_tz"; NC
+    ko "  * 현재 시각: %s\n" "$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')"
 }
 
 template_copy() {
