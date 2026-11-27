@@ -11711,6 +11711,7 @@ dms() {
     printf '\n'
 }
 
+
 # ==============================================================================
 # 통합 서버 패키지 관리 TUI: pms (Package Manager Studio)
 # - 모든 리눅스/유닉스 배포판 자동 대응:
@@ -13341,6 +13342,7 @@ pms() {
     [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
     printf '\n'
 }
+
 
 # ==============================================================================
 # 통합 사용자·호스팅 계정 관리 TUI: ums (User Manager Studio)
@@ -15141,6 +15143,939 @@ ums() {
                 [ "$_UM_VCNT" -eq 0 ] && continue
                 _um_delete_user "${_UM_VIEW[$_UM_CUR]}"
                 _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+        esac
+    done
+
+    tput cnorm 2>/dev/null
+    stty sane 2>/dev/null
+    [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+    printf '\n'
+}
+
+# ==============================================================================
+# 통합 도커·컴포즈 관리 TUI: dkms (Docker & Compose Manager Studio)
+# - Portainer + Dockge 핵심 기능을 콘솔에서 방향키 + 엔터 + 원키 단축키로 통합 제어
+# - 6개 탭: [1]Containers [2]Stacks(Compose) [3]Images [4]Volumes [5]Networks [6]System&Stats
+# - Compose v2(docker compose) / v1(docker-compose) 자동 판별 + 로컬 compose.yml 자동 스캔
+# - Bash 3.x+ 및 EUC-KR/UTF-8 완벽 호환 (연관배열 미사용, 무깜빡임 델타 렌더링)
+# ==============================================================================
+
+_dk_p() {
+    local _fmt="$1"
+    shift
+    if [ "$_DK_ENC" = "euckr" ] && declare -f _dm_iconv_euckr >/dev/null 2>&1; then
+        printf "$_fmt" "$@" | _dm_iconv_euckr | iconv -f UTF-8 -t EUC-KR//TRANSLIT 2>/dev/null || printf "$_fmt" "$@"
+    else
+        printf "$_fmt" "$@"
+    fi
+}
+
+_dk_pause() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    _dk_p '\n\033[1;33m[아무 키나 누르면 dkms 로 돌아갑니다...]\033[0m'
+    IFS= read -rsn1 _ </dev/tty
+}
+
+_dk_detect_env() {
+    _DK_ENC="utf8"
+    _DK_VER="N/A"
+    _DK_COMPOSE_BIN=""
+    _DK_COMPOSE_VER="N/A"
+    _DK_HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null)"
+    [ -z "$_DK_SCAN_DIRS" ] && _DK_SCAN_DIRS="/data /opt /root /srv /docker /home"
+
+    local _loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$_loc" in
+        *[Ee][Uu][Cc]*[Kk][Rr]*|*[Kk][Oo]_[Kk][Rr]|ko)
+            command -v iconv >/dev/null 2>&1 && _DK_ENC="euckr" ;;
+    esac
+
+    if ! command -v docker >/dev/null 2>&1; then
+        _dk_p '\033[1;31m[오류] docker 명령을 찾을 수 없습니다.\033[0m\n'
+        _dk_p '먼저 [dki] 메뉴에서 Docker 를 설치해 주세요.\n'
+        return 1
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        _dk_p '\033[1;33m[경고] Docker 데몬이 실행 중이 아니거나 권한이 부족합니다.\033[0m\n'
+        local _ans=""
+        read -p "지금 Docker 데몬을 시작할까요? [Y/n]: " _ans </dev/tty
+        if ! printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+            systemctl start docker 2>/dev/null || service docker start 2>/dev/null
+            sleep 2
+        fi
+        if ! docker info >/dev/null 2>&1; then
+            _dk_p '\033[1;31m[실패] Docker 데몬에 연결할 수 없습니다.\033[0m\n'
+            return 1
+        fi
+    fi
+
+    _DK_VER=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "OK")
+    if docker compose version >/dev/null 2>&1; then
+        _DK_COMPOSE_BIN="docker compose"
+        _DK_COMPOSE_VER=$(docker compose version --short 2>/dev/null || echo "v2")
+    elif command -v docker-compose >/dev/null 2>&1; then
+        _DK_COMPOSE_BIN="docker-compose"
+        _DK_COMPOSE_VER=$(docker-compose version --short 2>/dev/null || echo "v1")
+    fi
+    return 0
+}
+
+_dk_compose_run() {
+    local _dir="$1"
+    shift
+    if [ -z "$_DK_COMPOSE_BIN" ]; then
+        _dk_p '\033[1;31m[오류] docker compose / docker-compose 가 설치되어 있지 않습니다.\033[0m\n'
+        return 1
+    fi
+    if [ -n "$_dir" ] && [ -d "$_dir" ]; then
+        ( cd "$_dir" && $_DK_COMPOSE_BIN "$@" )
+    else
+        $_DK_COMPOSE_BIN "$@"
+    fi
+}
+
+_dk_load_summary() {
+    _DK_CNT_RUN=0
+    _DK_CNT_STOP=0
+    _DK_CNT_IMG=0
+    _DK_CNT_VOL=0
+    _DK_CNT_NET=0
+    local _st
+    while IFS= read -r _st; do
+        [ -z "$_st" ] && continue
+        if [ "$_st" = "running" ]; then
+            _DK_CNT_RUN=$((_DK_CNT_RUN + 1))
+        else
+            _DK_CNT_STOP=$((_DK_CNT_STOP + 1))
+        fi
+    done < <(docker ps -a --format '{{.State}}' 2>/dev/null)
+    _DK_CNT_IMG=$(docker images -q 2>/dev/null | wc -l | tr -d ' ')
+    _DK_CNT_VOL=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
+    _DK_CNT_NET=$(docker network ls -q 2>/dev/null | wc -l | tr -d ' ')
+}
+
+_dk_load_tab() {
+    _DK_IDS=()
+    _DK_NAMES=()
+    _DK_STATE=()
+    _DK_COL2=()
+    _DK_COL3=()
+    _DK_META=()
+    _DK_TOTAL=0
+
+    local _line _c1 _c2 _c3 _c4 _c5 _c6 _c7 _dir _f _seen _dup _d _p _st _cf
+    case "$_DK_TAB" in
+        1) # Containers
+            while IFS='|' read -r _c1 _c2 _c3 _c4 _c5 _c6 _c7; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="$_c2"
+                _DK_STATE[$_DK_TOTAL]="$_c3"
+                _DK_COL2[$_DK_TOTAL]="$_c4"
+                _DK_COL3[$_DK_TOTAL]="$_c5"
+                _DK_META[$_DK_TOTAL]="${_c6}|${_c7}"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null)
+            ;;
+        2) # Stacks (Compose: running + local compose.yml scan)
+            _seen=""
+            if [ "$_DK_COMPOSE_BIN" = "docker compose" ]; then
+                while IFS='|' read -r _c1 _c2 _c3; do
+                    [ -z "$_c1" ] && continue
+                    _cf="${_c3%%,*}"
+                    _dir=$(dirname "$_cf" 2>/dev/null)
+                    _DK_IDS[$_DK_TOTAL]="$_dir"
+                    _DK_NAMES[$_DK_TOTAL]="$_c1"
+                    case "$_c2" in
+                        *running*) _DK_STATE[$_DK_TOTAL]="running" ;;
+                        *)         _DK_STATE[$_DK_TOTAL]="stopped" ;;
+                    esac
+                    _DK_COL2[$_DK_TOTAL]="$_c2"
+                    _DK_COL3[$_DK_TOTAL]="${_dir:-$_cf}"
+                    _DK_META[$_DK_TOTAL]="$_cf"
+                    _seen="${_seen}|${_dir}|"
+                    _DK_TOTAL=$((_DK_TOTAL + 1))
+                done < <(docker compose ls -a --format '{{.Name}}|{{.Status}}|{{.ConfigFiles}}' 2>/dev/null)
+            fi
+            # Scan local compose directories (depth <= 3)
+            for _d in $_DK_SCAN_DIRS; do
+                [ -d "$_d" ] || continue
+                while IFS= read -r _f; do
+                    [ -f "$_f" ] || continue
+                    _dir=$(dirname "$_f")
+                    case "$_seen" in *"|${_dir}|"*) continue ;; esac
+                    _p=$(basename "$_dir")
+                    _DK_IDS[$_DK_TOTAL]="$_dir"
+                    _DK_NAMES[$_DK_TOTAL]="$_p"
+                    _DK_STATE[$_DK_TOTAL]="local"
+                    _DK_COL2[$_DK_TOTAL]="stopped (local)"
+                    _DK_COL3[$_DK_TOTAL]="$_dir"
+                    _DK_META[$_DK_TOTAL]="$_f"
+                    _seen="${_seen}|${_dir}|"
+                    _DK_TOTAL=$((_DK_TOTAL + 1))
+                done < <(find "$_d" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
+            done
+            ;;
+        3) # Images
+            while IFS='|' read -r _c1 _c2 _c3 _c4; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="$_c2"
+                case "$_c2" in
+                    *"<none>"*) _DK_STATE[$_DK_TOTAL]="dangling" ;;
+                    *)          _DK_STATE[$_DK_TOTAL]="image" ;;
+                esac
+                _DK_COL2[$_DK_TOTAL]="$_c3"
+                _DK_COL3[$_DK_TOTAL]="$_c4"
+                _DK_META[$_DK_TOTAL]="$_c1"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker images --format '{{.ID}}|{{.Repository}}:{{.Tag}}|{{.Size}}|{{.CreatedSince}}' 2>/dev/null)
+            ;;
+        4) # Volumes
+            while IFS='|' read -r _c1 _c2; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="$_c1"
+                _DK_STATE[$_DK_TOTAL]="volume"
+                _DK_COL2[$_DK_TOTAL]="$_c2"
+                _DK_COL3[$_DK_TOTAL]="/var/lib/docker/volumes/${_c1}/_data"
+                _DK_META[$_DK_TOTAL]="$_c2"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker volume ls --format '{{.Name}}|{{.Driver}}' 2>/dev/null)
+            ;;
+        5) # Networks
+            while IFS='|' read -r _c1 _c2 _c3 _c4; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="$_c2"
+                _DK_STATE[$_DK_TOTAL]="network"
+                _DK_COL2[$_DK_TOTAL]="${_c3}/${_c4}"
+                _DK_COL3[$_DK_TOTAL]="$_c1"
+                _DK_META[$_DK_TOTAL]="$_c3"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>/dev/null)
+            ;;
+        6) # System & Live Stats snapshot
+            while IFS='|' read -r _c1 _c2 _c3 _c4 _c5 _c6; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="$_c1"
+                _DK_STATE[$_DK_TOTAL]="running"
+                _DK_COL2[$_DK_TOTAL]="CPU:${_c2} MEM:${_c4} (${_c3})"
+                _DK_COL3[$_DK_TOTAL]="NET:${_c5} IO:${_c6}"
+                _DK_META[$_DK_TOTAL]="$_c1"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null)
+            ;;
+    esac
+}
+
+_dk_build_view() {
+    _DK_VIEW=()
+    _DK_VCNT=0
+    local _i _q _hay
+    _q=$(printf '%s' "$_DK_SEARCH" | tr '[:upper:]' '[:lower:]')
+    _i=0
+    while [ "$_i" -lt "$_DK_TOTAL" ]; do
+        if [ -z "$_q" ]; then
+            _DK_VIEW[$_DK_VCNT]="$_i"
+            _DK_VCNT=$((_DK_VCNT + 1))
+        else
+            _hay=$(printf '%s %s %s %s' "${_DK_NAMES[$_i]}" "${_DK_COL2[$_i]}" "${_DK_COL3[$_i]}" "${_DK_META[$_i]}" | tr '[:upper:]' '[:lower:]')
+            case "$_hay" in
+                *"$_q"*)
+                    _DK_VIEW[$_DK_VCNT]="$_i"
+                    _DK_VCNT=$((_DK_VCNT + 1))
+                    ;;
+            esac
+        fi
+        _i=$((_i + 1))
+    done
+    [ "$_DK_CUR" -ge "$_DK_VCNT" ] && _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0))
+    [ "$_DK_CUR" -lt 0 ] && _DK_CUR=0
+    [ "$_DK_TOP" -gt "$_DK_CUR" ] && _DK_TOP="$_DK_CUR"
+}
+
+_dk_render_row() {
+    local _vidx="$1" _is_cur="$2"
+    local _idx="${_DK_VIEW[$_vidx]}"
+    local _st="${_DK_STATE[$_idx]}"
+    local _nm="${_DK_NAMES[$_idx]}"
+    local _c2="${_DK_COL2[$_idx]}"
+    local _c3="${_DK_COL3[$_idx]}"
+    local _mark=" " _bg="" _rst='\033[0m' _ico _iclr
+
+    case "$_st" in
+        running)  _ico="●"; _iclr='\033[1;32m' ;;
+        paused)   _ico="◐"; _iclr='\033[1;33m' ;;
+        dangling) _ico="⚠"; _iclr='\033[1;33m' ;;
+        local)    _ico="○"; _iclr='\033[0;36m' ;;
+        image|volume|network) _ico="◆"; _iclr='\033[1;36m' ;;
+        *)        _ico="○"; _iclr='\033[1;31m' ;;
+    esac
+
+    if [ "$_is_cur" = "1" ]; then
+        _mark="▶"
+        _bg='\033[44;1;37m'
+        _iclr='\033[44;1;33m'
+    fi
+
+    # Truncate for clean column alignment
+    [ "${#_nm}" -gt 24 ] && _nm="${_nm:0:23}~"
+    [ "${#_c2}" -gt 26 ] && _c2="${_c2:0:25}~"
+    local _c3_max=$((_DK_COLS - 58))
+    [ "$_c3_max" -lt 16 ] && _c3_max=16
+    [ "${#_c3}" -gt "$_c3_max" ] && _c3="${_c3:0:$((_c3_max - 1))}~"
+
+    _dk_p "${_bg} %s ${_iclr}%s${_rst}${_bg} %-24s  %-26s  %s\033[K${_rst}" "$_mark" "$_ico" "$_nm" "$_c2" "$_c3"
+}
+
+_dk_render_full() {
+    _DK_LINES=$(tput lines 2>/dev/null || echo 24)
+    _DK_COLS=$(tput cols 2>/dev/null || echo 100)
+    [ "$_DK_LINES" -lt 16 ] && _DK_LINES=16
+    [ "$_DK_COLS" -lt 70 ] && _DK_COLS=70
+    _DK_PAGE=$((_DK_LINES - 9))
+    [ "$_DK_PAGE" -lt 5 ] && _DK_PAGE=5
+
+    if [ "$_DK_CUR" -lt "$_DK_TOP" ]; then
+        _DK_TOP="$_DK_CUR"
+    elif [ "$_DK_CUR" -ge $((_DK_TOP + _DK_PAGE)) ]; then
+        _DK_TOP=$((_DK_CUR - _DK_PAGE + 1))
+    fi
+
+    printf '\033[H'
+    # Line 1: Header
+    _dk_p '\033[1;36m◈ Docker & Compose Studio [dkms]\033[0m  \033[1;37m%s\033[0m  Docker:%s  Compose:%s  \033[1;32mRun:%s\033[0m/\033[1;31mStop:%s\033[0m Img:%s Vol:%s Net:%s\033[K\n' \
+        "$_DK_HOST" "$_DK_VER" "$_DK_COMPOSE_VER" "$_DK_CNT_RUN" "$_DK_CNT_STOP" "$_DK_CNT_IMG" "$_DK_CNT_VOL" "$_DK_CNT_NET"
+
+    # Line 2: Tab Bar
+    local _t _tlbl _tbar=""
+    for _t in 1 2 3 4 5 6; do
+        case "$_t" in
+            1) _tlbl="1:Containers" ;;
+            2) _tlbl="2:Stacks(Compose)" ;;
+            3) _tlbl="3:Images" ;;
+            4) _tlbl="4:Volumes" ;;
+            5) _tlbl="5:Networks" ;;
+            6) _tlbl="6:System&Stats" ;;
+        esac
+        if [ "$_t" = "$_DK_TAB" ]; then
+            _tbar="${_tbar}\033[46;1;30m [${_tlbl}] \033[0m "
+        else
+            _tbar="${_tbar}\033[0;37m ${_tlbl} \033[0m "
+        fi
+    done
+    _dk_p "${_tbar}\033[K\n"
+
+    # Line 3: Divider + Search status
+    if [ -n "$_DK_SEARCH" ]; then
+        _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m\033[K\n' "$_DK_SEARCH" "$_DK_VCNT"
+    else
+        _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m (%d건)\033[K\n' "$_DK_VCNT"
+    fi
+
+    # Line 4: Column Header
+    case "$_DK_TAB" in
+        1) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "NAME" "STATUS" "IMAGE" ;;
+        2) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "STACK (PROJECT)" "STATUS" "COMPOSE DIR" ;;
+        3) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "REPOSITORY:TAG" "SIZE" "CREATED" ;;
+        4) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "VOLUME NAME" "DRIVER" "MOUNTPOINT" ;;
+        5) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "NETWORK NAME" "DRIVER/SCOPE" "NETWORK ID" ;;
+        6) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "CONTAINER (LIVE)" "CPU / MEM" "NET / BLOCK IO" ;;
+    esac
+
+    # Lines 5..(5+PAGE-1): List rows
+    local _r=0 _v
+    while [ "$_r" -lt "$_DK_PAGE" ]; do
+        _v=$((_DK_TOP + _r))
+        if [ "$_v" -lt "$_DK_VCNT" ]; then
+            if [ "$_v" -eq "$_DK_CUR" ]; then
+                _dk_render_row "$_v" 1
+            else
+                _dk_render_row "$_v" 0
+            fi
+            printf '\n'
+        else
+            if [ "$_r" -eq 0 ] && [ "$_DK_VCNT" -eq 0 ]; then
+                _dk_p '   \033[0;33m(표시할 항목이 없습니다. Tab/1~6 으로 다른 탭을 보거나 n 으로 스택 생성)\033[0m\033[K\n'
+            else
+                printf '\033[K\n'
+            fi
+        fi
+        _r=$((_r + 1))
+    done
+
+    # Footer: Tab-specific hotkeys
+    _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m\033[K\n'
+    case "$_DK_TAB" in
+        1) _dk_p '\033[1;33m[Enter]\033[0m메뉴 \033[1;32m[s]\033[0mStart/Stop \033[1;36m[R]\033[0m재시작 \033[1;35m[l]\033[0m로그 \033[1;37m[e]\033[0m쉘진입 \033[1;36m[i]\033[0m상세 \033[1;33m[c]\033[0mCompose편집 \033[1;31m[d]\033[0m삭제\033[K\n' ;;
+        2) _dk_p '\033[1;33m[Enter]\033[0m상세 \033[1;32m[u]\033[0mUp-d \033[1;31m[D]\033[0mDown \033[1;36m[R]\033[0m재시작 \033[1;35m[P]\033[0mPull+Up \033[1;33m[v]\033[0mYAML편집 \033[1;37m[l]\033[0m로그 \033[1;32m[n]\033[0m새스택 \033[1;36m[+]\033[0m경로\033[K\n' ;;
+        3) _dk_p '\033[1;33m[Enter/i]\033[0m상세 \033[1;32m[p]\033[0mPull이미지 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용정리(Prune)\033[K\n' ;;
+        4) _dk_p '\033[1;33m[Enter/i]\033[0m상세/마운트 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용볼륨정리(Prune)\033[K\n' ;;
+        5) _dk_p '\033[1;33m[Enter/i]\033[0m상세/서브넷 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용네트워크정리(Prune)\033[K\n' ;;
+        6) _dk_p '\033[1;32m[Enter/t]\033[0m실시간Stats \033[1;36m[i]\033[0m디스크점유(df-v) \033[1;35m[x]\033[0mSystemPrune \033[1;33m[B]\033[0m빌드캐시정리 \033[1;31m[R]\033[0m데몬재시작\033[K\n' ;;
+    esac
+    _dk_p '\033[0;37m[↑↓]이동 [←→/Tab/1-6]탭전환 [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
+    _dk_p '\033[1;32m%s\033[0m\033[K' "${_DK_MSG:-}"
+    _DK_DIRTY=0
+    _DK_PREV_CUR="$_DK_CUR"
+    _DK_PREV_TOP="$_DK_TOP"
+}
+
+_dk_render_delta() {
+    if [ "$_DK_DIRTY" = "1" ] || [ "$_DK_TOP" -ne "$_DK_PREV_TOP" ] || [ "$_DK_CUR" -lt "$_DK_TOP" ] || [ "$_DK_CUR" -ge $((_DK_TOP + _DK_PAGE)) ]; then
+        _dk_render_full
+        return
+    fi
+    if [ "$_DK_PREV_CUR" -ne "$_DK_CUR" ]; then
+        local _r1=$((5 + _DK_PREV_CUR - _DK_TOP))
+        local _r2=$((5 + _DK_CUR - _DK_TOP))
+        printf '\033[%d;1H' "$_r1"
+        _dk_render_row "$_DK_PREV_CUR" 0
+        printf '\033[%d;1H' "$_r2"
+        _dk_render_row "$_DK_CUR" 1
+        _DK_PREV_CUR="$_DK_CUR"
+    fi
+}
+
+_dk_show_help() {
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _dk_p '\033[1;36m◈ 통합 도커·컴포즈 관리 TUI [dkms] 단축키 도움말\033[0m\n\n'
+    _dk_p '  \033[1;37m[공통 이동/탭]\033[0m\n'
+    _dk_p '    ↑/↓, j/k       : 항목 이동 (PgUp/PgDn 페이지 이동)\n'
+    _dk_p '    ←/→, Tab, 1~6  : 6개 탭 즉시 전환 (Containers/Stacks/Images/Volumes/Networks/System)\n'
+    _dk_p '    /              : 현재 탭 키워드 필터 검색 (빈 값으로 Enter = 초기화)\n'
+    _dk_p '    r              : 데이터 새로고침   |   q : 종료\n\n'
+    _dk_p '  \033[1;37m[Tab 1: Containers]\033[0m\n'
+    _dk_p '    Enter : 액션 메뉴  | s : Start/Stop 토글 | R : 재시작 | l : 실시간 로그(Ctrl+C 복귀)\n'
+    _dk_p '    e     : 쉘 즉시접속(bash->sh 폴백) | i : Inspect 요약 | c : Compose YAML 편집 | d : 삭제\n\n'
+    _dk_p '  \033[1;37m[Tab 2: Stacks (Docker Compose)]\033[0m\n'
+    _dk_p '    Enter : 스택 상세(compose ps) | u : up -d | D : down | R : restart | P : pull + up -d 업데이트\n'
+    _dk_p '    v     : compose.yml/.env vi2 편집(+문법검증/반영) | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
+    _dk_p '  \033[1;37m[Tab 3~6: Images / Volumes / Networks / System]\033[0m\n'
+    _dk_p '    i/Enter : 상세정보 | p : 이미지 Pull | d : 개별 삭제 | x : Prune 정리 | t : 실시간 stats\n'
+    _dk_pause
+}
+
+_dk_container_inspect() {
+    local _id="$1" _nm="$2"
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _dk_p '\033[1;36m◈ 컨테이너 상세 정보: %s (%s)\033[0m\n' "$_nm" "$_id"
+    _dk_p '──────────────────────────────────────────────────────────────────────\n'
+    docker inspect --format 'Image      : {{.Config.Image}}
+State      : {{.State.Status}} (Running={{.State.Running}}, Restarting={{.State.Restarting}}, ExitCode={{.State.ExitCode}})
+StartedAt  : {{.State.StartedAt}}
+RestartPol : {{.HostConfig.RestartPolicy.Name}}
+ComposeDir : {{index .Config.Labels "com.docker.compose.project.working_dir"}}
+ComposeFile: {{index .Config.Labels "com.docker.compose.project.config_files"}}
+Networks   : {{range $k, $v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}
+Ports      : {{range $p, $conf := .NetworkSettings.Ports}}{{$p}}->{{range $conf}}{{.HostIp}}:{{.HostPort}} {{end}}{{end}}' "$_id" 2>/dev/null
+    _dk_p '\n\n\033[1;33m[볼륨 마운트]\033[0m\n'
+    docker inspect --format '{{range .Mounts}}  {{.Type}}: {{.Source}} -> {{.Destination}} ({{.Mode}}){{"\n"}}{{end}}' "$_id" 2>/dev/null
+    _dk_p '\033[1;33m[환경변수 (상위 20개)]\033[0m\n'
+    docker inspect --format '{{range .Config.Env}}  {{.}}{{"\n"}}{{end}}' "$_id" 2>/dev/null | head -n 20
+    _dk_pause
+}
+
+_dk_container_action() {
+    local _act="$1" _idx="$2"
+    local _id="${_DK_IDS[$_idx]}" _nm="${_DK_NAMES[$_idx]}" _st="${_DK_STATE[$_idx]}"
+    local _ans _wdir _cfile
+    case "$_act" in
+        menu)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m◈ 컨테이너 액션: %s [%s]\033[0m\n' "$_nm" "$_st"
+            _dk_p '  1) Start / Stop 토글\n  2) Restart (재시작)\n  3) 실시간 로그 (logs -f)\n  4) 컨테이너 쉘 진입 (bash/sh)\n  5) 상세 Inspect 보기\n  6) 소속 Compose YAML 편집\n  7) 컨테이너 삭제 (rm)\n  0) 취소\n'
+            read -p "선택 [0-7]: " _ans </dev/tty
+            case "$_ans" in
+                1) _dk_container_action toggle "$_idx" ;;
+                2) _dk_container_action restart "$_idx" ;;
+                3) _dk_container_action logs "$_idx" ;;
+                4) _dk_container_action exec "$_idx" ;;
+                5) _dk_container_inspect "$_id" "$_nm" ;;
+                6) _dk_container_action compose_edit "$_idx" ;;
+                7) _dk_container_action rm "$_idx" ;;
+            esac
+            return
+            ;;
+        toggle)
+            if [ "$_st" = "running" ]; then
+                docker stop "$_id" >/dev/null 2>&1 && _DK_MSG="✔ 중지 완료: $_nm" || _DK_MSG="✖ 중지 실패: $_nm"
+            else
+                docker start "$_id" >/dev/null 2>&1 && _DK_MSG="✔ 시작 완료: $_nm" || _DK_MSG="✖ 시작 실패: $_nm"
+            fi
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+            ;;
+        restart)
+            docker restart "$_id" >/dev/null 2>&1 && _DK_MSG="✔ 재시작 완료: $_nm" || _DK_MSG="✖ 재시작 실패: $_nm"
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+            ;;
+        logs)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m◈ 실시간 로그: %s (종료: Ctrl+C)\033[0m\n' "$_nm"
+            ( trap 'exit 0' INT; docker logs -f --tail 100 "$_id" )
+            _dk_pause
+            ;;
+        exec)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m◈ 컨테이너 쉘 접속: %s (종료: exit)\033[0m\n' "$_nm"
+            docker exec -it "$_id" bash 2>/dev/null || docker exec -it "$_id" sh
+            _DK_MSG="✔ 쉘 세션 종료: $_nm"
+            ;;
+        inspect)
+            _dk_container_inspect "$_id" "$_nm"
+            ;;
+        compose_edit)
+            _wdir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$_id" 2>/dev/null)
+            _cfile=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$_id" 2>/dev/null)
+            _cfile="${_cfile%%,*}"
+            if [ -n "$_cfile" ] && [ -f "$_cfile" ]; then
+                _dk_stack_edit "$_wdir" "$_cfile"
+            else
+                _DK_MSG="⚠ Compose 기반 컨테이너가 아니거나 YAML 경로를 찾을 수 없습니다: $_nm"
+            fi
+            ;;
+        rm)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;31m⚠ 컨테이너 삭제 확인: %s (%s / 상태=%s)\033[0m\n' "$_nm" "$_id" "$_st"
+            read -p "정말 삭제할까요? [y/N]: " _ans </dev/tty
+            if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                if [ "$_st" = "running" ]; then
+                    docker rm -f "$_id" >/dev/null 2>&1 && _DK_MSG="✔ 강제 삭제 완료: $_nm" || _DK_MSG="✖ 삭제 실패: $_nm"
+                else
+                    docker rm "$_id" >/dev/null 2>&1 && _DK_MSG="✔ 삭제 완료: $_nm" || _DK_MSG="✖ 삭제 실패: $_nm"
+                fi
+                _dk_load_summary; _dk_load_tab; _dk_build_view
+            else
+                _DK_MSG="취소됨: $_nm"
+            fi
+            ;;
+    esac
+}
+
+_dk_stack_edit() {
+    local _dir="$1" _cfile="$2" _target _ans
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _target="$_cfile"
+    if [ -f "${_dir}/.env" ]; then
+        _dk_p '\033[1;36m◈ 편집할 파일 선택 (%s)\033[0m\n' "$_dir"
+        _dk_p '  1) %s\n  2) %s/.env\n  0) 취소\n' "$(basename "$_cfile")" "$_dir"
+        read -p "선택 [1]: " _ans </dev/tty
+        case "$_ans" in
+            0) return ;;
+            2) _target="${_dir}/.env" ;;
+        esac
+    fi
+    if declare -f vi2 >/dev/null 2>&1; then
+        vi2 "$_target"
+    else
+        vi "$_target"
+    fi
+    _dk_p '\n\033[1;36m[문법 검증] compose config -q 실행 중...\033[0m\n'
+    if _dk_compose_run "$_dir" config -q; then
+        _dk_p '\033[1;32m✔ YAML 문법 정상!\033[0m\n'
+        read -p "지금 바로 'compose up -d' 로 반영할까요? [Y/n]: " _ans </dev/tty
+        if ! printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+            _dk_compose_run "$_dir" up -d
+            _DK_MSG="✔ 편집 & up -d 반영 완료: $(basename "$_dir")"
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+        fi
+    else
+        _dk_p '\033[1;31m✖ YAML 문법 오류가 감지되었습니다! 반영을 중단합니다.\033[0m\n'
+    fi
+    _dk_pause
+}
+
+_dk_stack_new() {
+    local _dir _ans _file
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _dk_p '\033[1;36m◈ 새 Docker Compose 스택 만들기\033[0m\n'
+    read -p "스택 디렉터리 경로 (예: /data/docker/myapp): " _dir </dev/tty
+    [ -z "$_dir" ] && return
+    mkdir -p "$_dir" || { _DK_MSG="✖ 디렉터리 생성 실패: $_dir"; return; }
+    _file="${_dir}/compose.yml"
+    if [ ! -f "$_file" ]; then
+        cat >"$_file" <<'EOF'
+services:
+  app:
+    image: nginx:alpine
+    container_name: myapp
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+EOF
+    fi
+    _dk_stack_edit "$_dir" "$_file"
+    case " $_DK_SCAN_DIRS " in
+        *" $(dirname "$_dir") "*) ;;
+        *) _DK_SCAN_DIRS="${_DK_SCAN_DIRS} $(dirname "$_dir")" ;;
+    esac
+    _dk_load_summary; _dk_load_tab; _dk_build_view
+}
+
+_dk_stack_action() {
+    local _act="$1" _idx="$2"
+    local _dir="${_DK_IDS[$_idx]}" _nm="${_DK_NAMES[$_idx]}" _cf="${_DK_META[$_idx]}"
+    local _ans
+    case "$_act" in
+        menu)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m◈ 스택 상세: %s (%s)\033[0m\n' "$_nm" "$_dir"
+            _dk_p '──────────────────────────────────────────────────────────────────────\n'
+            _dk_compose_run "$_dir" ps -a 2>/dev/null
+            _dk_p '\n  1) up -d (기동/반영)    2) down (내리기)    3) restart (재시작)\n'
+            _dk_p '  4) pull + up -d (최신업데이트)  5) YAML/.env 편집(vi2)  6) 통합 로그\n  0) 돌아가기\n'
+            read -p "선택 [0-6]: " _ans </dev/tty
+            case "$_ans" in
+                1) _dk_stack_action up "$_idx" ;;
+                2) _dk_stack_action down "$_idx" ;;
+                3) _dk_stack_action restart "$_idx" ;;
+                4) _dk_stack_action update "$_idx" ;;
+                5) _dk_stack_edit "$_dir" "$_cf" ;;
+                6) _dk_stack_action logs "$_idx" ;;
+            esac
+            return
+            ;;
+        up)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;32m▶ compose up -d: %s (%s)\033[0m\n' "$_nm" "$_dir"
+            _dk_compose_run "$_dir" up -d && _DK_MSG="✔ up -d 완료: $_nm" || _DK_MSG="✖ up -d 실패: $_nm"
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+            _dk_pause
+            ;;
+        down)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;31m⚠ 스택 중지/제거 (compose down): %s (%s)\033[0m\n' "$_nm" "$_dir"
+            read -p "정말 down 할까요? [y/N]: " _ans </dev/tty
+            if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                _dk_compose_run "$_dir" down && _DK_MSG="✔ down 완료: $_nm" || _DK_MSG="✖ down 실패: $_nm"
+                _dk_load_summary; _dk_load_tab; _dk_build_view
+                _dk_pause
+            fi
+            ;;
+        restart)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m▶ compose restart: %s\033[0m\n' "$_nm"
+            _dk_compose_run "$_dir" restart && _DK_MSG="✔ 스택 재시작 완료: $_nm" || _DK_MSG="✖ 재시작 실패: $_nm"
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+            _dk_pause
+            ;;
+        update)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;35m▶ 원클릭 최신 업데이트 (pull + up -d): %s\033[0m\n' "$_nm"
+            if _dk_compose_run "$_dir" pull && _dk_compose_run "$_dir" up -d; then
+                _DK_MSG="✔ pull + up -d 업데이트 완료: $_nm"
+            else
+                _DK_MSG="✖ 업데이트 실패: $_nm"
+            fi
+            _dk_load_summary; _dk_load_tab; _dk_build_view
+            _dk_pause
+            ;;
+        edit)
+            _dk_stack_edit "$_dir" "$_cf"
+            ;;
+        logs)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;36m◈ 스택 통합 로그: %s (종료: Ctrl+C)\033[0m\n' "$_nm"
+            ( trap 'exit 0' INT; _dk_compose_run "$_dir" logs -f --tail 100 )
+            _dk_pause
+            ;;
+    esac
+}
+
+dkms() {
+    _dk_detect_env || return 1
+
+    _DK_TAB=1
+    _DK_CUR=0
+    _DK_TOP=0
+    _DK_PREV_CUR=0
+    _DK_PREV_TOP=0
+    _DK_SEARCH=""
+    _DK_MSG="✔ dkms 준비 완료 (1~6 탭전환, Enter 메뉴, ? 도움말)"
+    _DK_DIRTY=1
+
+    _dk_load_summary
+    _dk_load_tab
+    _dk_build_view
+
+    local _old_trap _k _k2 _k3 _idx _ans _img _ndir
+    _old_trap=$(trap -p INT)
+    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+
+    tput civis 2>/dev/null
+    printf '\033[2J\033[H'
+
+    while true; do
+        _dk_render_delta
+        stty -echo 2>/dev/null
+        IFS= read -rsn1 _k </dev/tty
+
+        # Arrow / Page / Home / End escape sequences
+        if [ "$_k" = $'\x1b' ]; then
+            IFS= read -rsn1 -t 1 _k2 </dev/tty
+            if [ "$_k2" = "[" ]; then
+                IFS= read -rsn1 -t 1 _k3 </dev/tty
+                case "$_k3" in
+                    A) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
+                    B) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
+                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab; _dk_build_view; _DK_DIRTY=1 ;;
+                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab; _dk_build_view; _DK_DIRTY=1 ;;
+                    5) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR - _DK_PAGE)); [ "$_DK_CUR" -lt 0 ] && _DK_CUR=0; _DK_DIRTY=1 ;;
+                    6) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR + _DK_PAGE)); [ "$_DK_CUR" -ge "$_DK_VCNT" ] && _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0)); _DK_DIRTY=1 ;;
+                    H) _DK_CUR=0; _DK_DIRTY=1 ;;
+                    F) _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0)); _DK_DIRTY=1 ;;
+                esac
+            else
+                # Standalone Esc clears search filter
+                if [ -n "$_DK_SEARCH" ]; then
+                    _DK_SEARCH=""; _DK_CUR=0; _DK_TOP=0; _dk_build_view; _DK_DIRTY=1
+                fi
+            fi
+            continue
+        fi
+
+        case "$_k" in
+            q|Q) break ;;
+            $'\t')
+                _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
+                _dk_load_tab; _dk_build_view; _DK_DIRTY=1
+                ;;
+            1|2|3|4|5|6)
+                if [ "$_DK_TAB" != "$_k" ]; then
+                    _DK_TAB="$_k"; _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
+                    _dk_load_tab; _dk_build_view; _DK_DIRTY=1
+                fi
+                ;;
+            k) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
+            j) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
+            \?|h)
+                _dk_show_help; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+            /)
+                tput cnorm 2>/dev/null; stty echo 2>/dev/null
+                _dk_p '\n검색어 입력 (빈 값=초기화): '
+                IFS= read -r _DK_SEARCH </dev/tty
+                _DK_CUR=0; _DK_TOP=0; _dk_build_view; _DK_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            r)
+                _dk_load_summary; _dk_load_tab; _dk_build_view
+                _DK_MSG="✔ 새로고침 완료"
+                _DK_DIRTY=1
+                ;;
+            *)
+                # Tab-specific hotkeys
+                _idx=""
+                [ "$_DK_VCNT" -gt 0 ] && _idx="${_DK_VIEW[$_DK_CUR]}"
+                case "$_DK_TAB" in
+                    1) # Containers
+                        [ -z "$_idx" ] && continue
+                        case "$_k" in
+                            "") _dk_container_action menu "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            s)  _dk_container_action toggle "$_idx"; _DK_DIRTY=1 ;;
+                            R)  _dk_container_action restart "$_idx"; _DK_DIRTY=1 ;;
+                            l)  _dk_container_action logs "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            e)  _dk_container_action exec "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            i)  _dk_container_action inspect "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            c)  _dk_container_action compose_edit "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            d)  _dk_container_action rm "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                        esac
+                        ;;
+                    2) # Stacks
+                        case "$_k" in
+                            n)
+                                _dk_stack_new; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            +)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null
+                                _dk_p '\n현재 스캔 경로: %s\n추가할 경로 입력: ' "$_DK_SCAN_DIRS"
+                                IFS= read -r _ndir </dev/tty
+                                if [ -n "$_ndir" ] && [ -d "$_ndir" ]; then
+                                    _DK_SCAN_DIRS="${_DK_SCAN_DIRS} ${_ndir}"
+                                    _dk_load_tab; _dk_build_view
+                                    _DK_MSG="✔ 스캔 경로 추가: $_ndir"
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            "") [ -n "$_idx" ] && { _dk_stack_action menu "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            u)  [ -n "$_idx" ] && { _dk_stack_action up "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            D)  [ -n "$_idx" ] && { _dk_stack_action down "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            R)  [ -n "$_idx" ] && { _dk_stack_action restart "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            P)  [ -n "$_idx" ] && { _dk_stack_action update "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            v)  [ -n "$_idx" ] && { _dk_stack_action edit "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            l)  [ -n "$_idx" ] && { _dk_stack_action logs "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                        esac
+                        ;;
+                    3) # Images
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ 이미지 상세: %s (%s)\033[0m\n' "${_DK_NAMES[$_idx]}" "${_DK_IDS[$_idx]}"
+                                docker image inspect --format 'RepoTags : {{.RepoTags}}
+Arch/OS  : {{.Os}}/{{.Architecture}}
+Size     : {{.Size}} bytes
+Created  : {{.Created}}
+Cmd      : {{.Config.Cmd}}
+Exposed  : {{.Config.ExposedPorts}}' "${_DK_IDS[$_idx]}" 2>/dev/null
+                                _dk_pause; _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            p)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _img=""
+                                [ -n "$_idx" ] && [ "${_DK_NAMES[$_idx]}" != "<none>:<none>" ] && _img="${_DK_NAMES[$_idx]}"
+                                read -p "Pull 할 이미지명 [기본: ${_img:-nginx:alpine}]: " _ans </dev/tty
+                                [ -z "$_ans" ] && _ans="${_img:-nginx:alpine}"
+                                docker pull "$_ans" && _DK_MSG="✔ Pull 완료: $_ans" || _DK_MSG="✖ Pull 실패: $_ans"
+                                _dk_load_summary; _dk_load_tab; _dk_build_view
+                                _dk_pause; _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            d)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "이미지 삭제 (${_DK_NAMES[$_idx]} / ${_DK_IDS[$_idx]})? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker rmi "${_DK_IDS[$_idx]}" >/dev/null 2>&1 && _DK_MSG="✔ 이미지 삭제 완료" || _DK_MSG="✖ 삭제 실패 (사용 중 이미지)"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            x)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;33m◈ 미사용 이미지 정리 (docker image prune)\033[0m\n'
+                                read -p "1) Dangling(<none>)만 정리  2) 모든 미사용 이미지 정리(-a)  0) 취소 [1]: " _ans </dev/tty
+                                case "$_ans" in
+                                    0) ;;
+                                    2) docker image prune -a -f; _DK_MSG="✔ 모든 미사용 이미지 정리 완료" ;;
+                                    *) docker image prune -f; _DK_MSG="✔ Dangling 이미지 정리 완료" ;;
+                                esac
+                                _dk_load_summary; _dk_load_tab; _dk_build_view
+                                _dk_pause; _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                    4) # Volumes
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ 볼륨 상세: %s\033[0m\n' "${_DK_NAMES[$_idx]}"
+                                docker volume inspect "${_DK_NAMES[$_idx]}" 2>/dev/null
+                                _dk_p '\n\033[1;33m[연결된 컨테이너]\033[0m\n'
+                                docker ps -a --filter "volume=${_DK_NAMES[$_idx]}" --format '  {{.Names}} ({{.Status}})' 2>/dev/null
+                                _dk_pause; _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            d)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "볼륨 삭제 (${_DK_NAMES[$_idx]})? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker volume rm "${_DK_NAMES[$_idx]}" >/dev/null 2>&1 && _DK_MSG="✔ 볼륨 삭제 완료" || _DK_MSG="✖ 삭제 실패 (사용 중 볼륨)"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            x)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "미사용 볼륨을 모두 정리(docker volume prune)할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker volume prune -f
+                                    _DK_MSG="✔ 미사용 볼륨 정리 완료"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                    _dk_pause
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                    5) # Networks
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ 네트워크 상세: %s\033[0m\n' "${_DK_NAMES[$_idx]}"
+                                docker network inspect --format 'Name   : {{.Name}}
+Driver : {{.Driver}}  Scope: {{.Scope}}
+Subnets: {{range .IPAM.Config}}{{.Subnet}} (GW={{.Gateway}}) {{end}}
+Containers:
+{{range $k, $v := .Containers}}  - {{$v.Name}} : {{$v.IPv4Address}}{{"\n"}}{{end}}' "${_DK_IDS[$_idx]}" 2>/dev/null
+                                _dk_pause; _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            d)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "네트워크 삭제 (${_DK_NAMES[$_idx]})? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker network rm "${_DK_IDS[$_idx]}" >/dev/null 2>&1 && _DK_MSG="✔ 네트워크 삭제 완료" || _DK_MSG="✖ 삭제 실패"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            x)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "미사용 네트워크 정리(docker network prune)할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker network prune -f
+                                    _DK_MSG="✔ 미사용 네트워크 정리 완료"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                    _dk_pause
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                    6) # System & Stats
+                        case "$_k" in
+                            ""|t)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ 실시간 Docker Stats (종료: Ctrl+C)\033[0m\n'
+                                ( trap 'exit 0' INT; docker stats )
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            i)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ Docker 디스크 사용량 (docker system df -v)\033[0m\n'
+                                docker system df -v 2>/dev/null | less -RX
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            x)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;31m⚠ docker system prune (중지된 컨테이너·미사용 네트워크·dangling 이미지 정리)\033[0m\n'
+                                read -p "실행할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker system prune -f
+                                    _DK_MSG="✔ system prune 완료"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                    _dk_pause
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            B)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "Docker 빌드 캐시 정리(docker builder prune -f)할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    docker builder prune -f
+                                    _DK_MSG="✔ builder prune 완료"
+                                    _dk_pause
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            R)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "Docker 데몬을 재시작할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null
+                                    sleep 2
+                                    _DK_MSG="✔ Docker 데몬 재시작 완료"
+                                    _dk_load_summary; _dk_load_tab; _dk_build_view
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                esac
                 ;;
         esac
     done
