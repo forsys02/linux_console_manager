@@ -11688,6 +11688,1569 @@ dms() {
     printf '\n'
 }
 
+# ==============================================================================
+# 통합 서버 패키지 관리 TUI: pms (Package Manager Studio)
+# - 모든 리눅스/유닉스 배포판 자동 대응:
+#   dnf / yum / apt / apt-get / pacman / apk / zypper / pkg / rpm / dpkg / pkginfo
+# - 기능: 설치됨 탐색 / 업데이트 조회·개별·전체 업그레이드 / 원격 저장소 검색·설치 /
+#         삭제(핵심 OS 패키지 보호 가드) / 파일목록 / 명령어·경로 역검색(whatprovides) /
+#         소스 레포지토리 관리(목록·활성토글·vi2편집·주요레포추가·캐시갱신·explorer)
+# - Bash 2.x/3.x/4.x/5.x 및 EUC-KR 구서버 완벽 호환 (연관배열 미사용, 무깜빡임 델타 렌더링)
+# ==============================================================================
+
+_pm_detect_env() {
+    _PM_OS="Linux"
+    _PM_MGR="unknown"
+    _PM_LOW="unknown"
+    _PM_REPO_DIR=""
+    _PM_ENC="utf8"
+
+    if [ -f /etc/os-release ]; then
+        _PM_OS=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2); print $2; exit}' /etc/os-release 2>/dev/null)
+    elif [ -f /etc/redhat-release ]; then
+        _PM_OS=$(head -n1 /etc/redhat-release 2>/dev/null)
+    elif [ -f /etc/debian_version ]; then
+        _PM_OS="Debian $(cat /etc/debian_version 2>/dev/null)"
+    else
+        _PM_OS=$(uname -s 2>/dev/null)
+    fi
+    [ -z "$_PM_OS" ] && _PM_OS="Linux"
+
+    # 터미널 인코딩 판별 (EUC-KR 구서버 한글 보호)
+    local _loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$_loc" in
+        *[Ee][Uu][Cc]*[Kk][Rr]*|*[Kk][Oo]_[Kk][Rr]|ko)
+            if command -v iconv >/dev/null 2>&1; then
+                _PM_ENC="euckr"
+            fi ;;
+    esac
+
+    # 상위 패키지 매니저 자동 탐지
+    if command -v dnf >/dev/null 2>&1; then
+        _PM_MGR="dnf"; _PM_LOW="rpm"; _PM_REPO_DIR="/etc/yum.repos.d"
+    elif command -v yum >/dev/null 2>&1; then
+        _PM_MGR="yum"; _PM_LOW="rpm"; _PM_REPO_DIR="/etc/yum.repos.d"
+    elif command -v apt >/dev/null 2>&1; then
+        _PM_MGR="apt"; _PM_LOW="dpkg"; _PM_REPO_DIR="/etc/apt"
+    elif command -v apt-get >/dev/null 2>&1; then
+        _PM_MGR="apt-get"; _PM_LOW="dpkg"; _PM_REPO_DIR="/etc/apt"
+    elif command -v pacman >/dev/null 2>&1; then
+        _PM_MGR="pacman"; _PM_LOW="pacman"; _PM_REPO_DIR="/etc/pacman.d"
+    elif command -v apk >/dev/null 2>&1; then
+        _PM_MGR="apk"; _PM_LOW="apk"; _PM_REPO_DIR="/etc/apk"
+    elif command -v zypper >/dev/null 2>&1; then
+        _PM_MGR="zypper"; _PM_LOW="rpm"; _PM_REPO_DIR="/etc/zypp/repos.d"
+    elif command -v pkg >/dev/null 2>&1; then
+        _PM_MGR="pkg"; _PM_LOW="pkg"
+        [ -d /usr/local/etc/pkg/repos ] && _PM_REPO_DIR="/usr/local/etc/pkg/repos" || _PM_REPO_DIR="/etc/pkg"
+    elif command -v rpm >/dev/null 2>&1; then
+        _PM_MGR="rpm"; _PM_LOW="rpm"; _PM_REPO_DIR="/etc/yum.repos.d"
+    elif command -v dpkg >/dev/null 2>&1; then
+        _PM_MGR="dpkg"; _PM_LOW="dpkg"; _PM_REPO_DIR="/etc/apt"
+    elif command -v pkginfo >/dev/null 2>&1; then
+        _PM_MGR="pkginfo"; _PM_LOW="pkginfo"
+    fi
+}
+
+_pm_p() {
+    local _fmt="$1"
+    shift
+    if [ "$_PM_ENC" = "euckr" ]; then
+        printf "$_fmt" "$@" | _dm_iconv_euckr
+    else
+        printf "$_fmt" "$@"
+    fi
+}
+
+# 핵심 시스템 패키지 보호 판별 (삭제 시 이중 안전 확인)
+_pm_is_critical() {
+    case "$1" in
+        glibc|glibc-*|libc6|libc-bin|bash|coreutils|systemd|systemd-*|init|initscripts|sysvinit*|\
+        openssh|openssh-*|ssh|sshd|dropbear|kernel|kernel-*|linux-image*|grub|grub2*|grub-*|\
+        yum|yum-*|dnf|dnf-*|rpm|rpm-*|apt|apt-*|dpkg|dpkg-*|pacman|apk-tools|zypper|\
+        sudo|passwd|shadow*|pam|libpam*|openssl|openssl-*|util-linux|procps*|iproute*|net-tools|\
+        network*|NetworkManager|e2fsprogs|xfsprogs|lvm2|udev|dbus)
+            return 0 ;;
+    esac
+    return 1
+}
+
+# 주요 서버/인프라 패키지 필터 판별 (f 키 '주요서버' 모드용)
+_pm_is_major() {
+    case "$1" in
+        httpd*|apache2*|nginx*|php*|mariadb*|mysql*|postgresql*|mongodb*|redis*|memcached*|\
+        named*|bind*|postfix*|sendmail*|exim*|dovecot*|vsftpd*|proftpd*|pure-ftpd*|\
+        openssh*|ssh|dropbear|fail2ban*|firewalld*|ufw|iptables*|nftables*|\
+        docker*|containerd*|podman*|haproxy*|keepalived*|certbot*|acme*|openssl*|\
+        samba*|nfs*|cron*|at|rsyslog*|chrony*|ntp*|screen|tmux|vim*|git|curl|wget|python3*|\
+        node*|npm|go|golang*|java*|jdk*|pve-*|proxmox*|tailscale*|wireguard*|openvpn*)
+            return 0 ;;
+    esac
+    return 1
+}
+
+# 데이터 초기화
+_pm_clear_data() {
+    _PM_NAMES=()
+    _PM_VERS=()
+    _PM_DESCS=()
+    _PM_STATES=()
+    _PM_META=()
+    _PM_TOTAL=0
+}
+
+# EUC-KR 환경에서 외부 영문/특수문자 안전화
+_pm_safe_str() {
+    if [ "$_PM_ENC" = "euckr" ]; then
+        printf '%s' "$1" | LC_ALL=C tr -cd '\40-\176'
+    else
+        printf '%s' "$1"
+    fi
+}
+
+# 1) 설치된 패키지 목록 로드
+_pm_load_installed() {
+    _pm_clear_data
+    local _tmp="/tmp/go_pm_inst_$$"
+    rm -f "$_tmp"
+
+    case "$_PM_LOW" in
+        rpm)
+            LC_ALL=C rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' 2>/dev/null \
+                | sort -u -t $'\t' -k1,1 >"$_tmp"
+            ;;
+        dpkg)
+            LC_ALL=C dpkg-query -W -f='${Status}\t${Package}\t${Version}\t${binary:Summary}\n' 2>/dev/null \
+                | awk -F'\t' '$1 ~ /install ok installed/ {print $2"\t"$3"\t"$4}' \
+                | sort -u -t $'\t' -k1,1 >"$_tmp"
+            ;;
+        pacman)
+            LC_ALL=C pacman -Q 2>/dev/null \
+                | awk '{print $1"\t"$2"\t"}' | sort -u >"$_tmp"
+            ;;
+        apk)
+            LC_ALL=C apk list --installed 2>/dev/null \
+                | awk '{
+                    pkg=$1; sub(/-[0-9].*/,"",pkg);
+                    ver=$1; sub(/^[^0-9]*/,"",ver);
+                    desc=""; for(i=4;i<=NF;i++) desc=desc (i>4?" ":"") $i;
+                    print pkg"\t"ver"\t"desc
+                }' | sort -u >"$_tmp"
+            if [ ! -s "$_tmp" ]; then
+                LC_ALL=C apk info -v 2>/dev/null | awk '{print $1"\tinstalled\t"}' | sort -u >"$_tmp"
+            fi
+            ;;
+        pkg)
+            LC_ALL=C pkg info 2>/dev/null \
+                | awk '{
+                    nm=$1; ver=$1;
+                    if (match(nm, /-[0-9]/)) { ver=substr(nm, RSTART+1); nm=substr(nm, 1, RSTART-1); }
+                    desc=""; for(i=2;i<=NF;i++) desc=desc (i>2?" ":"") $i;
+                    print nm"\t"ver"\t"desc
+                }' | sort -u >"$_tmp"
+            ;;
+        pkginfo)
+            LC_ALL=C pkginfo 2>/dev/null \
+                | awk '{nm=$2; desc=""; for(i=3;i<=NF;i++) desc=desc (i>3?" ":"") $i; print nm"\t-\t"desc}' \
+                | sort -u >"$_tmp"
+            ;;
+    esac
+
+    local i=0 _nm _vr _ds
+    while IFS=$'\t' read -r _nm _vr _ds; do
+        [ -n "$_nm" ] || continue
+        _PM_NAMES[$i]="$_nm"
+        _PM_VERS[$i]="${_vr:--}"
+        _PM_DESCS[$i]="$_ds"
+        _PM_STATES[$i]="installed"
+        _PM_META[$i]=""
+        i=$((i + 1))
+    done <"$_tmp"
+    rm -f "$_tmp"
+    _PM_TOTAL=$i
+}
+
+# 2) 업데이트 가능 패키지 목록 로드
+_pm_load_updates() {
+    _pm_clear_data
+    local _tmp="/tmp/go_pm_upd_$$"
+    rm -f "$_tmp"
+
+    case "$_PM_MGR" in
+        dnf|yum)
+            LC_ALL=C "$_PM_MGR" check-update -q 2>/dev/null \
+                | awk 'NF>=3 && $1 !~ /^(Obsoleting|Security|Last|Loaded|Skipping|\*)/ && $1 ~ /\./ {
+                    nm=$1; sub(/\.[^.]+$/,"",nm);
+                    print nm"\t"$2"\t[Repo: "$3"]"
+                }' | sort -u >"$_tmp"
+            ;;
+        apt|apt-get)
+            if command -v apt >/dev/null 2>&1; then
+                LC_ALL=C apt list --upgradable 2>/dev/null \
+                    | awk -F'/' 'NR>1 && NF>=2 {
+                        nm=$1; rest=$2;
+                        split(rest, a, " ");
+                        ver=a[2];
+                        desc=rest;
+                        print nm"\t"ver"\t"desc
+                    }' | sort -u >"$_tmp"
+            else
+                LC_ALL=C apt-get -s upgrade 2>/dev/null \
+                    | awk '/^Inst / {print $2"\t"$4"\t"$3" -> "$4}' | sort -u >"$_tmp"
+            fi
+            ;;
+        pacman)
+            LC_ALL=C pacman -Qu 2>/dev/null \
+                | awk '{print $1"\t"$4"\t"$2" -> "$4}' | sort -u >"$_tmp"
+            ;;
+        apk)
+            LC_ALL=C apk list --upgradable 2>/dev/null \
+                | awk '{print $1"\t"$2"\t"$0}' | sort -u >"$_tmp"
+            ;;
+        zypper)
+            LC_ALL=C zypper -q lu 2>/dev/null \
+                | awk -F'|' 'NF>=5 && $1 ~ /^v/ {
+                    gsub(/^[ \t]+|[ \t]+$/,"",$3);
+                    gsub(/^[ \t]+|[ \t]+$/,"",$4);
+                    gsub(/^[ \t]+|[ \t]+$/,"",$5);
+                    print $3"\t"$5"\t"$4" -> "$5
+                }' | sort -u >"$_tmp"
+            ;;
+        pkg)
+            LC_ALL=C pkg version -l '<' 2>/dev/null \
+                | awk '{print $1"\tupdate\t"$0}' | sort -u >"$_tmp"
+            ;;
+    esac
+
+    local i=0 _nm _vr _ds
+    if [ -f "$_tmp" ]; then
+        while IFS=$'\t' read -r _nm _vr _ds; do
+            [ -n "$_nm" ] || continue
+            _PM_NAMES[$i]="$_nm"
+            _PM_VERS[$i]="${_vr:-update}"
+            _PM_DESCS[$i]="$_ds"
+            _PM_STATES[$i]="upgradable"
+            _PM_META[$i]=""
+            i=$((i + 1))
+        done <"$_tmp"
+        rm -f "$_tmp"
+    fi
+    _PM_TOTAL=$i
+}
+
+# 3) 원격 저장소 패키지 검색
+_pm_load_search() {
+    local kw="$1"
+    _pm_clear_data
+    [ -z "$kw" ] && return 0
+    local _tmp="/tmp/go_pm_srch_$$"
+    rm -f "$_tmp"
+
+    case "$_PM_MGR" in
+        dnf|yum)
+            LC_ALL=C "$_PM_MGR" search "$kw" 2>/dev/null \
+                | awk -F' : ' 'NF>=2 && $1 !~ /^(=|Last|Loaded|Matched|Name)/ {
+                    nm=$1; gsub(/^[ \t]+|[ \t]+$/,"",nm);
+                    arch="";
+                    if (match(nm, /\.[^.]+$/)) { arch=substr(nm, RSTART+1); nm=substr(nm, 1, RSTART-1); }
+                    ds=$2; gsub(/^[ \t]+|[ \t]+$/,"",ds);
+                    if (nm != "") print nm"\t"arch"\t"ds
+                }' | sort -u -t $'\t' -k1,1 >"$_tmp"
+            ;;
+        apt|apt-get)
+            LC_ALL=C apt-cache search "$kw" 2>/dev/null \
+                | awk -F' - ' 'NF>=2 {print $1"\tremote\t"$2}' \
+                | head -n 400 >"$_tmp"
+            ;;
+        pacman)
+            LC_ALL=C pacman -Ss "$kw" 2>/dev/null \
+                | awk '
+                    /^[^ \t]/ {
+                        split($1, a, "/"); nm=a[2]; ver=$2;
+                        getline ds; gsub(/^[ \t]+/,"",ds);
+                        print nm"\t"ver"\t"ds
+                    }' | head -n 400 >"$_tmp"
+            ;;
+        apk)
+            LC_ALL=C apk search -v "$kw" 2>/dev/null \
+                | awk -F' - ' '{
+                    nm=$1; ver="remote";
+                    if (match(nm, /-[0-9]/)) { ver=substr(nm, RSTART+1); nm=substr(nm, 1, RSTART-1); }
+                    print nm"\t"ver"\t"$2
+                }' | head -n 400 >"$_tmp"
+            ;;
+        zypper)
+            LC_ALL=C zypper -q se "$kw" 2>/dev/null \
+                | awk -F'|' 'NF>=4 && $2 !~ /Name/ && $2 !~ /^--/ {
+                    gsub(/^[ \t]+|[ \t]+$/,"",$2);
+                    gsub(/^[ \t]+|[ \t]+$/,"",$3);
+                    gsub(/^[ \t]+|[ \t]+$/,"",$4);
+                    if ($2 != "") print $2"\t"$4"\t"$3
+                }' | head -n 400 >"$_tmp"
+            ;;
+        pkg)
+            LC_ALL=C pkg search "$kw" 2>/dev/null \
+                | awk '{nm=$1; desc=""; for(i=2;i<=NF;i++) desc=desc (i>2?" ":"") $i; print nm"\tremote\t"desc}' \
+                | head -n 400 >"$_tmp"
+            ;;
+        *)
+            # rpm/dpkg 단독 구서버는 설치된 패키지 내에서 검색 폴백
+            _pm_load_installed
+            return 0
+            ;;
+    esac
+
+    local i=0 _nm _vr _ds
+    if [ -f "$_tmp" ]; then
+        while IFS=$'\t' read -r _nm _vr _ds; do
+            [ -n "$_nm" ] || continue
+            _PM_NAMES[$i]="$_nm"
+            _PM_VERS[$i]="${_vr:-remote}"
+            _PM_DESCS[$i]="$_ds"
+            _PM_STATES[$i]="remote"
+            _PM_META[$i]=""
+            i=$((i + 1))
+        done <"$_tmp"
+        rm -f "$_tmp"
+    fi
+    _PM_TOTAL=$i
+}
+
+# 4) 소스 레포지토리 목록 로드 (모든 배포판 대응)
+# _PM_NAMES=레포ID/라벨, _PM_VERS=파일명, _PM_DESCS=설명/URL, _PM_STATES=enabled|disabled, _PM_META=전체파일경로|줄번호
+_pm_load_repos() {
+    _pm_clear_data
+    local _tmp="/tmp/go_pm_repo_$$"
+    rm -f "$_tmp"
+
+    case "$_PM_MGR" in
+        dnf|yum|zypper|rpm)
+            local _rdir="/etc/yum.repos.d"
+            [ "$_PM_MGR" = "zypper" ] && _rdir="/etc/zypp/repos.d"
+            if [ -d "$_rdir" ]; then
+                local _rf
+                for _rf in "$_rdir"/*.repo "$_rdir"/*.repo.disabled; do
+                    [ -f "$_rf" ] || continue
+                    local _bn
+                    _bn=$(basename "$_rf")
+                    awk -v fpath="$_rf" -v bname="$_bn" '
+                        function flush_repo() {
+                            if (rid != "") {
+                                st = (en == "0" || fpath ~ /\.disabled$/) ? "disabled" : "enabled";
+                                info = (rname != "" ? rname : rurl);
+                                if (info == "") info = bname;
+                                print rid "\t" bname "\t" info "\t" st "\t" fpath;
+                            }
+                        }
+                        /^[ \t]*\[[^]]+\]/ {
+                            flush_repo();
+                            rid=$0; gsub(/^[ \t]*\[|\][ \t]*$/, "", rid);
+                            rname=""; rurl=""; en="1";
+                            next;
+                        }
+                        /^[ \t]*name[ \t]*=/ { sub(/^[ \t]*name[ \t]*=[ \t]*/,""); rname=$0; next }
+                        /^[ \t]*enabled[ \t]*=/ { sub(/^[ \t]*enabled[ \t]*=[ \t]*/,""); gsub(/[ \t].*/,""); en=$0; next }
+                        /^[ \t]*(baseurl|mirrorlist|metalink)[ \t]*=/ {
+                            if (rurl == "") { sub(/^[ \t]*[^=]*=[ \t]*/,""); rurl=$0; }
+                            next;
+                        }
+                        END { flush_repo(); }
+                    ' "$_rf" >>"$_tmp"
+                done
+            fi
+            ;;
+        apt|apt-get|dpkg)
+            local _af
+            for _af in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.list.disabled /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.sources.disabled; do
+                [ -f "$_af" ] || continue
+                local _bn
+                _bn=$(basename "$_af")
+                case "$_af" in
+                    *.sources|*.sources.disabled)
+                        local _st="enabled"
+                        case "$_af" in *.disabled) _st="disabled" ;; esac
+                        grep -qiE '^[[:space:]]*Enabled:[[:space:]]*no' "$_af" 2>/dev/null && _st="disabled"
+                        local _uri
+                        _uri=$(awk '/^URIs:/{$1=""; sub(/^[ \t]+/,""); print; exit}' "$_af" 2>/dev/null)
+                        local _su
+                        _su=$(awk '/^Suites:/{$1=""; sub(/^[ \t]+/,""); print; exit}' "$_af" 2>/dev/null)
+                        printf '%s\t%s\t%s (%s)\t%s\t%s\n' "${_bn%.sources*}" "$_bn" "${_uri:-deb822}" "${_su:--}" "$_st" "$_af" >>"$_tmp"
+                        ;;
+                    *)
+                        # .list 파일: deb / # deb 라인 파싱
+                        awk -v fpath="$_af" -v bname="$_bn" '
+                            /^[ \t]*#?[ \t]*deb(-src)?[ \t]+/ {
+                                line=$0;
+                                st = (line ~ /^[ \t]*#/ || fpath ~ /\.disabled$/) ? "disabled" : "enabled";
+                                clean=line; sub(/^[ \t]*#[ \t]*/,"",clean);
+                                # URL 및 suite 추출
+                                split(clean, a, /[ \t]+/);
+                                typ=a[1];
+                                idx=2;
+                                if (a[2] ~ /^\[/) {
+                                    # [arch=amd64 ...] 스킵
+                                    while (idx <= length(a) && a[idx] !~ /\]$/) idx++;
+                                    idx++;
+                                }
+                                url=a[idx]; suite=a[idx+1];
+                                rid=typ ":" suite;
+                                if (rid == ":") rid=bname;
+                                print rid "\t" bname ":" NR "\t" clean "\t" st "\t" fpath "|" NR;
+                            }
+                        ' "$_af" >>"$_tmp"
+                        ;;
+                esac
+            done
+            ;;
+        pacman)
+            if [ -f /etc/pacman.conf ]; then
+                awk '
+                    /^[ \t]*#?\[[^]]+\]/ {
+                        raw=$0;
+                        st = (raw ~ /^[ \t]*#/) ? "disabled" : "enabled";
+                        rid=raw; gsub(/^[ \t]*#?\[|\][ \t]*$/,"",rid);
+                        if (rid != "options") {
+                            print rid "\tpacman.conf:" NR "\t[" rid "] repository\t" st "\t/etc/pacman.conf|" NR;
+                        }
+                    }
+                ' /etc/pacman.conf >>"$_tmp"
+            fi
+            [ -f /etc/pacman.d/mirrorlist ] && printf 'mirrorlist\tmirrorlist\t/etc/pacman.d/mirrorlist\tenabled\t/etc/pacman.d/mirrorlist\n' >>"$_tmp"
+            ;;
+        apk)
+            if [ -f /etc/apk/repositories ]; then
+                awk '
+                    /^[ \t]*#?[ \t]*(https?:|\/)/ {
+                        st = ($0 ~ /^[ \t]*#/) ? "disabled" : "enabled";
+                        clean=$0; sub(/^[ \t]*#[ \t]*/,"",clean);
+                        print "repo#" NR "\trepositories:" NR "\t" clean "\t" st "\t/etc/apk/repositories|" NR;
+                    }
+                ' /etc/apk/repositories >>"$_tmp"
+            fi
+            ;;
+        pkg)
+            local _pf
+            for _pf in /etc/pkg/*.conf /usr/local/etc/pkg/repos/*.conf; do
+                [ -f "$_pf" ] || continue
+                local _bn
+                _bn=$(basename "$_pf")
+                local _st="enabled"
+                grep -qiE 'enabled[[:space:]]*:[[:space:]]*(no|false)' "$_pf" 2>/dev/null && _st="disabled"
+                local _u
+                _u=$(grep -iE 'url[[:space:]]*:' "$_pf" 2>/dev/null | head -n1 | sed 's/^[ \t]*//')
+                printf '%s\t%s\t%s\t%s\t%s\n' "${_bn%.conf}" "$_bn" "${_u:-$_pf}" "$_st" "$_pf" >>"$_tmp"
+            done
+            ;;
+    esac
+
+    local i=0 _nm _vr _ds _st _mt
+    if [ -f "$_tmp" ]; then
+        while IFS=$'\t' read -r _nm _vr _ds _st _mt; do
+            [ -n "$_nm" ] || continue
+            _PM_NAMES[$i]="$_nm"
+            _PM_VERS[$i]="$_vr"
+            _PM_DESCS[$i]="$_ds"
+            _PM_STATES[$i]="${_st:-enabled}"
+            _PM_META[$i]="$_mt"
+            i=$((i + 1))
+        done <"$_tmp"
+        rm -f "$_tmp"
+    fi
+    _PM_TOTAL=$i
+}
+
+# 필터 및 검색 적용 뷰 생성
+_pm_build_view() {
+    _PM_VIEW=()
+    local i=0 v=0 nm ds st
+    local q_low
+    q_low=$(printf '%s' "$_PM_SEARCH" | tr 'A-Z' 'a-z')
+
+    while [ "$i" -lt "$_PM_TOTAL" ]; do
+        nm="${_PM_NAMES[$i]}"
+        ds="${_PM_DESCS[$i]}"
+        st="${_PM_STATES[$i]}"
+
+        if [ "$_PM_MODE" = "installed" ] && [ "$_PM_FILTER" = "major" ]; then
+            _pm_is_major "$nm" || { i=$((i + 1)); continue; }
+        elif [ "$_PM_MODE" = "repos" ]; then
+            if [ "$_PM_FILTER" = "enabled" ] && [ "$st" != "enabled" ]; then
+                i=$((i + 1)); continue
+            elif [ "$_PM_FILTER" = "disabled" ] && [ "$st" != "disabled" ]; then
+                i=$((i + 1)); continue
+            fi
+        fi
+
+        if [ -n "$q_low" ]; then
+            local nm_low ds_low
+            nm_low=$(printf '%s' "$nm" | tr 'A-Z' 'a-z')
+            ds_low=$(printf '%s' "$ds" | tr 'A-Z' 'a-z')
+            case "$nm_low $ds_low" in
+                *"$q_low"*) ;;
+                *) i=$((i + 1)); continue ;;
+            esac
+        fi
+
+        _PM_VIEW[$v]="$i"
+        v=$((v + 1))
+        i=$((i + 1))
+    done
+    _PM_VCNT=$v
+    [ "$_PM_CUR" -ge "$_PM_VCNT" ] && _PM_CUR=$((_PM_VCNT - 1))
+    [ "$_PM_CUR" -lt 0 ] && _PM_CUR=0
+    [ "$_PM_TOP" -gt "$_PM_CUR" ] && _PM_TOP=$_PM_CUR
+}
+
+# 레포 활성/비활성 토글 (Space)
+_pm_toggle_repo() {
+    local idx="$1"
+    local rid="${_PM_NAMES[$idx]}"
+    local st="${_PM_STATES[$idx]}"
+    local mt="${_PM_META[$idx]}"
+    local fpath="${mt%%|*}"
+    local lno=""
+    case "$mt" in
+        *\|*) lno="${mt#*|}" ;;
+    esac
+
+    [ -f "$fpath" ] || { _PM_MSG="⚠ 설정 파일을 찾을 수 없습니다: $fpath"; return 1; }
+
+    local _bak="${fpath}.bak.$(date +%Y%m%d%H%M%S)"
+    cp -a "$fpath" "$_bak" 2>/dev/null
+
+    case "$_PM_MGR" in
+        dnf|yum|zypper|rpm)
+            local _new_val="0" _new_st="disabled"
+            [ "$st" = "disabled" ] && { _new_val="1"; _new_st="enabled"; }
+            case "$fpath" in
+                *.disabled)
+                    local _un="${fpath%.disabled}"
+                    mv -f "$fpath" "$_un" 2>/dev/null && fpath="$_un"
+                    ;;
+            esac
+            awk -v target="$rid" -v nval="$_new_val" '
+                BEGIN { in_sec=0; done_en=0 }
+                /^[ \t]*\[[^]]+\]/ {
+                    if (in_sec && !done_en) { print "enabled=" nval; done_en=1 }
+                    sec=$0; gsub(/^[ \t]*\[|\][ \t]*$/, "", sec);
+                    in_sec = (sec == target) ? 1 : 0;
+                    print; next;
+                }
+                in_sec && /^[ \t]*enabled[ \t]*=/ {
+                    print "enabled=" nval; done_en=1; next;
+                }
+                { print }
+                END { if (in_sec && !done_en) print "enabled=" nval }
+            ' "$fpath" >"${fpath}.pms_tmp" && mv -f "${fpath}.pms_tmp" "$fpath"
+            rm -f "$_bak" 2>/dev/null
+            _PM_MSG="✔ 레포 [${rid}] -> ${_new_st} 전환 완료! (c 키로 캐시 갱신 권장)"
+            ;;
+        apt|apt-get|dpkg)
+            if [ -n "$lno" ]; then
+                if [ "$st" = "enabled" ]; then
+                    awk -v ln="$lno" 'NR==ln { print "# " $0; next } { print }' "$fpath" >"${fpath}.pms_tmp" \
+                        && mv -f "${fpath}.pms_tmp" "$fpath"
+                    _PM_MSG="✔ 레포 [${rid}] 비활성화(주석) 완료! (c 키로 apt update 권장)"
+                else
+                    awk -v ln="$lno" 'NR==ln { sub(/^[ \t]*#[ \t]*/,""); print; next } { print }' "$fpath" >"${fpath}.pms_tmp" \
+                        && mv -f "${fpath}.pms_tmp" "$fpath"
+                    _PM_MSG="✔ 레포 [${rid}] 활성화 완료! (c 키로 apt update 권장)"
+                fi
+                rm -f "$_bak" 2>/dev/null
+            else
+                # deb822 .sources 파일
+                if [ "$st" = "enabled" ]; then
+                    mv -f "$fpath" "${fpath}.disabled" 2>/dev/null
+                    _PM_MSG="✔ ${rid} 비활성화 (.disabled) 완료! (c 키로 apt update 권장)"
+                else
+                    mv -f "$fpath" "${fpath%.disabled}" 2>/dev/null
+                    _PM_MSG="✔ ${rid} 활성화 완료! (c 키로 apt update 권장)"
+                fi
+                rm -f "$_bak" 2>/dev/null
+            fi
+            ;;
+        apk)
+            if [ -n "$lno" ]; then
+                if [ "$st" = "enabled" ]; then
+                    awk -v ln="$lno" 'NR==ln { print "#" $0; next } { print }' "$fpath" >"${fpath}.pms_tmp" \
+                        && mv -f "${fpath}.pms_tmp" "$fpath"
+                    _PM_MSG="✔ APK 레포 #${lno} 비활성화 완료!"
+                else
+                    awk -v ln="$lno" 'NR==ln { sub(/^[ \t]*#[ \t]*/,""); print; next } { print }' "$fpath" >"${fpath}.pms_tmp" \
+                        && mv -f "${fpath}.pms_tmp" "$fpath"
+                    _PM_MSG="✔ APK 레포 #${lno} 활성화 완료!"
+                fi
+                rm -f "$_bak" 2>/dev/null
+            fi
+            ;;
+        *)
+            rm -f "$_bak" 2>/dev/null
+            _PM_MSG="ℹ 이 배포판(${_PM_MGR})은 [e] 키로 vi2 직접 편집을 이용하세요."
+            return 0
+            ;;
+    esac
+    _pm_load_repos
+    _pm_build_view
+}
+
+# 레포 설정 파일 vi2 백업 편집
+_pm_edit_repo() {
+    local idx="$1"
+    local mt="${_PM_META[$idx]}"
+    local fpath="${mt%%|*}"
+    [ -f "$fpath" ] || { _PM_MSG="⚠ 편집할 레포 파일이 없습니다: $fpath"; return 1; }
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    local _bck _ack
+    _bck=$(cksum "$fpath" 2>/dev/null)
+    vi2 "$fpath"
+    _ack=$(cksum "$fpath" 2>/dev/null)
+    if [ "$_bck" != "$_ack" ]; then
+        _pm_p '\n\033[1;33m📝 레포 설정이 변경되었습니다: %s\033[0m\n' "$fpath"
+        _pm_p '지금 저장소 메타데이터 캐시를 갱신할까요? [Y/n]: '
+        local _ans=""
+        IFS= read -r _ans </dev/tty
+        case "$_ans" in
+            n|N) _PM_MSG="✔ 레포 저장 완료 (캐시 미갱신): $(basename "$fpath")" ;;
+            *)   _pm_refresh_cache; _PM_MSG="✔ 레포 저장 및 캐시 갱신 완료!" ;;
+        esac
+    else
+        _PM_MSG="변경 없음: $(basename "$fpath")"
+    fi
+    _pm_load_repos
+    _pm_build_view
+}
+
+# 주요 레포 / 커스텀 레포 추가 마법사 (a 키)
+_pm_add_repo_wizard() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _pm_p '\033[1;36m* 소스 레포지토리 추가 마법사 (OS: %s / PM: %s)\033[0m\n' "$_PM_OS" "$_PM_MGR"
+    printf '%s\n' "--------------------------------------------------------------------"
+    case "$_PM_MGR" in
+        dnf|yum)
+            _pm_p '  \033[1;33m1.\033[0m EPEL 저장소 설치 (epel-release) + yum/dnf-utils\n'
+            _pm_p '  \033[1;33m2.\033[0m CRB / PowerTools 저장소 활성화 (RHEL/Alma/Rocky 8/9)\n'
+            _pm_p '  \033[1;33m3.\033[0m 커스텀 .repo 파일 URL로 추가 (config-manager --add-repo)\n'
+            _pm_p '  \033[1;33m4.\033[0m 새 .repo 파일 직접 생성 후 vi2 편집 (/etc/yum.repos.d/)\n'
+            _pm_p '  \033[0;37m0.\033[0m 취소\n'
+            printf '%s\n' "--------------------------------------------------------------------"
+            _pm_p '선택 [0-4]: '
+            local _sel=""
+            IFS= read -r _sel </dev/tty
+            case "$_sel" in
+                1)
+                    "$_PM_MGR" install -y epel-release yum-utils 2>&1 || "$_PM_MGR" install -y epel-release 2>&1
+                    _pm_pause "EPEL 설치 완료"
+                    _PM_MSG="✔ EPEL 저장소 설치 완료"
+                    ;;
+                2)
+                    if command -v dnf >/dev/null 2>&1; then
+                        dnf config-manager --set-enabled crb 2>&1 || dnf config-manager --set-enabled powertools 2>&1
+                    else
+                        yum-config-manager --enable powertools 2>&1 || yum-config-manager --enable crb 2>&1
+                    fi
+                    _pm_pause "CRB/PowerTools 활성화 완료"
+                    _PM_MSG="✔ CRB/PowerTools 활성화 시도 완료"
+                    ;;
+                3)
+                    _pm_p '추가할 .repo URL 입력: '
+                    local _url=""
+                    IFS= read -r _url </dev/tty
+                    if [ -n "$_url" ]; then
+                        if command -v dnf >/dev/null 2>&1; then
+                            dnf config-manager --add-repo "$_url" 2>&1
+                        else
+                            yum-config-manager --add-repo "$_url" 2>&1
+                        fi
+                        _pm_pause "레포 URL 추가 완료"
+                        _PM_MSG="✔ 커스텀 레포 추가 완료"
+                    fi
+                    ;;
+                4)
+                    _pm_p '새 레포 파일명 (.repo 제외, 예: custom): '
+                    local _rn=""
+                    IFS= read -r _rn </dev/tty
+                    if [ -n "$_rn" ]; then
+                        _rn="${_rn%.repo}"
+                        local _nf="/etc/yum.repos.d/${_rn}.repo"
+                        if [ ! -f "$_nf" ]; then
+                            cat >"$_nf" <<REPOEOF
+[${_rn}]
+name=${_rn} Repository
+baseurl=https://example.com/repo/
+enabled=1
+gpgcheck=0
+REPOEOF
+                        fi
+                        vi2 "$_nf"
+                        _PM_MSG="✔ ${_nf} 편집 완료"
+                    fi
+                    ;;
+                *) _PM_MSG="레포 추가 취소" ;;
+            esac
+            ;;
+        apt|apt-get)
+            _pm_p '  \033[1;33m1.\033[0m Ubuntu universe / multiverse 저장소 활성화 + apt update\n'
+            _pm_p '  \033[1;33m2.\033[0m PPA 저장소 추가 (add-apt-repository ppa:...)\n'
+            _pm_p '  \033[1;33m3.\033[0m 새 .list 파일 생성 후 vi2 편집 (/etc/apt/sources.list.d/)\n'
+            _pm_p '  \033[1;33m4.\033[0m 메인 /etc/apt/sources.list 바로 vi2 편집\n'
+            _pm_p '  \033[0;37m0.\033[0m 취소\n'
+            printf '%s\n' "--------------------------------------------------------------------"
+            _pm_p '선택 [0-4]: '
+            local _sel=""
+            IFS= read -r _sel </dev/tty
+            case "$_sel" in
+                1)
+                    apt-get install -y software-properties-common 2>&1
+                    add-apt-repository -y universe 2>&1
+                    add-apt-repository -y multiverse 2>&1
+                    apt-get update 2>&1
+                    _pm_pause "universe/multiverse 활성화 완료"
+                    _PM_MSG="✔ universe/multiverse 활성화 완료"
+                    ;;
+                2)
+                    _pm_p '추가할 PPA 입력 (예: ppa:ondrej/php): '
+                    local _ppa=""
+                    IFS= read -r _ppa </dev/tty
+                    if [ -n "$_ppa" ]; then
+                        command -v add-apt-repository >/dev/null 2>&1 || apt-get install -y software-properties-common 2>&1
+                        add-apt-repository -y "$_ppa" 2>&1 && apt-get update 2>&1
+                        _pm_pause "PPA 추가 완료"
+                        _PM_MSG="✔ PPA 추가 완료: $_ppa"
+                    fi
+                    ;;
+                3)
+                    _pm_p '새 .list 파일명 (.list 제외, 예: custom): '
+                    local _rn=""
+                    IFS= read -r _rn </dev/tty
+                    if [ -n "$_rn" ]; then
+                        _rn="${_rn%.list}"
+                        local _nf="/etc/apt/sources.list.d/${_rn}.list"
+                        [ ! -f "$_nf" ] && echo "# deb https://example.com/apt stable main" >"$_nf"
+                        vi2 "$_nf"
+                        _PM_MSG="✔ ${_nf} 편집 완료"
+                    fi
+                    ;;
+                4)
+                    vi2 /etc/apt/sources.list
+                    _PM_MSG="✔ /etc/apt/sources.list 편집 완료"
+                    ;;
+                *) _PM_MSG="레포 추가 취소" ;;
+            esac
+            ;;
+        apk)
+            vi2 /etc/apk/repositories
+            _PM_MSG="✔ /etc/apk/repositories 편집 완료"
+            ;;
+        pacman)
+            vi2 /etc/pacman.conf
+            _PM_MSG="✔ /etc/pacman.conf 편집 완료"
+            ;;
+        *)
+            _pm_p '이 배포판(%s)에서는 레포 디렉토리를 직접 열어 편집하세요: %s\n' "$_PM_MGR" "$_PM_REPO_DIR"
+            _pm_pause ""
+            ;;
+    esac
+    if [ "$_PM_MODE" = "repos" ]; then
+        _pm_load_repos
+        _pm_build_view
+    fi
+}
+
+# 잠시 멈춤 헬퍼
+_pm_pause() {
+    local _msg="${1:-}"
+    [ -n "$_msg" ] && _pm_p '\n\033[1;32m✔ %s\033[0m\n' "$_msg"
+    _pm_p '\n아무 키나 누르면 [pms] 화면으로 돌아갑니다...'
+    IFS= read -rsn1 _ </dev/tty 2>/dev/null
+}
+
+# 저장소 메타데이터 캐시 갱신 / 정리 (c 키)
+_pm_refresh_cache() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n'
+    _pm_p '\033[1;36m[캐시 관리] 1) 메타데이터 갱신(update/makecache)  2) 캐시 정리(clean/autoremove)  0) 취소 [기본 1]: \033[0m'
+    local _c=""
+    IFS= read -r _c </dev/tty
+    [ -z "$_c" ] && _c="1"
+    case "$_c" in
+        1)
+            case "$_PM_MGR" in
+                dnf|yum) "$_PM_MGR" makecache 2>&1 ;;
+                apt|apt-get) "$_PM_MGR" update 2>&1 ;;
+                pacman) pacman -Sy 2>&1 ;;
+                apk) apk update 2>&1 ;;
+                zypper) zypper refresh 2>&1 ;;
+                pkg) pkg update 2>&1 ;;
+                *) _pm_p '이 매니저(%s)는 원격 캐시 갱신을 지원하지 않습니다.\n' "$_PM_MGR" ;;
+            esac
+            _pm_pause "저장소 메타데이터 갱신 완료"
+            _PM_MSG="✔ 저장소 캐시 갱신 완료!"
+            ;;
+        2)
+            case "$_PM_MGR" in
+                dnf) dnf clean all 2>&1; dnf autoremove -y 2>&1 ;;
+                yum) yum clean all 2>&1 ;;
+                apt|apt-get) "$_PM_MGR" autoremove -y 2>&1; "$_PM_MGR" clean 2>&1 ;;
+                pacman) pacman -Sc --noconfirm 2>&1 ;;
+                apk) apk cache clean 2>&1 ;;
+                zypper) zypper clean --all 2>&1 ;;
+                pkg) pkg clean -y 2>&1; pkg autoremove -y 2>&1 ;;
+                *) _pm_p '캐시 정리 미지원(%s)\n' "$_PM_MGR" ;;
+            esac
+            _pm_pause "캐시/미사용 패키지 정리 완료"
+            _PM_MSG="✔ 캐시 정리 완료!"
+            ;;
+        *) _PM_MSG="캐시 관리 취소" ;;
+    esac
+}
+
+# 패키지 상세 정보 보기 (v / Enter)
+_pm_show_info() {
+    local pkg="$1"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    {
+        printf '=== Package Info: %s (PM: %s / %s) ===\n\n' "$pkg" "$_PM_MGR" "$_PM_LOW"
+        case "$_PM_MGR" in
+            dnf|yum)
+                rpm -qi "$pkg" 2>/dev/null || "$_PM_MGR" info "$pkg" 2>&1
+                ;;
+            apt|apt-get)
+                dpkg -s "$pkg" 2>/dev/null || apt-cache show "$pkg" 2>&1
+                ;;
+            pacman)
+                pacman -Qi "$pkg" 2>/dev/null || pacman -Si "$pkg" 2>&1
+                ;;
+            apk)
+                apk info -a "$pkg" 2>&1
+                ;;
+            zypper)
+                rpm -qi "$pkg" 2>/dev/null || zypper info "$pkg" 2>&1
+                ;;
+            pkg)
+                pkg info "$pkg" 2>/dev/null || pkg rquery '%n-%v\n%c\n%e' "$pkg" 2>&1
+                ;;
+            rpm) rpm -qi "$pkg" 2>&1 ;;
+            dpkg) dpkg -s "$pkg" 2>&1 ;;
+            pkginfo) pkginfo -l "$pkg" 2>&1 ;;
+        esac
+    } | less -RX
+}
+
+# 패키지가 설치한 파일 목록 보기 (l 키)
+_pm_show_files() {
+    local pkg="$1"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    {
+        printf '=== Installed Files: %s ===\n\n' "$pkg"
+        case "$_PM_LOW" in
+            rpm)     rpm -ql "$pkg" 2>&1 ;;
+            dpkg)    dpkg -L "$pkg" 2>&1 ;;
+            pacman)  pacman -Ql "$pkg" 2>&1 ;;
+            apk)     apk info -L "$pkg" 2>&1 ;;
+            pkg)     pkg info -l "$pkg" 2>&1 ;;
+            pkginfo) pkgchk -l "$pkg" 2>&1 ;;
+            *)       echo "지원하지 않는 패키지 백엔드: $_PM_LOW" ;;
+        esac
+    } | less -RX
+}
+
+# 패키지 설치 / 개별 업데이트 (i 키)
+_pm_install_pkg() {
+    local pkg="$1" mode="${2:-install}"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+
+    if [ -z "$pkg" ]; then
+        _pm_p '\n설치할 패키지명 (또는 로컬 .rpm/.deb 경로, 빈 값=취소): '
+        IFS= read -r pkg </dev/tty
+        [ -z "$pkg" ] && { _PM_MSG="설치 취소"; return 0; }
+    fi
+
+    local _verb="설치"
+    [ "$mode" = "upgrade" ] && _verb="업데이트"
+    _pm_p '\n\033[1;33m[%s]\033[0m 패키지 \033[1;36m%s\033[0m 을(를) %s할까요? [Y/n]: ' "$_PM_MGR" "$pkg" "$_verb"
+    local _ans=""
+    IFS= read -r _ans </dev/tty
+    case "$_ans" in
+        n|N) _PM_MSG="${_verb} 취소: $pkg"; return 0 ;;
+    esac
+
+    local _rc=0
+    case "$pkg" in
+        *.rpm)
+            rpm -Uvh "$pkg" 2>&1; _rc=$?
+            ;;
+        *.deb)
+            dpkg -i "$pkg" 2>&1; _rc=$?
+            ;;
+        *)
+            case "$_PM_MGR" in
+                dnf|yum)
+                    if [ "$mode" = "upgrade" ]; then
+                        "$_PM_MGR" upgrade -y "$pkg" 2>&1; _rc=$?
+                    else
+                        "$_PM_MGR" install -y "$pkg" 2>&1; _rc=$?
+                    fi
+                    ;;
+                apt|apt-get)
+                    if [ "$mode" = "upgrade" ]; then
+                        "$_PM_MGR" install --only-upgrade -y "$pkg" 2>&1; _rc=$?
+                    else
+                        "$_PM_MGR" install -y "$pkg" 2>&1; _rc=$?
+                    fi
+                    ;;
+                pacman)  pacman -S --noconfirm "$pkg" 2>&1; _rc=$? ;;
+                apk)     apk add "$pkg" 2>&1; _rc=$? ;;
+                zypper)
+                    if [ "$mode" = "upgrade" ]; then
+                        zypper -n up "$pkg" 2>&1; _rc=$?
+                    else
+                        zypper -n in "$pkg" 2>&1; _rc=$?
+                    fi
+                    ;;
+                pkg)     pkg install -y "$pkg" 2>&1; _rc=$? ;;
+                *)       _pm_p '원격 설치 미지원(%s). 로컬 .rpm/.deb 경로를 입력하세요.\n' "$_PM_MGR"; _rc=1 ;;
+            esac
+            ;;
+    esac
+
+    if [ $_rc -eq 0 ]; then
+        _pm_pause "${pkg} ${_verb} 완료!"
+        _PM_MSG="✔ ${pkg} ${_verb} 완료!"
+        if [ "$_PM_MODE" = "installed" ]; then
+            _pm_load_installed; _pm_build_view
+        elif [ "$_PM_MODE" = "updates" ]; then
+            _pm_load_updates; _pm_build_view
+        fi
+    else
+        _pm_pause "${pkg} ${_verb} 실패 (exit $_rc)"
+        _PM_MSG="✖ ${pkg} ${_verb} 실패 (exit $_rc)"
+    fi
+}
+
+# 패키지 삭제 (d / x 키 — 핵심 OS 패키지 이중 안전장치)
+_pm_remove_pkg() {
+    local pkg="$1"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n'
+
+    if _pm_is_critical "$pkg"; then
+        _pm_p '\033[1;41;37m ⛔ [핵심 시스템 패키지 보호] %s \033[0m\n' "$pkg"
+        _pm_p '\033[1;31m   이 패키지를 삭제하면 OS 부팅/SSH/패키지 관리가 마비될 수 있습니다!\033[0m\n'
+        _pm_p '   그래도 삭제하려면 패키지명(\033[1;33m%s\033[0m)을 그대로 입력하세요 (취소=Enter): ' "$pkg"
+        local _typed=""
+        IFS= read -r _typed </dev/tty
+        if [ "$_typed" != "$pkg" ]; then
+            _PM_MSG="🛡 핵심 패키지 보호됨 — 삭제 취소: $pkg"
+            return 1
+        fi
+    else
+        _pm_p '\033[1;33m⚠ 패키지 [%s] 을(를) 정말 삭제할까요? [y/N]: \033[0m' "$pkg"
+        local _ans=""
+        IFS= read -r _ans </dev/tty
+        case "$_ans" in
+            y|Y|yes|YES) ;;
+            *) _PM_MSG="삭제 취소: $pkg"; return 1 ;;
+        esac
+    fi
+
+    local _rc=0
+    case "$_PM_MGR" in
+        dnf|yum)     "$_PM_MGR" remove -y "$pkg" 2>&1; _rc=$? ;;
+        apt|apt-get) "$_PM_MGR" remove -y "$pkg" 2>&1; _rc=$? ;;
+        pacman)      pacman -R --noconfirm "$pkg" 2>&1; _rc=$? ;;
+        apk)         apk del "$pkg" 2>&1; _rc=$? ;;
+        zypper)      zypper -n rm "$pkg" 2>&1; _rc=$? ;;
+        pkg)         pkg delete -y "$pkg" 2>&1; _rc=$? ;;
+        rpm)         rpm -e "$pkg" 2>&1; _rc=$? ;;
+        dpkg)        dpkg -r "$pkg" 2>&1; _rc=$? ;;
+        *)           _pm_p '삭제 미지원(%s)\n' "$_PM_MGR"; _rc=1 ;;
+    esac
+
+    if [ $_rc -eq 0 ]; then
+        _pm_pause "${pkg} 삭제 완료!"
+        _PM_MSG="✔ ${pkg} 삭제 완료!"
+        if [ "$_PM_MODE" = "installed" ]; then
+            _pm_load_installed; _pm_build_view
+        fi
+    else
+        _pm_pause "${pkg} 삭제 실패 (exit $_rc)"
+        _PM_MSG="✖ ${pkg} 삭제 실패 (exit $_rc)"
+    fi
+}
+
+# 전체 시스템 업그레이드 (U 키)
+_pm_upgrade_all() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n'
+    _pm_p '\033[1;33m⚠ 시스템 전체 패키지를 최신 버전으로 일괄 업그레이드할까요? (%s) [y/N]: \033[0m' "$_PM_MGR"
+    local _ans=""
+    IFS= read -r _ans </dev/tty
+    case "$_ans" in
+        y|Y|yes|YES) ;;
+        *) _PM_MSG="전체 업그레이드 취소"; return 0 ;;
+    esac
+
+    local _rc=0
+    case "$_PM_MGR" in
+        dnf|yum)     "$_PM_MGR" update -y 2>&1; _rc=$? ;;
+        apt|apt-get) "$_PM_MGR" update 2>&1 && "$_PM_MGR" upgrade -y 2>&1; _rc=$? ;;
+        pacman)      pacman -Syu --noconfirm 2>&1; _rc=$? ;;
+        apk)         apk update 2>&1 && apk upgrade 2>&1; _rc=$? ;;
+        zypper)      zypper -n up 2>&1; _rc=$? ;;
+        pkg)         pkg upgrade -y 2>&1; _rc=$? ;;
+        *)           _pm_p '전체 업그레이드 미지원(%s)\n' "$_PM_MGR"; _rc=1 ;;
+    esac
+
+    if [ $_rc -eq 0 ]; then
+        _pm_pause "시스템 전체 업그레이드 완료!"
+        _PM_MSG="✔ 시스템 전체 업그레이드 완료!"
+    else
+        _pm_pause "업그레이드 중 오류 발생 (exit $_rc)"
+        _PM_MSG="✖ 전체 업그레이드 오류 (exit $_rc)"
+    fi
+    if [ "$_PM_MODE" = "updates" ]; then
+        _pm_load_updates; _pm_build_view
+    elif [ "$_PM_MODE" = "installed" ]; then
+        _pm_load_installed; _pm_build_view
+    fi
+}
+
+# 파일/명령어 소속 패키지 역검색 (w 키 — whatprovides / dpkg -S / rpm -qf)
+_pm_whatprovides() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    _pm_p '\n역검색할 명령어 또는 파일 경로 (예: netstat, /etc/ssh/sshd_config): '
+    local _q=""
+    IFS= read -r _q </dev/tty
+    [ -z "$_q" ] && { _PM_MSG="역검색 취소"; return 0; }
+
+    local _target="$_q"
+    if [ ! -e "$_target" ]; then
+        local _wh
+        _wh=$(command -v "$_q" 2>/dev/null)
+        [ -n "$_wh" ] && [ -e "$_wh" ] && _target="$_wh"
+    fi
+
+    printf '\n'
+    if [ -e "$_target" ]; then
+        _pm_p '\033[1;36m[로컬 파일 소속 조회]\033[0m %s\n' "$_target"
+        case "$_PM_LOW" in
+            rpm)    rpm -qf "$_target" 2>&1 ;;
+            dpkg)   dpkg -S "$_target" 2>&1 ;;
+            pacman) pacman -Qo "$_target" 2>&1 ;;
+            apk)    apk info --who-owns "$_target" 2>&1 ;;
+            pkg)    pkg which "$_target" 2>&1 ;;
+        esac
+        _pm_pause ""
+    else
+        _pm_p '\033[1;36m[원격 저장소 역검색]\033[0m 명령어/파일 "%s" 제공 패키지 탐색 중...\n' "$_q"
+        case "$_PM_MGR" in
+            dnf|yum) "$_PM_MGR" provides "*/$_q" 2>&1 | head -n 40 ;;
+            apt|apt-get)
+                if command -v apt-file >/dev/null 2>&1; then
+                    apt-file search "$_q" 2>&1 | grep -E "bin/${_q}$|/${_q}$" | head -n 30
+                else
+                    _pm_p '⚠ apt-file 미설치 상태입니다. apt-cache search 로 대체 검색합니다:\n'
+                    apt-cache search "$_q" 2>&1 | head -n 25
+                fi
+                ;;
+            pacman) pacman -F "$_q" 2>&1 | head -n 30 ;;
+            zypper) zypper wp "$_q" 2>&1 | head -n 30 ;;
+            *) _pm_p '원격 역검색 미지원(%s)\n' "$_PM_MGR" ;;
+        esac
+        _pm_p '\n바로 설치할 패키지명이 있으면 입력 (건너뛰기=Enter): '
+        local _inst=""
+        IFS= read -r _inst </dev/tty
+        [ -n "$_inst" ] && _pm_install_pkg "$_inst" "install"
+    fi
+}
+
+# 화면 레이아웃/기호 캐시
+_pm_init_layout() {
+    local _TS_LINES="" _TS_COLS=""
+    _get_term_size
+    _PM_ROWS=$_TS_LINES
+    _PM_COLS=$_TS_COLS
+    _PM_PAGE_H=$((_PM_ROWS - 10))
+    [ "$_PM_PAGE_H" -lt 5 ] && _PM_PAGE_H=5
+    local _w=$((_PM_COLS > 115 ? 115 : _PM_COLS - 1))
+    _PM_HLINE=$(printf '%*s' "$_w" '' | tr ' ' '-')
+    if [ "$_PM_ENC" = "euckr" ]; then
+        _PM_S_CUR=">"; _PM_S_INFO="[i]"; _PM_S_BUL="-"; _PM_S_DASH="-"
+    else
+        _PM_S_CUR="▶"; _PM_S_INFO="📦"; _PM_S_BUL="•"; _PM_S_DASH="—"
+    fi
+    _PM_DIRTY=1
+}
+
+# 단일 줄 렌더링
+_pm_render_row() {
+    local vidx="$1" is_cur="$2"
+    local idx="${_PM_VIEW[$vidx]}"
+    local nm="${_PM_NAMES[$idx]}" vr="${_PM_VERS[$idx]}" ds="${_PM_DESCS[$idx]}" st="${_PM_STATES[$idx]}"
+    local s_tag
+
+    if [ "$_PM_ENC" = "euckr" ]; then
+        case "$st" in
+            installed)  s_tag=$'\033[1;32m[I]\033[0m' ;;
+            upgradable) s_tag=$'\033[1;33m[U]\033[0m' ;;
+            remote)     s_tag=$'\033[1;36m[+]\033[0m' ;;
+            enabled)    s_tag=$'\033[1;32m[*]\033[0m' ;;
+            disabled)   s_tag=$'\033[0;37m[ ]\033[0m' ;;
+            *)          s_tag=$'\033[0;37m[-]\033[0m' ;;
+        esac
+    else
+        case "$st" in
+            installed)  s_tag=$'\033[1;32m[✓]\033[0m' ;;
+            upgradable) s_tag=$'\033[1;33m[↑]\033[0m' ;;
+            remote)     s_tag=$'\033[1;36m[+]\033[0m' ;;
+            enabled)    s_tag=$'\033[1;32m[✓]\033[0m' ;;
+            disabled)   s_tag=$'\033[0;37m[ ]\033[0m' ;;
+            *)          s_tag=$'\033[0;37m[-]\033[0m' ;;
+        esac
+    fi
+
+    local max_d=$((_PM_COLS - 56))
+    [ "$max_d" -lt 14 ] && max_d=14
+    ds=$(_pm_safe_str "$ds")
+    [ "${#ds}" -gt "$max_d" ] && ds="${ds:0:$((max_d - 2))}.."
+
+    if [ "$is_cur" = "1" ]; then
+        printf '\033[1;33m%s\033[0m %s \033[7m %-26.26s \033[0m \033[0;36m%-18.18s\033[0m %s\033[K\n' \
+            "$_PM_S_CUR" "$s_tag" "$nm" "$vr" "$ds"
+    else
+        printf '  %s  %-26.26s  \033[0;36m%-18.18s\033[0m %s\033[K\n' \
+            "$s_tag" "$nm" "$vr" "$ds"
+    fi
+}
+
+# 하단 상세 카드 + 상태바
+_pm_render_footer() {
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_PM_HLINE"
+    if [ "$_PM_VCNT" -gt 0 ]; then
+        local cidx="${_PM_VIEW[$_PM_CUR]}"
+        local cnm="${_PM_NAMES[$cidx]}"
+        local cvr="${_PM_VERS[$cidx]}"
+        local cds="${_PM_DESCS[$cidx]}"
+        local cst="${_PM_STATES[$cidx]}"
+        local cmt="${_PM_META[$cidx]}"
+        [ -z "$cds" ] && cds="(설명 없음 — [v/Enter]로 상세조회)"
+        cds=$(_pm_safe_str "$cds")
+
+        printf '\033[1;36m%s %s\033[0m %s %s\033[K\n' "$_PM_S_INFO" "$cnm" "$_PM_S_DASH" "$cds"
+        if [ "$_PM_MODE" = "repos" ]; then
+            printf '   %s 상태: \033[1;37m%s\033[0m | 파일: \033[0;32m%s\033[0m\033[K\n' \
+                "$_PM_S_BUL" "$cst" "${cmt%%|*}"
+            printf '   %s 동작: [Space]활성토글  [e/Enter]vi2편집  [a]레포추가  [c]캐시갱신  [o]explorer\033[K\n' "$_PM_S_BUL"
+        else
+            printf '   %s 버전: \033[1;37m%s\033[0m | 상태: \033[1;37m%s\033[0m | 매니저: \033[0;32m%s (%s)\033[0m' \
+                "$_PM_S_BUL" "$cvr" "$cst" "$_PM_MGR" "$_PM_LOW"
+            _pm_is_critical "$cnm" && printf '  \033[1;31m[핵심OS 보호됨]\033[0m'
+            printf '\033[K\n'
+            printf '   %s 동작: [v/Enter]상세  [l]파일목록  [i]설치/업뎃  [d]삭제  [w]명령어역검색  [R]레포관리\033[K\n' "$_PM_S_BUL"
+        fi
+    else
+        printf '\033[K\n\033[K\n\033[K\n'
+    fi
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_PM_HLINE"
+    if [ -n "$_PM_MSG" ]; then
+        printf '\033[1;33m %s\033[0m\033[K' "$_PM_MSG"
+    else
+        if [ "$_PM_MODE" = "repos" ]; then
+            printf ' \033[0;37m[1]설치 [2]업뎃 [3]원격 [4]레포 | [Space]토글 [e]vi2 [a]추가 [c]캐시 [o]폴더 [/]검색 [f]필터 [q]종료\033[0m\033[K'
+        else
+            printf ' \033[0;37m[1]설치 [2]업뎃 [3]원격 [4]레포 | [s]원격검색 [i]설치 [d]삭제 [v]상세 [l]파일 [w]역검색 [U]전체업뎃 [c]캐시 [/]필터 [q]종료\033[0m\033[K'
+        fi
+    fi
+}
+
+# 전체 페이지 렌더링 (제자리 덮어쓰기)
+_pm_render_full_body() {
+    local list_h=$_PM_PAGE_H
+    local cur_pg=1 tot_pg=1
+    if [ "$_PM_VCNT" -gt 0 ]; then
+        cur_pg=$(( (_PM_TOP / list_h) + 1 ))
+        tot_pg=$(( ((_PM_VCNT - 1) / list_h) + 1 ))
+    fi
+    local mlabel="설치됨"
+    case "$_PM_MODE" in
+        updates) mlabel="업데이트" ;;
+        search)  mlabel="원격검색:${_PM_RQUERY}" ;;
+        repos)   mlabel="소스레포" ;;
+    esac
+    local flabel=""
+    case "$_PM_FILTER" in
+        major)    flabel=" [주요서버]" ;;
+        enabled)  flabel=" [활성만]" ;;
+        disabled) flabel=" [비활성만]" ;;
+    esac
+
+    printf '\033[H'
+    printf '\033[1;36m* 통합 서버 패키지 관리 [pms]\033[0m  \033[0;37mOS: %s (%s)\033[0m  모드:\033[1;33m%s%s\033[0m (%d/%d)  \033[1;37mP.%d/%d\033[0m' \
+        "$_PM_OS" "$_PM_MGR" "$mlabel" "$flabel" "$_PM_VCNT" "$_PM_TOTAL" "$cur_pg" "$tot_pg"
+    [ -n "$_PM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_PM_SEARCH"
+    printf '\033[K\n\033[0;34m%s\033[0m\033[K\n' "$_PM_HLINE"
+
+    local r=0 vidx
+    if [ "$_PM_VCNT" -eq 0 ]; then
+        if [ "$_PM_MODE" = "updates" ]; then
+            printf '\033[K\n  ✔ 업데이트 가능한 패키지가 없습니다. (모두 최신 상태 또는 [c]로 캐시 갱신)\033[K\n'
+        elif [ "$_PM_MODE" = "search" ]; then
+            printf '\033[K\n  ℹ [s] 키를 눌러 원격 저장소에서 패키지를 검색하세요.\033[K\n'
+        elif [ "$_PM_MODE" = "repos" ]; then
+            printf '\033[K\n  ℹ 탐지된 레포 항목이 없습니다. [a]로 레포를 추가하거나 [o]로 폴더를 여세요.\033[K\n'
+        else
+            printf '\033[K\n  (조건에 맞는 항목이 없습니다. / 로 검색어를 지우거나 f 로 필터를 바꾸세요)\033[K\n'
+        fi
+        r=2
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\033[K\n'
+            r=$((r + 1))
+        done
+    else
+        while [ "$r" -lt "$list_h" ]; do
+            vidx=$((_PM_TOP + r))
+            [ "$vidx" -ge "$_PM_VCNT" ] && break
+            if [ "$vidx" -eq "$_PM_CUR" ]; then
+                _pm_render_row "$vidx" 1
+            else
+                _pm_render_row "$vidx" 0
+            fi
+            r=$((r + 1))
+        done
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\033[K\n'
+            r=$((r + 1))
+        done
+    fi
+    _pm_render_footer
+    printf '\033[J'
+}
+
+# 같은 페이지 내 초고속 델타 렌더링 (깜빡임 0%)
+_pm_render_delta_body() {
+    local old_row=$((3 + _PM_LAST_CUR - _PM_TOP))
+    local new_row=$((3 + _PM_CUR - _PM_TOP))
+    local foot_row=$((3 + _PM_PAGE_H))
+    printf '\033[%d;1H' "$old_row"
+    _pm_render_row "$_PM_LAST_CUR" 0
+    printf '\033[%d;1H' "$new_row"
+    _pm_render_row "$_PM_CUR" 1
+    printf '\033[%d;1H' "$foot_row"
+    _pm_render_footer
+}
+
+_pm_render() {
+    if [ "$_PM_VCNT" -gt 0 ]; then
+        [ "$_PM_CUR" -lt 0 ] && _PM_CUR=0
+        [ "$_PM_CUR" -ge "$_PM_VCNT" ] && _PM_CUR=$((_PM_VCNT - 1))
+        _PM_TOP=$(( (_PM_CUR / _PM_PAGE_H) * _PM_PAGE_H ))
+    else
+        _PM_TOP=0
+    fi
+
+    if [ "${_PM_DIRTY:-1}" = "0" ] && [ "$_PM_VCNT" -gt 0 ] \
+       && [ "$_PM_TOP" = "${_PM_LAST_TOP:--1}" ] && [ "${_PM_LAST_CUR:--1}" -ge 0 ] \
+       && [ "$_PM_LAST_CUR" -lt "$_PM_VCNT" ] && [ -z "$_PM_MSG" ] && [ -z "${_PM_LAST_MSG:-}" ]; then
+        if [ "$_PM_CUR" != "$_PM_LAST_CUR" ]; then
+            if [ "$_PM_ENC" = "euckr" ]; then
+                _pm_render_delta_body | _dm_iconv_euckr
+            else
+                _pm_render_delta_body
+            fi
+        fi
+    else
+        if [ "$_PM_ENC" = "euckr" ]; then
+            _pm_render_full_body | _dm_iconv_euckr
+        else
+            _pm_render_full_body
+        fi
+        _PM_DIRTY=0
+    fi
+    _PM_LAST_CUR=$_PM_CUR
+    _PM_LAST_TOP=$_PM_TOP
+    _PM_LAST_MSG="$_PM_MSG"
+}
+
+# 모드 전환 헬퍼
+_pm_switch_mode() {
+    local new_mode="$1"
+    _PM_MODE="$new_mode"
+    _PM_FILTER="all"
+    _PM_SEARCH=""
+    _PM_CUR=0; _PM_TOP=0
+    _PM_LAST_CUR=-1; _PM_LAST_TOP=-1
+    case "$new_mode" in
+        installed)
+            _pm_p '\033[H\033[1;36m[pms] 설치된 패키지 목록 로딩 중...\033[0m\033[K'
+            _pm_load_installed
+            ;;
+        updates)
+            _pm_p '\033[H\033[1;36m[pms] 업데이트 가능 패키지 조회 중 (%s)...\033[0m\033[K' "$_PM_MGR"
+            _pm_load_updates
+            ;;
+        search)
+            if [ -n "$_PM_RQUERY" ]; then
+                _pm_p '\033[H\033[1;36m[pms] 원격 저장소 검색 중: %s ...\033[0m\033[K' "$_PM_RQUERY"
+                _pm_load_search "$_PM_RQUERY"
+            else
+                _pm_clear_data
+            fi
+            ;;
+        repos)
+            _pm_p '\033[H\033[1;36m[pms] 소스 레포지토리 목록 로딩 중...\033[0m\033[K'
+            _pm_load_repos
+            ;;
+    esac
+    _pm_build_view
+    _PM_DIRTY=1
+}
+
+# 메인 진입 함수: pms [초기검색어]
+pms() {
+    _pm_detect_env
+    if [ "$_PM_MGR" = "unknown" ]; then
+        _pm_p '❌ 지원하는 패키지 매니저(dnf/yum/apt/pacman/apk/zypper/pkg/rpm/dpkg/pkginfo)를 찾지 못했습니다.\n'
+        return 1
+    fi
+
+    _PM_MODE="installed"
+    _PM_FILTER="all"
+    _PM_SEARCH="${1:-}"
+    _PM_RQUERY=""
+    _PM_CUR=0; _PM_TOP=0
+    _PM_MSG=""
+    _PM_LAST_CUR=-1; _PM_LAST_TOP=-1; _PM_LAST_MSG=""
+
+    _pm_p '\033[1;36m[pms] %s (PM: %s / %s) 패키지 목록 로딩 중...\033[0m\n' "$_PM_OS" "$_PM_MGR" "$_PM_LOW"
+    _pm_load_installed
+    _pm_build_view
+    _pm_init_layout
+
+    local _esc_t=1
+    [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && _esc_t=0.25
+
+    local _old_trap
+    _old_trap=$(trap -p INT)
+    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+    trap '_pm_init_layout' WINCH 2>/dev/null
+
+    printf '\033[2J\033[H'
+    tput civis 2>/dev/null
+    while :; do
+        _pm_render
+        _PM_MSG=""
+
+        local _k="" _x="" _x2=""
+        IFS= read -rsn1 _k </dev/tty 2>/dev/null || break
+
+        if [ "$_k" = $'\033' ]; then
+            IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+            if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then
+                if [ -n "$_PM_SEARCH" ]; then
+                    _PM_SEARCH=""
+                    _PM_CUR=0; _PM_TOP=0
+                    _pm_build_view
+                    _PM_DIRTY=1
+                    continue
+                fi
+                _k="q"
+            elif [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
+                IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+                case "$_x" in
+                    A) [ "$_PM_CUR" -gt 0 ] && _PM_CUR=$((_PM_CUR - 1)); continue ;;
+                    B) [ "$_PM_CUR" -lt $((_PM_VCNT - 1)) ] && _PM_CUR=$((_PM_CUR + 1)); continue ;;
+                    D) # ← 이전 페이지
+                       local _ph="${_PM_PAGE_H:-10}"
+                       if [ "$_PM_TOP" -gt 0 ]; then
+                           _PM_TOP=$((_PM_TOP - _ph))
+                           [ "$_PM_TOP" -lt 0 ] && _PM_TOP=0
+                           _PM_CUR=$_PM_TOP
+                       else
+                           _PM_CUR=0
+                       fi
+                       continue ;;
+                    C) # → 다음 페이지
+                       local _ph="${_PM_PAGE_H:-10}"
+                       local _nt=$((_PM_TOP + _ph))
+                       if [ "$_nt" -lt "$_PM_VCNT" ]; then
+                           _PM_TOP=$_nt; _PM_CUR=$_PM_TOP
+                       elif [ "$_PM_VCNT" -gt 0 ]; then
+                           _PM_CUR=$((_PM_VCNT - 1))
+                       fi
+                       continue ;;
+                    5) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       local _ph="${_PM_PAGE_H:-10}"
+                       if [ "$_PM_TOP" -gt 0 ]; then
+                           _PM_TOP=$((_PM_TOP - _ph))
+                           [ "$_PM_TOP" -lt 0 ] && _PM_TOP=0
+                           _PM_CUR=$_PM_TOP
+                       else
+                           _PM_CUR=0
+                       fi
+                       continue ;;
+                    6) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       local _ph="${_PM_PAGE_H:-10}"
+                       local _nt=$((_PM_TOP + _ph))
+                       if [ "$_nt" -lt "$_PM_VCNT" ]; then
+                           _PM_TOP=$_nt; _PM_CUR=$_PM_TOP
+                       elif [ "$_PM_VCNT" -gt 0 ]; then
+                           _PM_CUR=$((_PM_VCNT - 1))
+                       fi
+                       continue ;;
+                esac
+                continue
+            else
+                continue
+            fi
+        fi
+
+        case "$_k" in
+            q|Q) break ;;
+            k) [ "$_PM_CUR" -gt 0 ] && _PM_CUR=$((_PM_CUR - 1)) ;;
+            j) [ "$_PM_CUR" -lt $((_PM_VCNT - 1)) ] && _PM_CUR=$((_PM_CUR + 1)) ;;
+            $'\t')
+                case "$_PM_MODE" in
+                    installed) _pm_switch_mode "updates" ;;
+                    updates)   _pm_switch_mode "search" ;;
+                    search)    _pm_switch_mode "repos" ;;
+                    *)         _pm_switch_mode "installed" ;;
+                esac
+                ;;
+            1) _pm_switch_mode "installed" ;;
+            2|u) _pm_switch_mode "updates" ;;
+            3) _pm_switch_mode "search" ;;
+            4|r|R) _pm_switch_mode "repos" ;;
+            s|S)
+                tput cnorm 2>/dev/null
+                stty echo 2>/dev/null
+                _pm_p '\n원격 저장소 검색 키워드 (예: nginx, php, htop): '
+                local _rq=""
+                IFS= read -r _rq </dev/tty
+                if [ -n "$_rq" ]; then
+                    _PM_RQUERY="$_rq"
+                    _pm_switch_mode "search"
+                fi
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            /)
+                tput cnorm 2>/dev/null
+                stty echo 2>/dev/null
+                _pm_p '\n목록 내 필터 검색어 (빈 값=초기화): '
+                IFS= read -r _PM_SEARCH </dev/tty
+                _PM_CUR=0; _PM_TOP=0
+                _pm_build_view
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            f|F)
+                if [ "$_PM_MODE" = "installed" ]; then
+                    [ "$_PM_FILTER" = "all" ] && _PM_FILTER="major" || _PM_FILTER="all"
+                elif [ "$_PM_MODE" = "repos" ]; then
+                    case "$_PM_FILTER" in
+                        all)     _PM_FILTER="enabled" ;;
+                        enabled) _PM_FILTER="disabled" ;;
+                        *)       _PM_FILTER="all" ;;
+                    esac
+                fi
+                _PM_CUR=0; _PM_TOP=0
+                _pm_build_view
+                _PM_DIRTY=1
+                ;;
+            " ")
+                if [ "$_PM_MODE" = "repos" ] && [ "$_PM_VCNT" -gt 0 ]; then
+                    _pm_toggle_repo "${_PM_VIEW[$_PM_CUR]}"
+                    _PM_DIRTY=1
+                fi
+                ;;
+            ""|v|V)
+                [ "$_PM_VCNT" -eq 0 ] && continue
+                local _idx="${_PM_VIEW[$_PM_CUR]}"
+                if [ "$_PM_MODE" = "repos" ]; then
+                    _pm_edit_repo "$_idx"
+                else
+                    _pm_show_info "${_PM_NAMES[$_idx]}"
+                fi
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            e|E)
+                if [ "$_PM_MODE" = "repos" ] && [ "$_PM_VCNT" -gt 0 ]; then
+                    _pm_edit_repo "${_PM_VIEW[$_PM_CUR]}"
+                    _PM_DIRTY=1; tput civis 2>/dev/null
+                else
+                    _pm_switch_mode "repos"
+                fi
+                ;;
+            l|L)
+                [ "$_PM_VCNT" -eq 0 ] && continue
+                [ "$_PM_MODE" = "repos" ] && continue
+                _pm_show_files "${_PM_NAMES[${_PM_VIEW[$_PM_CUR]}]}"
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            i|I)
+                if [ "$_PM_MODE" = "remote" ] || [ "$_PM_MODE" = "search" ]; then
+                    if [ "$_PM_VCNT" -gt 0 ]; then
+                        _pm_install_pkg "${_PM_NAMES[${_PM_VIEW[$_PM_CUR]}]}" "install"
+                    else
+                        _pm_install_pkg "" "install"
+                    fi
+                elif [ "$_PM_MODE" = "updates" ] && [ "$_PM_VCNT" -gt 0 ]; then
+                    _pm_install_pkg "${_PM_NAMES[${_PM_VIEW[$_PM_CUR]}]}" "upgrade"
+                else
+                    _pm_install_pkg "" "install"
+                fi
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            d|D|x|X)
+                [ "$_PM_VCNT" -eq 0 ] && continue
+                [ "$_PM_MODE" = "repos" ] && continue
+                _pm_remove_pkg "${_PM_NAMES[${_PM_VIEW[$_PM_CUR]}]}"
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            w|W)
+                _pm_whatprovides
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            U)
+                _pm_upgrade_all
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            c|C)
+                _pm_refresh_cache
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            a|A)
+                _pm_add_repo_wizard
+                _PM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            o|O)
+                if [ -n "$_PM_REPO_DIR" ] && [ -d "$_PM_REPO_DIR" ]; then
+                    tput cnorm 2>/dev/null
+                    stty echo 2>/dev/null
+                    explorer "$_PM_REPO_DIR"
+                    _PM_DIRTY=1; tput civis 2>/dev/null
+                else
+                    _PM_MSG="ℹ 탐지된 레포 디렉토리가 없습니다."
+                fi
+                ;;
+        esac
+    done
+
+    tput cnorm 2>/dev/null
+    stty sane 2>/dev/null
+    [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+    printf '\n'
+}
+
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
     rbackup $1 || cp -a $1 $1.bak
