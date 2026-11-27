@@ -16073,7 +16073,7 @@ explorer() {
 
 exp() { explorer "$@"; }
 
-pingcheck() { ping -c1 168.126.63.1 &>/dev/null && echo "y" || echo "n"; }
+pingcheck() { ping -c1 -W2 168.126.63.1 &>/dev/null && echo "y" || echo "n"; }
 pingtest() {
     echo
     [ "$1" ] && ping -c3 $1 || ping -c3 168.126.63.1
@@ -16254,11 +16254,17 @@ ibackup() {
 
 # ifcfg-ethx 파일이 없어 생성해야 할 경우
 ifcfgset() {
-    [ ! "$(which ifconfig 2>/dev/null)" ] && "ifconfig command not found!" && exit
+    if ! command -v ifconfig >/dev/null 2>&1 && ! command -v ip >/dev/null 2>&1; then
+        echo "Error: neither ifconfig nor ip command found!" >&2
+        return 1
+    fi
 
     # Get all ethernet interfaces
-    INTERFACES=$(ifconfig -a | grep HWaddr | awk '{print $1}')
-    [ ! "$INTERFACES" ] && INTERFACES="$(ip link show | awk -F ': ' '/^[0-9]+:/ {gsub(/:$/, "", $2); if ($2 != "lo") print $2}')"
+    INTERFACES=""
+    if command -v ifconfig >/dev/null 2>&1; then
+        INTERFACES=$(ifconfig -a | grep HWaddr | awk '{print $1}')
+    fi
+    [ ! "$INTERFACES" ] && INTERFACES="$(ip link show 2>/dev/null | awk -F ': ' '/^[0-9]+:/ {gsub(/:$/, "", $2); sub(/@.*/, "", $2); if ($2 != "lo") print $2}')"
 
     for INTERFACE in $INTERFACES; do
         # Check if the configuration file already exists
@@ -16275,21 +16281,33 @@ ifcfgset() {
             echo
         fi
 
-        # Get ifconfig output for this interface
-        OUTPUT=$(ifconfig $INTERFACE)
-
-        # Extract necessary information (구 grep 2.4.x 호환: grep -o 대신 awk 사용)
-        HWADDR=$(echo "$OUTPUT" | awk 'toupper($0) ~ /HWADDR / {for(i=1;i<=NF;i++) if(toupper($i)=="HWADDR"){print $(i+1); exit}}')
-        [ ! "$HWADDR" ] && HWADDR=$(echo "$OUTPUT" | awk 'tolower($0) ~ /ether / {for(i=1;i<=NF;i++) if(tolower($i)=="ether"){print $(i+1); exit}}')
-        IPADDR=$(echo "$OUTPUT" | awk '/inet addr:/ {for(i=1;i<=NF;i++) if($i ~ /^addr:/){sub(/^addr:/,"",$i); print $i; exit}}')
-        [ ! "$IPADDR" ] && IPADDR=$(echo "$OUTPUT" | awk '/inet / {for(i=1;i<=NF;i++) if($i=="inet"){sub(/\/.*/,"",$(i+1)); print $(i+1); exit}}')
+        # Extract HWADDR and IPADDR (ifconfig or ip fallback, old grep 2.4.x compatible)
+        HWADDR=""
+        IPADDR=""
+        if command -v ifconfig >/dev/null 2>&1; then
+            OUTPUT=$(ifconfig "$INTERFACE" 2>/dev/null)
+            HWADDR=$(echo "$OUTPUT" | awk 'toupper($0) ~ /HWADDR / {for(i=1;i<=NF;i++) if(toupper($i)=="HWADDR"){print $(i+1); exit}}')
+            [ ! "$HWADDR" ] && HWADDR=$(echo "$OUTPUT" | awk 'tolower($0) ~ /ether / {for(i=1;i<=NF;i++) if(tolower($i)=="ether"){print $(i+1); exit}}')
+            IPADDR=$(echo "$OUTPUT" | awk '/inet addr:/ {for(i=1;i<=NF;i++) if($i ~ /^addr:/){sub(/^addr:/,"",$i); print $i; exit}}')
+            [ ! "$IPADDR" ] && IPADDR=$(echo "$OUTPUT" | awk '/inet / {for(i=1;i<=NF;i++) if($i=="inet"){sub(/\/.*/,"",$(i+1)); print $(i+1); exit}}')
+        fi
+        if [ -z "$HWADDR" ] && [ -r "/sys/class/net/$INTERFACE/address" ]; then
+            HWADDR=$(cat "/sys/class/net/$INTERFACE/address" 2>/dev/null)
+        fi
+        if [ -z "$IPADDR" ] && command -v ip >/dev/null 2>&1; then
+            IPADDR=$(ip -o -4 addr show dev "$INTERFACE" 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4; exit}')
+        fi
         GATEWAY="${IPADDR%.*}.1"
 
         # If IP address is not set, ask for it and set netmask and broadcast address to typical values
-        read -p "Enter the IP address for $INTERFACE (or type dhcp, default: $IPADDR): " INPUT_IPADDR
+        read -p "Enter the IP address for $INTERFACE (or type dhcp, default: ${IPADDR:-none}): " INPUT_IPADDR
 
         if [ -z "$INPUT_IPADDR" ]; then
-            INPUT_IPADDR=$IPADDR
+            INPUT_IPADDR="$IPADDR"
+        fi
+        if [ -z "$INPUT_IPADDR" ]; then
+            echo "Error: IP address is empty. Skipping $INTERFACE."
+            continue
         fi
 
         if [ "$INPUT_IPADDR" == "dhcp" ]; then
