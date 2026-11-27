@@ -16233,7 +16233,7 @@ _px_load_summary() {
     _PX_CNT_VM=0
     _PX_CNT_CT=0
     _PX_LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo "-")
-    _PX_MEM_PCT=$(LC_ALL=C free 2>/dev/null | awk '/Mem:/ {if($2>0) printf "%.0f%%", $3*100/$2; else print "-"}')
+    _PX_MEM_PCT=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{if(t>0 && a>=0) printf "%.0f%%", (t-a)*100/t; else print "-"}' /proc/meminfo 2>/dev/null)
     [ -z "$_PX_MEM_PCT" ] && _PX_MEM_PCT="-"
 
     local _t _st
@@ -16621,8 +16621,10 @@ _px_render_full() {
     done
     _px_p "${_tbar}\033[K\n"
 
-    # Line 3: Divider + Search status
-    if [ -n "$_PX_SEARCH" ]; then
+    # Line 3: Divider + Search / Loading status
+    if [ "${_PX_LOADING:-0}" = "1" ]; then
+        _px_p '\033[0;36m──────\033[0m \033[1;33m(데이터 불러오는 중...)\033[0m \033[0;36m────────────────────────────────────────────────\033[0m\033[K\n'
+    elif [ -n "$_PX_SEARCH" ]; then
         _px_p '\033[0;36m──────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m \033[0;36m──────────────────────────────────────────\033[0m\033[K\n' "$_PX_SEARCH" "$_PX_VCNT"
     else
         _px_p '\033[0;36m──────\033[0m \033[1;37m(%d건)\033[0m \033[0;36m────────────────────────────────────────────────────────\033[0m\033[K\n' "$_PX_VCNT"
@@ -16650,7 +16652,21 @@ _px_render_full() {
             fi
             printf '\n'
         else
-            if [ "$_r" -eq 0 ] && [ "$_PX_VCNT" -eq 0 ]; then
+            if [ "$_r" -eq 0 ] && [ "${_PX_LOADING:-0}" = "1" ]; then
+                if [ "$_PX_TAB" = "3" ]; then
+                    if [ "$_PX_ENC" = "euckr" ]; then
+                        _px_p '   \033[1;33m... 백업 스토리지 목록(pvesm list)을 불러오는 중입니다. 잠시만 기다려 주세요.\033[0m\033[K\n'
+                    else
+                        _px_p '   \033[1;33m⏳ 백업 스토리지 목록(pvesm list)을 불러오는 중입니다... 잠시만 기다려 주세요.\033[0m\033[K\n'
+                    fi
+                else
+                    if [ "$_PX_ENC" = "euckr" ]; then
+                        _px_p '   \033[1;33m... 데이터를 불러오는 중입니다. 잠시만 기다려 주세요.\033[0m\033[K\n'
+                    else
+                        _px_p '   \033[1;33m⏳ 데이터를 불러오는 중입니다... 잠시만 기다려 주세요.\033[0m\033[K\n'
+                    fi
+                fi
+            elif [ "$_r" -eq 0 ] && [ "$_PX_VCNT" -eq 0 ]; then
                 _px_p '   \033[0;33m(표시할 항목이 없습니다. Tab/1~6 으로 다른 탭을 보거나 r 로 새로고침)\033[0m\033[K\n'
             else
                 printf '\033[K\n'
@@ -16690,6 +16706,33 @@ _px_render_delta() {
         _px_render_row "$_PX_CUR" 1
         _PX_PREV_CUR="$_PX_CUR"
     fi
+}
+
+_px_load_tab_async() {
+    _PX_IDS=()
+    _PX_NAMES=()
+    _PX_STATE=()
+    _PX_COL2=()
+    _PX_COL3=()
+    _PX_META=()
+    _PX_TOTAL=0
+    _PX_VIEW=()
+    _PX_VCNT=0
+    if [ "$_PX_TAB" != "6" ]; then
+        _PX_LOADING=1
+        if [ "$_PX_ENC" = "euckr" ]; then
+            _PX_MSG="... 데이터 불러오는 중"
+        else
+            _PX_MSG="⏳ 데이터 불러오는 중..."
+        fi
+        _PX_DIRTY=1
+        _px_render_full
+    fi
+    _px_load_tab
+    _PX_LOADING=0
+    _px_build_view
+    _PX_MSG=""
+    _PX_DIRTY=1
 }
 
 _px_show_help() {
@@ -17007,12 +17050,9 @@ pxms() {
     _PX_PREV_CUR=0
     _PX_PREV_TOP=0
     _PX_SEARCH=""
-    _PX_MSG="✔ pxms 준비 완료 (1~6 탭전환, Enter 메뉴, / 검색, ? 도움말)"
+    _PX_LOADING=0
+    _PX_CNT_RUN="-"; _PX_CNT_STOP="-"; _PX_CNT_VM="-"; _PX_CNT_CT="-"; _PX_LOAD="-"; _PX_MEM_PCT="-"
     _PX_DIRTY=1
-
-    _px_load_summary
-    _px_load_tab
-    _px_build_view
 
     local _old_trap _k _k2 _k3 _idx _ans _meta _t _n _id _sn _stg _vol _fmt _upid _newid _def_sn _desc _tkey _vms
     _old_trap=$(trap -p INT)
@@ -17020,6 +17060,10 @@ pxms() {
 
     tput civis 2>/dev/null
     printf '\033[2J\033[H'
+
+    _px_load_tab_async
+    _px_load_summary
+    _PX_MSG="✔ pxms 준비 완료 (1~6 탭전환, Enter 메뉴, / 검색, ? 도움말)"
 
     while true; do
         _px_render_delta
@@ -17034,8 +17078,8 @@ pxms() {
                 case "$_k3" in
                     A) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
                     B) [ "$_PX_CUR" -lt $((_PX_VCNT - 1)) ] && _PX_CUR=$((_PX_CUR + 1)) ;;
-                    C) _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab; _px_build_view; _PX_DIRTY=1 ;;
-                    D) _PX_TAB=$(( (_PX_TAB + 4) % 6 + 1 )); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab; _px_build_view; _PX_DIRTY=1 ;;
+                    C) _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async ;;
+                    D) _PX_TAB=$(( (_PX_TAB + 4) % 6 + 1 )); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async ;;
                     5) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR - _PX_PAGE)); [ "$_PX_CUR" -lt 0 ] && _PX_CUR=0; _PX_DIRTY=1 ;;
                     6) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR + _PX_PAGE)); [ "$_PX_CUR" -ge "$_PX_VCNT" ] && _PX_CUR=$((_PX_VCNT > 0 ? _PX_VCNT - 1 : 0)); _PX_DIRTY=1 ;;
                     H) _PX_CUR=0; _PX_DIRTY=1 ;;
@@ -17053,12 +17097,12 @@ pxms() {
             q|Q) break ;;
             $'\t')
                 _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
-                _px_load_tab; _px_build_view; _PX_DIRTY=1
+                _px_load_tab_async
                 ;;
             1|2|3|4|5|6)
                 if [ "$_PX_TAB" != "$_k" ]; then
                     _PX_TAB="$_k"; _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
-                    _px_load_tab; _px_build_view; _PX_DIRTY=1
+                    _px_load_tab_async
                 fi
                 ;;
             k) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
@@ -17072,7 +17116,8 @@ pxms() {
                 _PX_CUR=0; _PX_TOP=0; _px_build_view; _PX_DIRTY=1; tput civis 2>/dev/null
                 ;;
             r)
-                _px_load_summary; _px_load_tab; _px_build_view
+                _px_load_tab_async
+                _px_load_summary
                 _PX_MSG="✔ 새로고침 완료"
                 _PX_DIRTY=1
                 ;;
