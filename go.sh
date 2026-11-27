@@ -13538,7 +13538,7 @@ _um_load_users() {
         }
         {
             u=$1; uid=$3; gid=$4; gec=$5; hom=$6; shl=$7;
-            gsub(/\t/, " ", gec);
+            gsub(/[\t|]/, " ", gec);
             st="ACTIVE";
             sp = (u in sh) ? sh[u] : "";
             if (sp ~ /^!/) st="LOCKED";
@@ -13547,12 +13547,12 @@ _um_load_users() {
             if (expd[u] != "" && expd[u] ~ /^[0-9]+$/ && expd[u]+0 > 0 && expd[u]+0 <= 1) st="EXPIRED";
             fc = (u in failc) ? failc[u] : 0;
             su = (u == "root" || (u in is_sudo)) ? 1 : 0;
-            print u "\t" uid "\t" gid "\t" hom "\t" shl "\t" gec "\t" st "\t" fc "\t" su;
+            print u "|" uid "|" gid "|" hom "|" shl "|" gec "|" st "|" fc "|" su;
         }
     ' /etc/passwd >"$_tmp" 2>/dev/null
 
     local i=0 _nm _uid _gid _hom _shl _gec _st _fc _su
-    while IFS=$'\t' read -r _nm _uid _gid _hom _shl _gec _st _fc _su; do
+    while IFS='|' read -r _nm _uid _gid _hom _shl _gec _st _fc _su; do
         [ -n "$_nm" ] || continue
         _UM_NAMES[$i]="$_nm"
         _UM_UIDS[$i]="$_uid"
@@ -13574,10 +13574,10 @@ _um_refresh_one() {
     local idx="$1"
     local u="${_UM_NAMES[$idx]}"
     local line
-    line=$(awk -F: -v target="$u" '$1==target {print $3"\t"$4"\t"$5"\t"$6"\t"$7; exit}' /etc/passwd 2>/dev/null)
+    line=$(awk -F: -v target="$u" '$1==target {g=$5; gsub(/\|/," ",g); print $3"|"$4"|"g"|"$6"|"$7; exit}' /etc/passwd 2>/dev/null)
     if [ -n "$line" ]; then
         local _uid _gid _gec _hom _shl
-        IFS=$'\t' read -r _uid _gid _gec _hom _shl <<EOF
+        IFS='|' read -r _uid _gid _gec _hom _shl <<EOF
 $line
 EOF
         _UM_UIDS[$idx]="$_uid"
@@ -13670,15 +13670,19 @@ _um_build_view() {
     fi
 }
 
-# 레이아웃 계산 (dms/pms와 동일 규격)
+# 레이아웃 계산 (dms/pms와 동일 규격 — _get_term_size로 실제 창 크기 전체 활용)
 _um_init_layout() {
-    _UM_COLS=$(tput cols 2>/dev/null || echo 100)
-    _UM_ROWS=$(tput lines 2>/dev/null || echo 30)
+    local _TS_LINES="" _TS_COLS=""
+    _get_term_size
+    _UM_ROWS="${_TS_LINES:-24}"
+    _UM_COLS="${_TS_COLS:-80}"
     [ "$_UM_COLS" -lt 70 ] && _UM_COLS=70
     [ "$_UM_ROWS" -lt 16 ] && _UM_ROWS=16
     _UM_PAGE_H=$((_UM_ROWS - 9))
     [ "$_UM_PAGE_H" -lt 6 ] && _UM_PAGE_H=6
-    _UM_HLINE=$(awk -v n="$_UM_COLS" 'BEGIN{s=""; for(i=0;i<n;i++) s=s"-"; print s}')
+    local _w=$((_UM_COLS - 1))
+    [ "$_w" -lt 60 ] && _w=60
+    _UM_HLINE=$(printf '%*s' "$_w" '' | tr ' ' '-')
     _UM_DIRTY=1
     if [ "$_UM_ENC" = "euckr" ]; then
         _UM_S_CUR=">"; _UM_S_BUL="-"
