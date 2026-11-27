@@ -4731,6 +4731,90 @@ cgrepf3() { cgrepfN 3 "$@"; }
 cgrepf4() { cgrepfN 4 "$@"; }
 cgrepf5() { cgrepfN 5 "$@"; }
 
+# 한 줄에 세미콜론(;)으로 이어진 다중 명령 사이에 자동으로 46칸 구분선(---) 삽입
+#  - 따옴표('...', "..."), $(...), (...), 제어문(if/for/while/case), 변수대입/export/cd 등은 안전하게 제외
+_inject_cmd_sep() {
+    local _in="$1"
+    case "$_in" in
+        *\;*) ;;
+        *) printf '%s\n' "$_in"; return 0 ;;
+    esac
+    printf '%s\n' "$_in" | awk '
+    BEGIN {
+        sep = "----------------------------------------------"
+    }
+    {
+        s = $0
+        n = length(s)
+        out = ""
+        seg = ""
+        sq = 0; dq = 0; esc = 0; paren = 0
+        for (i = 1; i <= n; i++) {
+            c = substr(s, i, 1)
+            if (esc) {
+                out = out c; seg = seg c; esc = 0; continue
+            }
+            if (sq) {
+                out = out c; seg = seg c
+                if (c == "\047") sq = 0
+                continue
+            }
+            if (dq) {
+                out = out c; seg = seg c
+                if (c == "\\") esc = 1
+                else if (c == "\"") dq = 0
+                continue
+            }
+            if (c == "\\") { out = out c; seg = seg c; esc = 1; continue }
+            if (c == "\047") { out = out c; seg = seg c; sq = 1; continue }
+            if (c == "\"") { out = out c; seg = seg c; dq = 1; continue }
+            if (c == "(") { paren++; out = out c; seg = seg c; continue }
+            if (c == ")" && paren > 0) { paren--; out = out c; seg = seg c; continue }
+            if (c == "{" && paren == 0) { out = out c; seg = ""; continue }
+
+            if (c == ";" && paren == 0) {
+                # ;; (case 종료자 등) 은 그대로 통과
+                if (i < n && substr(s, i + 1, 1) == ";") {
+                    out = out ";;"; seg = ""; i++; continue
+                }
+                # 뒤쪽 첫 토큰 확인
+                rest = substr(s, i + 1)
+                sub(/^[ \t]+/, "", rest)
+                next_tok = rest
+                sub(/[ \t;)}|&].*$/, "", next_tok)
+
+                # 앞쪽 세그먼트 정리
+                prev = seg
+                gsub(/^[ \t]+|[ \t]+$/, "", prev)
+                prev_first = prev
+                sub(/[ \t].*$/, "", prev_first)
+                prev_last = prev
+                sub(/^.*[ \t]/, "", prev_last)
+
+                skip = 0
+                if (prev == "" || rest == "") skip = 1
+                if (rest ~ /^[})#]/) skip = 1
+                if (next_tok ~ /^(then|do|done|fi|else|elif|esac|in)$/) skip = 1
+                if (prev_last ~ /^(then|do|else|elif|in|&&|\|\|)$/) skip = 1
+                if (prev ~ /^[A-Za-z_][A-Za-z0-9_]*=/) skip = 1
+                if (prev_first ~ /^(export|local|unset|cd|alias|unalias|readonly|declare|typeset|trap|set|shopt|ulimit|umask|source|\.|true|false|:|for|while|until|if|elif|case|select)$/) skip = 1
+                if (prev ~ /echo[ \t]+["\047]?[-=]{3,}/) skip = 1
+
+                if (skip) {
+                    out = out ";"
+                } else {
+                    out = out "; echo \"" sep "\";"
+                }
+                seg = ""
+                continue
+            }
+            out = out c
+            seg = seg c
+        }
+        print out
+    }'
+}
+
 safe_eval() {
     local cmd="$1" re='(^|[[:space:]])(rm[[:space:]]+-rf[[:space:]]+/[[:space:]]*($|[[:space:]]+|#)|reboot|shutdown|mkfs)([[:space:]]|$)|\>\s*/etc/(passwd|shadow|group)\b|\>\s*/dev/sd[a-z]+\b'
     # ': 라벨 ; 실제명령' 에서 라벨 안의 ( ) < > | & 등으로 eval 문법 오류가 나지 않게 라벨을 제거 (bash2 호환)
@@ -4753,6 +4837,7 @@ safe_eval() {
         NC
         readxy "   실행하시겠습니까?" || return 1
     }
+    cmd="$(_inject_cmd_sep "$cmd")"
     if echo "$cmd" | grep -qE '\|[[:space:]]*less(\s|$)'; then
         #eval "$cmd"
         eval "$cmd" </dev/tty
