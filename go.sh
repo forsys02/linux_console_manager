@@ -10227,7 +10227,7 @@ _dm_detect_env() {
 # Red Hat 7.2 (glibc 2.2) iconv 는 EUC-KR 에 없는 이모지/기호를 만나면 그 자리에서 출력이 중단될 수 있으므로
 # 변환 전 비-EUC-KR 기호를 ASCII 로 먼저 치환한다.
 _dm_iconv_euckr() {
-    sed \
+    LC_ALL=C sed \
         -e 's/✔/[OK]/g' \
         -e 's/✖/[ERR]/g' \
         -e 's/⚠/[WARN]/g' \
@@ -10245,7 +10245,30 @@ _dm_iconv_euckr() {
         -e 's/—/-/g' \
         -e 's/─/-/g' \
         -e 's/❌/[ERR]/g' \
-        | iconv -f utf-8 -t euc-kr//TRANSLIT 2>/dev/null
+        -e 's/🎲/[RAND]/g' \
+        -e 's/⌨️/[KEY]/g' \
+        -e 's/⌨/[KEY]/g' \
+        -e 's/🔄/[RE]/g' \
+        -e 's/📧/[MAIL]/g' \
+        -e 's/📨/[SEND]/g' \
+        -e 's/📱/[SMS]/g' \
+        -e 's/🚀/[ALL]/g' \
+        -e 's/🔐/[AUTH]/g' \
+        -e 's/📁/[DIR]/g' \
+        -e 's/🔧/[FIX]/g' \
+        -e 's/🔎/[FIND]/g' \
+        -e 's/📂/[OPEN]/g' \
+        -e 's/🗄️/[DB]/g' \
+        -e 's/🗄/[DB]/g' \
+        -e 's/💾/[BAK]/g' \
+        -e 's/💻/[SQL]/g' \
+        -e 's/📋/[INFO]/g' \
+        -e 's/🌐/[ALL]/g' \
+        -e 's/📊/[TRF]/g' \
+        -e 's/💿/[DISK]/g' \
+        -e 's/🌍/[DNS]/g' \
+        -e 's/💰/[PAY]/g' \
+        | iconv -f utf-8 -t euc-kr//IGNORE 2>/dev/null
 }
 
 _dm_p() {
@@ -13847,8 +13870,8 @@ _um_show_detail() {
         for _wr in "$hom/public_html" "$hom/www" "$hom/html"; do
             [ -d "$_wr" ] && ls -ld "$_wr" 2>&1
         done
-        printf '디스크 사용량(du): '
-        du -sh "$hom" 2>/dev/null || echo "(계산 불가)"
+        _um_p '디스크 사용량(du): '
+        du -sh "$hom" 2>/dev/null || _um_p '(계산 불가)\n'
     else
         _um_p '  ⚠ 홈 디렉토리가 존재하지 않습니다: %s\n' "$hom"
     fi
@@ -13861,7 +13884,7 @@ _um_show_detail() {
     _um_p '\n\033[1;33m[3] 대응 데이터베이스(MySQL/MariaDB) 점검\033[0m\n'
     local _db_found=0
     if [ -d "/var/lib/mysql/$u" ]; then
-        printf '  데이터 디렉토리: '; du -sh "/var/lib/mysql/$u" 2>/dev/null
+        _um_p '  데이터 디렉토리: '; du -sh "/var/lib/mysql/$u" 2>/dev/null
         _db_found=1
     fi
     if [ -n "$_UM_MYSQL" ]; then
@@ -13881,7 +13904,7 @@ _um_show_detail() {
     fi
     local _pcnt
     _pcnt=$(ps -u "$u" --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    printf '  현재 실행 중 프로세스: %s개\n' "${_pcnt:-0}"
+    _um_p '  현재 실행 중 프로세스: %s개\n' "${_pcnt:-0}"
 
     if [ "$_UM_HOSTING" -eq 1 ] && [ -x /script/is ]; then
         _um_p '\n\033[1;33m[5] 호스팅 계정 종합 정보 (/script/is %s)\033[0m\n' "$u"
@@ -14462,7 +14485,7 @@ _um_manage_group_shell() {
     _um_p '\033[1;36m* 그룹 · 쉘 · 만료일 관리: %s\033[0m\n' "$u"
     printf '%s\n' "------------------------------------------------------------------------"
     id "$u" 2>&1
-    printf '현재 쉘: %s\n' "$shl"
+    _um_p '현재 쉘: %s\n' "$shl"
     printf '%s\n' "------------------------------------------------------------------------"
     _um_p '  \033[1;33m1.\033[0m 그룹 추가 (sudo / wheel / www-data / 직접입력)\n'
     _um_p '  \033[1;33m2.\033[0m 로그인 쉘 변경 (/bin/bash, /bin/sh, /sbin/nologin, /bin/pass 등)\n'
