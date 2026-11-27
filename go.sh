@@ -11269,12 +11269,12 @@ _dm_render_body() {
             ds="${_DM_DESC[$idx]}"
             rk="${_DM_RISK[$idx]}"
 
-            # 부팅 자동실행 체크박스
+            # 부팅 자동실행 체크박스 ([v]=활성, [ ]=비활성, [-]=토글불가(static 등), [x]=masked)
             case "$bt" in
                 enabled|enabled-runtime) b_tag=$'\033[1;32m[v]\033[0m' ;;
                 disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
-                masked)                  b_tag=$'\033[1;31m[M]\033[0m' ;;
-                *)                       b_tag=$'\033[0;36m[S]\033[0m' ;;
+                masked)                  b_tag=$'\033[0;31m[x]\033[0m' ;;
+                *)                       b_tag=$'\033[1;30m[-]\033[0m' ;;
             esac
 
             # 현재 실행 상태
