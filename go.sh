@@ -16146,11 +16146,22 @@ _px_detect_env() {
     _PX_PVE_VER="N/A"
     _PX_HAS_JQ=0
     _PX_HAS_PVESH=0
+    _PX_RUN_BG='\033[42;1;37m'
 
     local _loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
     case "$_loc" in
         *[Ee][Uu][Cc]*[Kk][Rr]*|*[Kk][Oo]_[Kk][Rr]|ko)
             command -v iconv >/dev/null 2>&1 && _PX_ENC="euckr" ;;
+    esac
+
+    case "${COLORTERM:-}" in
+        truecolor|24bit) _PX_RUN_BG='\033[48;5;22;1;97m' ;;
+        *)
+            case "${TERM:-}" in
+                *256color*|*truecolor*|*direct*|alacritty|kitty|xterm-kitty|wezterm|foot*)
+                    _PX_RUN_BG='\033[48;5;22;1;97m' ;;
+            esac
+            ;;
     esac
 
     if ! command -v pvesh >/dev/null 2>&1 && ! command -v qm >/dev/null 2>&1 && ! command -v pct >/dev/null 2>&1; then
@@ -16222,7 +16233,7 @@ _px_load_summary() {
     _PX_CNT_VM=0
     _PX_CNT_CT=0
     _PX_LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo "-")
-    _PX_MEM_PCT=$(free 2>/dev/null | awk '/Mem:/ {if($2>0) printf "%.0f%%", $3*100/$2; else print "-"}')
+    _PX_MEM_PCT=$(LC_ALL=C free 2>/dev/null | awk '/Mem:/ {if($2>0) printf "%.0f%%", $3*100/$2; else print "-"}')
     [ -z "$_PX_MEM_PCT" ] && _PX_MEM_PCT="-"
 
     local _t _st
@@ -16529,30 +16540,47 @@ _px_render_row() {
     local _nm="${_PX_NAMES[$_idx]}"
     local _c2="${_PX_COL2[$_idx]}"
     local _c3="${_PX_COL3[$_idx]}"
-    local _mark=" " _bg="" _rst='\033[0m' _ico _iclr
+    local _mark=" " _bg="" _rst='\033[0m' _ico _iclr _gap=" "
 
-    case "$_st" in
-        running) _ico="●"; _iclr='\033[1;32m' ;;
-        locked)  _ico="◐"; _iclr='\033[1;33m' ;;
-        snap)    _ico="◈"; _iclr='\033[1;35m' ;;
-        backup)  _ico="◆"; _iclr='\033[1;36m' ;;
-        tool)    _ico="▸"; _iclr='\033[1;36m' ;;
-        *)       _ico="○"; _iclr='\033[1;31m' ;;
-    esac
+    if [ "$_PX_ENC" = "euckr" ]; then
+        _gap="  "
+        case "$_st" in
+            running) _ico="●"; _iclr='\033[1;32m'; _bg="$_PX_RUN_BG" ;;
+            locked)  _ico="◐"; _iclr='\033[1;33m'; _bg='\033[1;33m' ;;
+            snap)    _ico="◈"; _iclr='\033[1;35m' ;;
+            backup)  _ico="◆"; _iclr='\033[1;36m' ;;
+            tool)    _ico="▸"; _iclr='\033[1;36m' ;;
+            *)       _ico="○"; _iclr='\033[0;37m'; _bg='\033[0;37m' ;;
+        esac
+    else
+        case "$_st" in
+            running) _ico="🟢"; _iclr='\033[1;32m'; _bg="$_PX_RUN_BG" ;;
+            locked)  _ico="🔒"; _iclr='\033[1;33m'; _bg='\033[1;33m' ;;
+            snap)    _ico="📸"; _iclr='\033[1;35m' ;;
+            backup)  _ico="💾"; _iclr='\033[1;36m' ;;
+            tool)    _ico="🔧"; _iclr='\033[1;36m' ;;
+            *)       _ico="⚫"; _iclr='\033[0;37m'; _bg='\033[0;37m' ;;
+        esac
+    fi
 
     if [ "$_is_cur" = "1" ]; then
         _mark="▶"
-        _bg='\033[44;1;37m'
-        _iclr='\033[44;1;33m'
+        if [ "$_st" = "running" ]; then
+            _bg='\033[44;1;92m'
+            _iclr='\033[44;1;92m'
+        else
+            _bg='\033[44;1;37m'
+            _iclr='\033[44;1;33m'
+        fi
     fi
 
     [ "${#_nm}" -gt 30 ] && _nm="${_nm:0:29}~"
     [ "${#_c2}" -gt 20 ] && _c2="${_c2:0:19}~"
-    local _c3_max=$((_PX_COLS - 58))
+    local _c3_max=$((_PX_COLS - 60))
     [ "$_c3_max" -lt 16 ] && _c3_max=16
     [ "${#_c3}" -gt "$_c3_max" ] && _c3="${_c3:0:$((_c3_max - 1))}~"
 
-    _px_p "${_bg} %s ${_iclr}%s${_rst}${_bg} %-30s  %-20s  %s\033[K${_rst}" "$_mark" "$_ico" "$_nm" "$_c2" "$_c3"
+    _px_p "${_bg} %s %s${_gap}%-30s  %-20s  %s\033[K${_rst}" "$_mark" "$_ico" "$_nm" "$_c2" "$_c3"
 }
 
 _px_render_full() {
@@ -16595,19 +16623,19 @@ _px_render_full() {
 
     # Line 3: Divider + Search status
     if [ -n "$_PX_SEARCH" ]; then
-        _px_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m\033[K\n' "$_PX_SEARCH" "$_PX_VCNT"
+        _px_p '\033[0;36m──────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m \033[0;36m──────────────────────────────────────────\033[0m\033[K\n' "$_PX_SEARCH" "$_PX_VCNT"
     else
-        _px_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m (%d건)\033[K\n' "$_PX_VCNT"
+        _px_p '\033[0;36m──────\033[0m \033[1;37m(%d건)\033[0m \033[0;36m────────────────────────────────────────────────────────\033[0m\033[K\n' "$_PX_VCNT"
     fi
 
     # Line 4: Column Header
     case "$_PX_TAB" in
-        1) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID NAME" "STATUS" "RESOURCES / NODE" ;;
-        2) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID  SNAPSHOT" "CREATED" "DESCRIPTION" ;;
-        3) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "BACKUP ARCHIVE" "VMID / SIZE" "STORAGE (FMT)" ;;
-        4) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "STORAGE NAME" "TYPE / USE%" "CAPACITY" ;;
-        5) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TASK TYPE / TARGET" "STATUS" "START TIME (USER)" ;;
-        6) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "[KEY] MENU NAME" "CATEGORY" "DESCRIPTION" ;;
+        1) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID NAME" "STATUS" "RESOURCES / NODE" ;;
+        2) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID  SNAPSHOT" "CREATED" "DESCRIPTION" ;;
+        3) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "BACKUP ARCHIVE" "VMID / SIZE" "STORAGE (FMT)" ;;
+        4) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "STORAGE NAME" "TYPE / USE%" "CAPACITY" ;;
+        5) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "TASK TYPE / TARGET" "STATUS" "START TIME (USER)" ;;
+        6) _px_p '\033[1;37m      %-30s  %-20s  %s\033[0m\033[K\n' "[KEY] MENU NAME" "CATEGORY" "DESCRIPTION" ;;
     esac
 
     # Lines 5..(5+PAGE-1): List rows
