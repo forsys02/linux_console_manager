@@ -15280,27 +15280,40 @@ _dk_load_tab() {
                 _DK_TOTAL=$((_DK_TOTAL + 1))
             done < <(docker ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Image}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null)
             ;;
-        2) # Stacks (Compose: running + local compose.yml scan)
+        2) # Stacks (Compose: container labels aggregate + local compose.yml scan, Compose v1/v2 universal)
             _seen=""
-            if [ "$_DK_COMPOSE_BIN" = "docker compose" ]; then
-                while IFS='|' read -r _c1 _c2 _c3; do
-                    [ -z "$_c1" ] && continue
-                    _cf="${_c3%%,*}"
-                    _dir=$(dirname "$_cf" 2>/dev/null)
-                    _DK_IDS[$_DK_TOTAL]="$_dir"
-                    _DK_NAMES[$_DK_TOTAL]="$_c1"
-                    case "$_c2" in
-                        *running*) _DK_STATE[$_DK_TOTAL]="running" ;;
-                        *)         _DK_STATE[$_DK_TOTAL]="stopped" ;;
-                    esac
-                    _DK_COL2[$_DK_TOTAL]="$_c2"
-                    _DK_COL3[$_DK_TOTAL]="${_dir:-$_cf}"
-                    _DK_META[$_DK_TOTAL]="$_cf"
-                    _seen="${_seen}|${_dir}|"
-                    _DK_TOTAL=$((_DK_TOTAL + 1))
-                done < <(docker compose ls -a --format '{{.Name}}|{{.Status}}|{{.ConfigFiles}}' 2>/dev/null)
-            fi
-            # Scan local compose directories (depth <= 3)
+            while IFS='|' read -r _c1 _c2 _c3 _c4; do
+                [ -z "$_c1" ] && continue
+                _cf="${_c4%%,*}"
+                _dir="$_c3"
+                [ -z "$_dir" ] && [ -n "$_cf" ] && _dir=$(dirname "$_cf" 2>/dev/null)
+                _DK_IDS[$_DK_TOTAL]="$_dir"
+                _DK_NAMES[$_DK_TOTAL]="$_c1"
+                case "$_c2" in
+                    running*) _DK_STATE[$_DK_TOTAL]="running" ;;
+                    *)        _DK_STATE[$_DK_TOTAL]="stopped" ;;
+                esac
+                _DK_COL2[$_DK_TOTAL]="$_c2"
+                _DK_COL3[$_DK_TOTAL]="${_dir:-$_cf}"
+                _DK_META[$_DK_TOTAL]="$_cf"
+                [ -n "$_dir" ] && _seen="${_seen}|${_dir}|"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < <(docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.State}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Label "com.docker.compose.project.config_files"}}' 2>/dev/null | awk -F'|' '
+                $1 != "" {
+                    p=$1; tot[p]++;
+                    if ($2 == "running") run[p]++;
+                    if (!(p in dir) && $3 != "") dir[p]=$3;
+                    if (!(p in cf) && $4 != "") cf[p]=$4;
+                    if (!(p in seen)) { order[++n]=p; seen[p]=1; }
+                }
+                END {
+                    for (i=1; i<=n; i++) {
+                        p=order[i]; r=run[p]+0; t=tot[p]+0;
+                        st = (r > 0) ? ("running(" r "/" t ")") : ("exited(0/" t ")");
+                        printf "%s|%s|%s|%s\n", p, st, dir[p], cf[p];
+                    }
+                }')
+            # Scan local compose directories (depth <= 4)
             for _d in $_DK_SCAN_DIRS; do
                 [ -d "$_d" ] || continue
                 while IFS= read -r _f; do
@@ -15316,7 +15329,7 @@ _dk_load_tab() {
                     _DK_META[$_DK_TOTAL]="$_f"
                     _seen="${_seen}|${_dir}|"
                     _DK_TOTAL=$((_DK_TOTAL + 1))
-                done < <(find "$_d" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
+                done < <(find "$_d" -maxdepth 4 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
             done
             ;;
         3) # Images
