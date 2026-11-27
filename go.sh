@@ -13319,6 +13319,1633 @@ pms() {
     printf '\n'
 }
 
+# ==============================================================================
+# 통합 사용자·호스팅 계정 관리 TUI: ums (User Manager Studio)
+# - 모든 리눅스/유닉스 배포판 자동 대응 (Alma/Rocky/CentOS/RHEL/Ubuntu/Debian/Arch/Alpine)
+# - 기본 기능: 계정 목록/필터/검색, Lock/Unlock/Unban(faillock/pam_tally2 자동분기),
+#              랜덤·수동 비밀번호 리셋, 대응 DB(MySQL/MariaDB) & 홈폴더/웹루트/용량 점검,
+#              계정 생성/그룹·쉘 관리/안전 삭제(시스템 계정 보호 가드)
+# - 로컬 호스팅 플러그인 자동 감지: 서버에 /script/is, /root/ppass, /script/loginchecksend,
+#   /script/sms, /script/treset 등이 존재하면 메일/SMS 발송·트래픽·SSL·도메인·만기 연동 활성화
+# - Bash 2.x/3.x/4.x/5.x 및 EUC-KR 구서버 완벽 호환 (연관배열 미사용, 무깜빡임 델타 렌더링)
+# ==============================================================================
+
+_um_detect_env() {
+    _UM_OS="Linux"
+    _UM_ENC="utf8"
+    _UM_FAIL_TOOL="none"
+    _UM_MIN_UID=1000
+    _UM_HOSTING=0
+    _UM_MYSQL=""
+    _UM_MYSQLDUMP=""
+
+    if [ -f /etc/os-release ]; then
+        _UM_OS=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2); print $2; exit}' /etc/os-release 2>/dev/null)
+    elif [ -f /etc/redhat-release ]; then
+        _UM_OS=$(head -n1 /etc/redhat-release 2>/dev/null)
+    elif [ -f /etc/debian_version ]; then
+        _UM_OS="Debian $(cat /etc/debian_version 2>/dev/null)"
+    else
+        _UM_OS=$(uname -s 2>/dev/null)
+    fi
+    [ -z "$_UM_OS" ] && _UM_OS="Linux"
+
+    # 터미널 인코딩 판별 (EUC-KR 구서버 한글 보호)
+    local _loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$_loc" in
+        *[Ee][Uu][Cc]*[Kk][Rr]*|*[Kk][Oo]_[Kk][Rr]|ko)
+            if command -v iconv >/dev/null 2>&1; then
+                _UM_ENC="euckr"
+            fi ;;
+    esac
+
+    # 일반 사용자 최소 UID 판별 (/etc/login.defs 기반, 구형 CentOS 5/6은 500)
+    if [ -r /etc/login.defs ]; then
+        local _mu
+        _mu=$(awk '/^[ \t]*UID_MIN[ \t]+[0-9]+/{print $2; exit}' /etc/login.defs 2>/dev/null)
+        [ -n "$_mu" ] && _UM_MIN_UID="$_mu"
+    fi
+
+    # 로그인 실패 잠금 도구 자동 탐지
+    if command -v faillock >/dev/null 2>&1; then
+        _UM_FAIL_TOOL="faillock"
+    elif command -v pam_tally2 >/dev/null 2>&1; then
+        _UM_FAIL_TOOL="pam_tally2"
+    elif [ -x /sbin/pam_tally2 ]; then
+        _UM_FAIL_TOOL="/sbin/pam_tally2"
+    fi
+
+    # DB 클라이언트 자동 탐지
+    if command -v mariadb >/dev/null 2>&1; then
+        _UM_MYSQL="mariadb"
+    elif command -v mysql >/dev/null 2>&1; then
+        _UM_MYSQL="mysql"
+    elif command -v mysql5 >/dev/null 2>&1; then
+        _UM_MYSQL="mysql5"
+    fi
+    if command -v mariadb-dump >/dev/null 2>&1; then
+        _UM_MYSQLDUMP="mariadb-dump"
+    elif command -v mysqldump >/dev/null 2>&1; then
+        _UM_MYSQLDUMP="mysqldump"
+    elif command -v mysqldump5 >/dev/null 2>&1; then
+        _UM_MYSQLDUMP="mysqldump5"
+    fi
+
+    # 로컬 호스팅 관리 스크립트 자동 감지 (존재 시 확장 메뉴 활성화)
+    if [ -x /script/is ] || [ -x /root/ppass ] || [ -x /script/loginchecksend ] || [ -x /script/treset ]; then
+        _UM_HOSTING=1
+    fi
+}
+
+_um_p() {
+    local _fmt="$1"
+    shift
+    if [ "$_UM_ENC" = "euckr" ]; then
+        printf "$_fmt" "$@" | _dm_iconv_euckr
+    else
+        printf "$_fmt" "$@"
+    fi
+}
+
+# 외부 호스팅 스크립트 출력 인코딩 정규화 (UTF-8 터미널에서 EUC-KR 스크립트 출력 자동 변환)
+_um_norm_out() {
+    if [ "$_UM_ENC" = "utf8" ] && command -v iconv >/dev/null 2>&1; then
+        local _tmp="/tmp/.ums_out.$$"
+        cat >"$_tmp"
+        if iconv -f utf-8 -t utf-8 "$_tmp" >/dev/null 2>&1; then
+            cat "$_tmp"
+        else
+            iconv -f euc-kr -t utf-8//IGNORE "$_tmp" 2>/dev/null || cat "$_tmp"
+        fi
+        rm -f "$_tmp" 2>/dev/null
+    else
+        cat
+    fi
+}
+
+_um_pause() {
+    local _msg="${1:-계속하려면 Enter를 누르세요...}"
+    _um_p '\n\033[0;37m%s\033[0m' "$_msg"
+    local _dummy=""
+    IFS= read -r _dummy </dev/tty
+}
+
+# 핵심 시스템 계정 보호 판별 (잠금/삭제 시 차단)
+_um_is_protected() {
+    local _u="$1" _uid="$2"
+    case "$_u" in
+        root|daemon|bin|sys|sync|nobody|sshd|systemd-*|dbus|polkitd|postfix|mysql|mariadb|apache|httpd|www-data|nginx|named|chrony|ntp)
+            return 0 ;;
+    esac
+    if [ -n "$_uid" ] && [ "$_uid" -eq 0 ] 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# 안전한 랜덤 비밀번호 생성 (12자, 영대/영소/숫자/안전특수문자 포함, 혼동문자 0O1lI 제외)
+_um_gen_password() {
+    local _len="${1:-12}"
+    local _pw=""
+    if [ -r /dev/urandom ]; then
+        local _u1 _l1 _d1 _s1 _rest
+        _u1=$(LC_ALL=C tr -dc 'ABCDEFGHJKLMNPQRSTUVWXYZ' </dev/urandom 2>/dev/null | head -c 2)
+        _l1=$(LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyz' </dev/urandom 2>/dev/null | head -c 3)
+        _d1=$(LC_ALL=C tr -dc '23456789' </dev/urandom 2>/dev/null | head -c 2)
+        _s1=$(LC_ALL=C tr -dc '@#%+=!' </dev/urandom 2>/dev/null | head -c 1)
+        local _rem=$((_len - 8))
+        [ "$_rem" -lt 1 ] && _rem=4
+        _rest=$(LC_ALL=C tr -dc 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789' </dev/urandom 2>/dev/null | head -c "$_rem")
+        _pw="${_u1}${_l1}${_d1}${_s1}${_rest}"
+        if command -v shuf >/dev/null 2>&1; then
+            _pw=$(printf '%s' "$_pw" | fold -w1 | shuf | tr -d '\n')
+        fi
+    fi
+    if [ ${#_pw} -lt 8 ]; then
+        _pw=$(date +%s%N 2>/dev/null | md5sum 2>/dev/null | awk '{print substr($1,1,10)"@A"}')
+    fi
+    printf '%s' "$_pw"
+}
+
+# 단일 계정의 실패 잠금 횟수 조회
+_um_get_fail_cnt() {
+    local _u="$1"
+    local _cnt=0
+    if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
+        _cnt=$(faillock --user "$_u" 2>/dev/null | awk 'NR>2 && $0 ~ /[0-9]{4}-[0-9]{2}-[0-9]{2}/ {c++} END{print c+0}')
+    elif [ "$_UM_FAIL_TOOL" != "none" ]; then
+        _cnt=$("$_UM_FAIL_TOOL" --user "$_u" 2>/dev/null | awk -v u="$_u" '$1==u {print $2+0; exit}')
+    fi
+    [ -z "$_cnt" ] && _cnt=0
+    printf '%s' "$_cnt"
+}
+
+# 전체 계정 목록 로딩 (/etc/passwd + /etc/shadow + /etc/group + faillock 일괄 집계)
+_um_load_users() {
+    _UM_NAMES=()
+    _UM_UIDS=()
+    _UM_GIDS=()
+    _UM_HOMES=()
+    _UM_SHELLS=()
+    _UM_GECOS=()
+    _UM_STATES=()
+    _UM_FAILS=()
+    _UM_SUDO=()
+    _UM_TOTAL=0
+
+    local _tmp="/tmp/.ums_list.$$"
+    local _ftmp="/tmp/.ums_fail.$$"
+    : >"$_ftmp"
+
+    # 로그인 실패 횟수 일괄 수집 (빠른 1회 실행)
+    if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
+        faillock 2>/dev/null | awk '
+            /:$/ { u=$1; sub(/:$/,"",u); next }
+            /^[0-9]{4}-[0-9]{2}-[0-9]{2}/ { if (u != "") cnt[u]++ }
+            END { for (k in cnt) print k "\t" cnt[k] }
+        ' >"$_ftmp"
+    elif [ "$_UM_FAIL_TOOL" != "none" ]; then
+        "$_UM_FAIL_TOOL" 2>/dev/null | awk 'NR>1 && $2 ~ /^[0-9]+$/ && $2+0 > 0 { print $1 "\t" $2 }' >"$_ftmp"
+    fi
+
+    # /etc/passwd + /etc/shadow + /etc/group + 실패횟수 통합 파싱
+    awk -F: -v ffile="$_ftmp" '
+        BEGIN {
+            while ((getline line < ffile) > 0) {
+                split(line, a, "\t");
+                if (a[1] != "") failc[a[1]] = a[2] + 0;
+            }
+            close(ffile);
+            while ((getline line < "/etc/group") > 0) {
+                n = split(line, g, ":");
+                if (g[1] == "wheel" || g[1] == "sudo" || g[1] == "admin") {
+                    m = split(g[4], mem, ",");
+                    for (i = 1; i <= m; i++) {
+                        if (mem[i] != "") is_sudo[mem[i]] = 1;
+                    }
+                }
+            }
+            close("/etc/group");
+            if ((getline line < "/etc/shadow") >= 0) {
+                close("/etc/shadow");
+                while ((getline line < "/etc/shadow") > 0) {
+                    split(line, s, ":");
+                    sh[s[1]] = s[2];
+                    expd[s[1]] = s[8];
+                }
+                close("/etc/shadow");
+            }
+        }
+        {
+            u=$1; uid=$3; gid=$4; gec=$5; hom=$6; shl=$7;
+            gsub(/\t/, " ", gec);
+            st="ACTIVE";
+            sp = (u in sh) ? sh[u] : "";
+            if (sp ~ /^!/) st="LOCKED";
+            else if (sp ~ /^\*/) st="NOPW";
+            else if (sp == "") st="EMPTY";
+            if (expd[u] != "" && expd[u] ~ /^[0-9]+$/ && expd[u]+0 > 0 && expd[u]+0 <= 1) st="EXPIRED";
+            fc = (u in failc) ? failc[u] : 0;
+            su = (u == "root" || (u in is_sudo)) ? 1 : 0;
+            print u "\t" uid "\t" gid "\t" hom "\t" shl "\t" gec "\t" st "\t" fc "\t" su;
+        }
+    ' /etc/passwd >"$_tmp" 2>/dev/null
+
+    local i=0 _nm _uid _gid _hom _shl _gec _st _fc _su
+    while IFS=$'\t' read -r _nm _uid _gid _hom _shl _gec _st _fc _su; do
+        [ -n "$_nm" ] || continue
+        _UM_NAMES[$i]="$_nm"
+        _UM_UIDS[$i]="$_uid"
+        _UM_GIDS[$i]="$_gid"
+        _UM_HOMES[$i]="$_hom"
+        _UM_SHELLS[$i]="$_shl"
+        _UM_GECOS[$i]="$_gec"
+        _UM_STATES[$i]="$_st"
+        _UM_FAILS[$i]="${_fc:-0}"
+        _UM_SUDO[$i]="${_su:-0}"
+        i=$((i + 1))
+    done <"$_tmp"
+    _UM_TOTAL=$i
+    rm -f "$_tmp" "$_ftmp" 2>/dev/null
+}
+
+# 단일 사용자 행 상태만 즉시 갱신 (Lock/Unlock/Unban 직후 초고속 반영)
+_um_refresh_one() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local line
+    line=$(awk -F: -v target="$u" '$1==target {print $3"\t"$4"\t"$5"\t"$6"\t"$7; exit}' /etc/passwd 2>/dev/null)
+    if [ -n "$line" ]; then
+        local _uid _gid _gec _hom _shl
+        IFS=$'\t' read -r _uid _gid _gec _hom _shl <<EOF
+$line
+EOF
+        _UM_UIDS[$idx]="$_uid"
+        _UM_GIDS[$idx]="$_gid"
+        _UM_GECOS[$idx]="$_gec"
+        _UM_HOMES[$idx]="$_hom"
+        _UM_SHELLS[$idx]="$_shl"
+    fi
+    local _sp
+    _sp=$(awk -F: -v target="$u" '$1==target {print $2; exit}' /etc/shadow 2>/dev/null)
+    local _st="ACTIVE"
+    case "$_sp" in
+        !*) _st="LOCKED" ;;
+        \**) _st="NOPW" ;;
+        "") _st="EMPTY" ;;
+    esac
+    _UM_STATES[$idx]="$_st"
+    _UM_FAILS[$idx]=$(_um_get_fail_cnt "$u")
+}
+
+# 필터 및 검색 뷰 빌드
+_um_build_view() {
+    _UM_VIEW=()
+    local i=0 vc=0
+    local _sq=""
+    [ -n "$_UM_SEARCH" ] && _sq=$(printf '%s' "$_UM_SEARCH" | tr '[:upper:]' '[:lower:]')
+
+    while [ "$i" -lt "$_UM_TOTAL" ]; do
+        local _nm="${_UM_NAMES[$i]}"
+        local _uid="${_UM_UIDS[$i]}"
+        local _hom="${_UM_HOMES[$i]}"
+        local _shl="${_UM_SHELLS[$i]}"
+        local _gec="${_UM_GECOS[$i]}"
+        local _st="${_UM_STATES[$i]}"
+        local _fc="${_UM_FAILS[$i]}"
+        local _su="${_UM_SUDO[$i]}"
+        local _ok=1
+
+        case "$_UM_FILTER" in
+            users)
+                # 일반 사용자: UID >= MIN_UID (nobody 제외) 또는 /home/ 하위 홈 보유 계정
+                if [ "$_nm" = "nobody" ] || [ "$_nm" = "nfsnobody" ]; then
+                    _ok=0
+                elif [ "$_uid" -lt "$_UM_MIN_UID" ] 2>/dev/null; then
+                    case "$_hom" in
+                        /home/*|/home1/*|/home2/*) _ok=1 ;;
+                        *) _ok=0 ;;
+                    esac
+                fi
+                ;;
+            locked)
+                if [ "$_st" != "LOCKED" ] && [ "${_fc:-0}" -le 0 ] 2>/dev/null; then
+                    _ok=0
+                fi
+                ;;
+            active)
+                if [ "$_st" != "ACTIVE" ] || [ "${_fc:-0}" -gt 0 ] 2>/dev/null; then
+                    _ok=0
+                fi
+                ;;
+            sudo)
+                [ "$_su" = "1" ] || _ok=0
+                ;;
+            system)
+                [ "$_uid" -lt "$_UM_MIN_UID" ] 2>/dev/null || _ok=0
+                ;;
+            all)
+                _ok=1
+                ;;
+        esac
+
+        if [ "$_ok" -eq 1 ] && [ -n "$_sq" ]; then
+            local _hay
+            _hay=$(printf '%s %s %s %s' "$_nm" "$_hom" "$_gec" "$_shl" | tr '[:upper:]' '[:lower:]')
+            case "$_hay" in
+                *"$_sq"*) _ok=1 ;;
+                *) _ok=0 ;;
+            esac
+        fi
+
+        if [ "$_ok" -eq 1 ]; then
+            _UM_VIEW[$vc]=$i
+            vc=$((vc + 1))
+        fi
+        i=$((i + 1))
+    done
+    _UM_VCNT=$vc
+    if [ "$_UM_CUR" -ge "$_UM_VCNT" ]; then
+        _UM_CUR=$((_UM_VCNT > 0 ? _UM_VCNT - 1 : 0))
+    fi
+}
+
+# 레이아웃 계산 (dms/pms와 동일 규격)
+_um_init_layout() {
+    _UM_COLS=$(tput cols 2>/dev/null || echo 100)
+    _UM_ROWS=$(tput lines 2>/dev/null || echo 30)
+    [ "$_UM_COLS" -lt 70 ] && _UM_COLS=70
+    [ "$_UM_ROWS" -lt 16 ] && _UM_ROWS=16
+    _UM_PAGE_H=$((_UM_ROWS - 9))
+    [ "$_UM_PAGE_H" -lt 6 ] && _UM_PAGE_H=6
+    _UM_HLINE=$(awk -v n="$_UM_COLS" 'BEGIN{s=""; for(i=0;i<n;i++) s=s"-"; print s}')
+    _UM_DIRTY=1
+    if [ "$_UM_ENC" = "euckr" ]; then
+        _UM_S_CUR=">"; _UM_S_BUL="-"
+    else
+        _UM_S_CUR="▶"; _UM_S_BUL="•"
+    fi
+}
+
+# 대응 DB 빠른 존재 여부 확인 (로컬 데이터 디렉토리 또는 MySQL)
+_um_quick_db_badge() {
+    local _u="$1"
+    if [ -d "/var/lib/mysql/$_u" ]; then
+        printf 'DB:OK'
+        return 0
+    fi
+    if [ -n "$_UM_MYSQL" ]; then
+        local _hit
+        _hit=$("$_UM_MYSQL" -NBe "SHOW DATABASES LIKE '${_u}'" 2>/dev/null | head -n1)
+        if [ -n "$_hit" ]; then
+            printf 'DB:OK'
+            return 0
+        fi
+    fi
+    printf 'DB:-'
+}
+
+# 호스팅 계정 정보에서 이메일/휴대폰 번호 추출 헬퍼 (/script/is 또는 /root/userinfo 기반)
+_um_extract_hosting_contact() {
+    local _u="$1"
+    _UM_C_EMAIL=""
+    _UM_C_PHONE=""
+    _UM_C_DOMAIN=""
+
+    if [ -x /script/is ]; then
+        local _is_out
+        _is_out=$(/script/is "$_u" 2>/dev/null | _um_norm_out)
+        _UM_C_EMAIL=$(printf '%s\n' "$_is_out" | grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | head -n1)
+        _UM_C_PHONE=$(printf '%s\n' "$_is_out" | grep -oE '01[016789]-?[0-9]{3,4}-?[0-9]{4}' | head -n1)
+        _UM_C_DOMAIN=$(printf '%s\n' "$_is_out" | grep -oE '([a-zA-Z0-9-]+\.)+(com|co\.kr|kr|net|org|or\.kr|ne\.kr|pe\.kr|re\.kr|go\.kr|ac\.kr|io|dev|shop|biz|info)' | grep -v '@' | head -n1)
+    fi
+    if [ -z "$_UM_C_EMAIL" ] && [ -r /root/userinfo ]; then
+        _UM_C_EMAIL=$(awk -v u="$_u" '$1==u {for(i=2;i<=NF;i++) if($i ~ /@/) {print $i; exit}}' /root/userinfo 2>/dev/null)
+    fi
+    if [ -z "$_UM_C_PHONE" ] && [ -r /root/_ispnuma ]; then
+        local _p
+        _p=$(tr -d ' \r\n' </root/_ispnuma 2>/dev/null)
+        case "$_p" in 01*) _UM_C_PHONE="$_p" ;; esac
+    fi
+}
+
+# ==============================================================================
+# 액션 1: 계정 종합 상세 보기 (Enter / v)
+# ==============================================================================
+_um_show_detail() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local hom="${_UM_HOMES[$idx]}"
+    local shl="${_UM_SHELLS[$idx]}"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 사용자 종합 상세 정보: %s\033[0m\n' "$u"
+    printf '%s\n' "------------------------------------------------------------------------"
+
+    _um_p '\033[1;33m[1] 시스템 계정 · 권한 · 잠금 상태\033[0m\n'
+    id "$u" 2>&1
+    passwd -S "$u" 2>&1
+    if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
+        printf 'faillock: '
+        faillock --user "$u" 2>&1 | tail -n 5
+    elif [ "$_UM_FAIL_TOOL" != "none" ]; then
+        printf 'pam_tally2: '
+        "$_UM_FAIL_TOOL" --user "$u" 2>&1
+    fi
+    printf 'Shell: %s  |  Home: %s\n' "$shl" "$hom"
+    if command -v chage >/dev/null 2>&1; then
+        chage -l "$u" 2>/dev/null | head -n 6
+    fi
+
+    _um_p '\n\033[1;33m[2] 홈 디렉토리 · 웹루트 · 디스크 용량\033[0m\n'
+    if [ -d "$hom" ]; then
+        ls -ld "$hom" 2>&1
+        for _wr in "$hom/public_html" "$hom/www" "$hom/html"; do
+            [ -d "$_wr" ] && ls -ld "$_wr" 2>&1
+        done
+        printf '디스크 사용량(du): '
+        du -sh "$hom" 2>/dev/null || echo "(계산 불가)"
+    else
+        _um_p '  ⚠ 홈 디렉토리가 존재하지 않습니다: %s\n' "$hom"
+    fi
+    if command -v quota >/dev/null 2>&1; then
+        local _qout
+        _qout=$(quota -u "$u" 2>/dev/null)
+        [ -n "$_qout" ] && printf '%s\n' "$_qout"
+    fi
+
+    _um_p '\n\033[1;33m[3] 대응 데이터베이스(MySQL/MariaDB) 점검\033[0m\n'
+    local _db_found=0
+    if [ -d "/var/lib/mysql/$u" ]; then
+        printf '  데이터 디렉토리: '; du -sh "/var/lib/mysql/$u" 2>/dev/null
+        _db_found=1
+    fi
+    if [ -n "$_UM_MYSQL" ]; then
+        local _dbs
+        _dbs=$("$_UM_MYSQL" -NBe "SHOW DATABASES LIKE '${u}%'" 2>/dev/null)
+        if [ -n "$_dbs" ]; then
+            _um_p '  매칭 DB 목록:\n'
+            printf '%s\n' "$_dbs" | sed 's/^/    - /'
+            _db_found=1
+        fi
+    fi
+    [ "$_db_found" -eq 0 ] && _um_p '  (대응하는 DB가 없거나 DB root 자동접속 불가)\n'
+
+    _um_p '\n\033[1;33m[4] 최근 접속 및 실행 중 프로세스\033[0m\n'
+    if command -v lastlog >/dev/null 2>&1; then
+        lastlog -u "$u" 2>/dev/null | tail -n 1
+    fi
+    local _pcnt
+    _pcnt=$(ps -u "$u" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    printf '  현재 실행 중 프로세스: %s개\n' "${_pcnt:-0}"
+
+    if [ "$_UM_HOSTING" -eq 1 ] && [ -x /script/is ]; then
+        _um_p '\n\033[1;33m[5] 호스팅 계정 종합 정보 (/script/is %s)\033[0m\n' "$u"
+        /script/is "$u" 2>&1 | _um_norm_out | head -n 30
+    fi
+
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_pause "Enter를 누르면 목록으로 돌아갑니다..."
+}
+
+# ==============================================================================
+# 액션 2: Lock / Unlock 토글 (Space / l)
+# ==============================================================================
+_um_toggle_lock() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local uid="${_UM_UIDS[$idx]}"
+    local st="${_UM_STATES[$idx]}"
+
+    if _um_is_protected "$u" "$uid"; then
+        _UM_MSG="⚠ 핵심 시스템 계정 '${u}' 는 잠금/해제 보호 대상입니다."
+        return 1
+    fi
+
+    if [ "$st" = "LOCKED" ]; then
+        passwd -u "$u" >/dev/null 2>&1
+        _um_refresh_one "$idx"
+        _UM_MSG="✔ '${u}' 계정 잠금 해제(passwd -u) 완료! (현재: ${_UM_STATES[$idx]})"
+    else
+        tput cnorm 2>/dev/null
+        stty echo 2>/dev/null
+        _um_p '\n\033[1;33m🔒 계정 [%s] 로그인을 잠글까요? (passwd -l) [y/N]: \033[0m' "$u"
+        local _ans=""
+        IFS= read -r _ans </dev/tty
+        case "$_ans" in
+            y|Y)
+                passwd -l "$u" >/dev/null 2>&1
+                _um_refresh_one "$idx"
+                _UM_MSG="✔ '${u}' 계정 잠금(passwd -l) 완료!"
+                ;;
+            *)
+                _UM_MSG="취소됨: '${u}'"
+                ;;
+        esac
+    fi
+}
+
+# ==============================================================================
+# 액션 3: 완전 Unban (faillock/pam_tally2 초기화 + passwd -u + 차단IP 확인) (u 키)
+# ==============================================================================
+_um_unban_user() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 계정 완전 잠금 해제 (Unban): %s\033[0m\n' "$u"
+    printf '%s\n' "------------------------------------------------------------------------"
+
+    local _last_ip=""
+    if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
+        _um_p '▶ [1/3] faillock 실패 기록 확인 및 초기화...\n'
+        faillock --user "$u" 2>&1
+        _last_ip=$(faillock --user "$u" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -n1)
+        faillock --user "$u" --reset 2>&1
+        faillock --user "$u" 2>&1
+    elif [ "$_UM_FAIL_TOOL" != "none" ]; then
+        _um_p '▶ [1/3] pam_tally2 실패 기록 확인 및 초기화...\n'
+        "$_UM_FAIL_TOOL" --user "$u" 2>&1
+        _last_ip=$("$_UM_FAIL_TOOL" --user "$u" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -n1)
+        "$_UM_FAIL_TOOL" --user "$u" --reset 2>&1
+        "$_UM_FAIL_TOOL" --user "$u" 2>&1
+    else
+        _um_p '▶ [1/3] faillock/pam_tally2 미설치 환경 — 건너뜀\n'
+    fi
+
+    _um_p '\n▶ [2/3] passwd 잠금 해제 (passwd -u)...\n'
+    passwd -u "$u" 2>&1 || true
+    passwd -S "$u" 2>&1
+
+    _um_p '\n▶ [3/3] 최근 실패 IP 방화벽/hosts.deny 차단 여부 점검...\n'
+    if [ -n "$_last_ip" ]; then
+        _um_p '  최근 실패 IP: %s\n' "$_last_ip"
+        local _ipt_hit="" _hd_hit=""
+        command -v iptables >/dev/null 2>&1 && _ipt_hit=$(iptables -nL 2>/dev/null | grep -F "$_last_ip" | head -n 5)
+        [ -r /etc/hosts.deny ] && _hd_hit=$(grep -F "$_last_ip" /etc/hosts.deny 2>/dev/null | head -n 5)
+        if [ -n "$_ipt_hit" ]; then
+            _um_p '  \033[1;31m⚠ iptables 차단 발견:\033[0m\n%s\n' "$_ipt_hit"
+        else
+            _um_p '  iptables 차단 없음\n'
+        fi
+        if [ -n "$_hd_hit" ]; then
+            _um_p '  \033[1;31m⚠ /etc/hosts.deny 차단 발견:\033[0m\n%s\n' "$_hd_hit"
+        fi
+    else
+        _um_p '  추출된 최근 실패 IP 없음\n'
+    fi
+
+    _um_refresh_one "$idx"
+    _UM_MSG="✔ '${u}' Unban 완료 (상태: ${_UM_STATES[$idx]} / 실패: ${_UM_FAILS[$idx]})"
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_pause "Enter를 누르면 목록으로 돌아갑니다..."
+}
+
+# ==============================================================================
+# 액션 4: 비밀번호 리셋 (임의 랜덤 생성 / 수동 입력) + 호스팅 메일/SMS 발송 연동 (p 키)
+# ==============================================================================
+_um_reset_password() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local uid="${_UM_UIDS[$idx]}"
+
+    if [ "$u" = "root" ] || [ "$uid" -eq 0 ] 2>/dev/null; then
+        _UM_MSG="⚠ root 비밀번호는 보안상 터미널에서 직접 'passwd root' 를 사용하세요."
+        return 1
+    fi
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 비밀번호 리셋 & 알림 발송 마법사: %s\033[0m\n' "$u"
+    printf '%s\n' "------------------------------------------------------------------------"
+
+    # 호스팅 환경이면 연락처 사전 조회
+    _UM_C_EMAIL=""; _UM_C_PHONE=""; _UM_C_DOMAIN=""
+    if [ "$_UM_HOSTING" -eq 1 ]; then
+        _um_extract_hosting_contact "$u"
+        _um_p '  [호스팅 연락처] 도메인: \033[1;37m%s\033[0m | 메일: \033[1;32m%s\033[0m | 휴대폰: \033[1;33m%s\033[0m\n' \
+            "${_UM_C_DOMAIN:--}" "${_UM_C_EMAIL:--}" "${_UM_C_PHONE:--}"
+        printf '%s\n' "------------------------------------------------------------------------"
+    fi
+
+    local _rand_pw
+    _rand_pw=$(_um_gen_password 12)
+    _um_p '  \033[1;33m1.\033[0m 🎲 임의 랜덤 비밀번호로 리셋  (생성됨: \033[1;32m%s\033[0m)\n' "$_rand_pw"
+    _um_p '  \033[1;33m2.\033[0m ⌨️  새 비밀번호 직접 입력\n'
+    _um_p '  \033[1;33m3.\033[0m 🔄 랜덤 비밀번호 다시 생성\n'
+    _um_p '  \033[0;37m0.\033[0m 취소\n'
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '선택 [0-3] (기본 1): '
+    local _sel=""
+    IFS= read -r _sel </dev/tty
+    [ -z "$_sel" ] && _sel="1"
+
+    while [ "$_sel" = "3" ]; do
+        _rand_pw=$(_um_gen_password 12)
+        _um_p '  🎲 새로 생성된 비밀번호: \033[1;32m%s\033[0m  — 이 값으로 진행할까요? [1=적용 / 3=재생성 / 0=취소]: ' "$_rand_pw"
+        IFS= read -r _sel </dev/tty
+        [ -z "$_sel" ] && _sel="1"
+    done
+
+    local _new_pw=""
+    case "$_sel" in
+        1) _new_pw="$_rand_pw" ;;
+        2)
+            _um_p '새 비밀번호 입력: '
+            IFS= read -r _new_pw </dev/tty
+            if [ -z "$_new_pw" ]; then
+                _UM_MSG="취소됨: 빈 비밀번호"
+                return 0
+            fi
+            ;;
+        *)
+            _UM_MSG="취소됨"
+            return 0
+            ;;
+    esac
+
+    # DB 비밀번호 동시 변경 여부
+    local _chg_db="n"
+    _um_p '\nDB 비밀번호도 함께 변경할까요? [y/N] (일반 FTP/SSH 초기화는 N 권장): '
+    local _db_ans=""
+    IFS= read -r _db_ans </dev/tty
+    case "$_db_ans" in y|Y) _chg_db="y" ;; esac
+
+    _um_p '\n▶ 비밀번호 변경 및 로그인 락 초기화 실행 중...\n'
+    local _pw_ok=0
+    if [ "$_UM_HOSTING" -eq 1 ] && [ -x /root/ppass ]; then
+        # 호스팅 표준 /root/ppass 연동 (비번 변경 + pam_tally2 리셋 + DB 변경 질의)
+        printf '%s\n' "$_chg_db" | /root/ppass "$u" "$_new_pw" 2>&1 | _um_norm_out
+        _pw_ok=1
+    else
+        if command -v chpasswd >/dev/null 2>&1; then
+            printf '%s:%s\n' "$u" "$_new_pw" | chpasswd 2>&1 && _pw_ok=1
+        else
+            printf '%s\n' "$_new_pw" | passwd --stdin "$u" 2>&1 && _pw_ok=1
+        fi
+        # DB 비밀번호 동시 변경 요청 시
+        if [ "$_chg_db" = "y" ] && [ -n "$_UM_MYSQL" ]; then
+            _um_p '▶ DB 사용자(%s) 비밀번호 변경 시도...\n' "$u"
+            "$_UM_MYSQL" -e "ALTER USER '${u}'@'localhost' IDENTIFIED BY '${_new_pw}'; FLUSH PRIVILEGES;" 2>/dev/null \
+                || "$_UM_MYSQL" -e "SET PASSWORD FOR '${u}'@'localhost' = PASSWORD('${_new_pw}'); FLUSH PRIVILEGES;" 2>/dev/null \
+                || _um_p '  ⚠ DB 비밀번호 자동 변경 실패 (수동 확인 필요)\n'
+        fi
+    fi
+
+    # faillock / pam_tally2 / passwd -u 추가 보강
+    if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
+        faillock --user "$u" --reset >/dev/null 2>&1
+    elif [ "$_UM_FAIL_TOOL" != "none" ]; then
+        "$_UM_FAIL_TOOL" --user "$u" --reset >/dev/null 2>&1
+    fi
+    passwd -u "$u" >/dev/null 2>&1
+
+    _um_refresh_one "$idx"
+    _um_p '\n\033[1;32m✔ 비밀번호 리셋 완료!\033[0m  계정: \033[1;37m%s\033[0m  |  새 비번: \033[1;33m%s\033[0m  |  실패횟수: %s\n' \
+        "$u" "$_new_pw" "${_UM_FAILS[$idx]}"
+
+    # 호스팅 특화 알림 발송 (메일 / SMS / 로그인 검증)
+    if [ "$_UM_HOSTING" -eq 1 ] && { [ -x /script/loginchecksend ] || [ -x /script/sms ] || [ -x /script/logincheck ]; }; then
+        printf '%s\n' "------------------------------------------------------------------------"
+        _um_p '\033[1;36m📨 고객 리셋 안내 발송 및 로그인 검증\033[0m\n'
+        _um_p '  등록 이메일: \033[1;32m%s\033[0m  |  휴대폰: \033[1;33m%s\033[0m\n' "${_UM_C_EMAIL:--}" "${_UM_C_PHONE:--}"
+        [ -x /script/loginchecksend ] && _um_p '  \033[1;33m1.\033[0m 📧 이메일 발송 (/script/loginchecksend)\n'
+        [ -x /script/sms ] && _um_p '  \033[1;33m2.\033[0m 📱 SMS 문자 발송 (/script/sms)\n'
+        [ -x /script/loginchecksend ] && [ -x /script/sms ] && _um_p '  \033[1;33m3.\033[0m 🚀 이메일 + SMS 일괄 발송 (권장)\n'
+        [ -x /script/logincheck ] && _um_p '  \033[1;33m4.\033[0m 🔐 로그인 성공 검증 (/script/logincheck)\n'
+        _um_p '  \033[0;37m0.\033[0m 발송 안 함 (종료)\n'
+        _um_p '선택 [0-4]: '
+        local _send_sel=""
+        IFS= read -r _send_sel </dev/tty
+
+        case "$_send_sel" in
+            1)
+                if [ -x /script/loginchecksend ]; then
+                    /script/loginchecksend "$u" "$_new_pw" 2>&1 | _um_norm_out
+                    _UM_MSG="✔ '${u}' 비번 리셋 + 이메일 발송 완료!"
+                fi
+                ;;
+            2|3)
+                if [ "$_send_sel" = "3" ] && [ -x /script/loginchecksend ]; then
+                    _um_p '\n▶ [1/2] 이메일 발송 중 (/script/loginchecksend)...\n'
+                    /script/loginchecksend "$u" "$_new_pw" 2>&1 | _um_norm_out
+                fi
+                if [ -x /script/sms ]; then
+                    local _target_phone="$_UM_C_PHONE"
+                    _um_p '\n▶ SMS 수신 휴대폰 번호 (Enter=기본값 [%s]): ' "${_target_phone:-없음}"
+                    local _in_ph=""
+                    IFS= read -r _in_ph </dev/tty
+                    [ -n "$_in_ph" ] && _target_phone="$_in_ph"
+                    if [ -n "$_target_phone" ]; then
+                        local _sms_body=""
+                        if [ -r /backup/ban/_sms ] && [ -s /backup/ban/_sms ]; then
+                            _sms_body=$(cat /backup/ban/_sms 2>/dev/null)
+                        else
+                            _sms_body="[비밀번호 초기화] ID: ${u} / PW: ${_new_pw}"
+                        fi
+                        _um_p '▶ SMS 발송 중 -> %s ...\n' "$_target_phone"
+                        # 비대화형 stdin 소비 함정 방지: 반드시 $2 인자로 본문 직접 전달
+                        /script/sms "$_target_phone" "$_sms_body" 2>&1 | _um_norm_out
+                        _UM_MSG="✔ '${u}' 비번 리셋 + 안내 발송 완료!"
+                    else
+                        _um_p '  ⚠ 휴대폰 번호가 없어 SMS 발송을 건너뛰었습니다.\n'
+                    fi
+                fi
+                ;;
+            4)
+                if [ -x /script/logincheck ]; then
+                    /script/logincheck "$u" "$_new_pw" 2>&1 | _um_norm_out
+                fi
+                _UM_MSG="✔ '${u}' 비번 리셋 및 로그인 검증 완료"
+                ;;
+            *)
+                _UM_MSG="✔ '${u}' 비번 리셋 완료 (새 비번: ${_new_pw})"
+                ;;
+        esac
+    else
+        _UM_MSG="✔ '${u}' 비번 리셋 완료 (새 비번: ${_new_pw})"
+    fi
+
+    _um_pause "Enter를 누르면 목록으로 돌아갑니다..."
+}
+
+# ==============================================================================
+# 액션 5: 대응 DB & 홈폴더 통합 점검/조치 (d 키)
+# ==============================================================================
+_um_check_db_home() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local hom="${_UM_HOMES[$idx]}"
+
+    while :; do
+        tput cnorm 2>/dev/null
+        stty echo 2>/dev/null
+        printf '\033[2J\033[H'
+        _um_p '\033[1;36m* 대응 DB & 홈폴더 통합 점검/조치: %s (%s)\033[0m\n' "$u" "$hom"
+        printf '%s\n' "------------------------------------------------------------------------"
+        _um_p '  \033[1;33m1.\033[0m 📁 홈폴더 종합 점검 (권한·웹루트·디스크 용량·Top 15 폴더·Quota)\n'
+        _um_p '  \033[1;33m2.\033[0m 🔧 홈폴더/웹루트(public_html) 소유권·권한 자동 보정\n'
+        _um_p '  \033[1;33m3.\033[0m 🔎 홈폴더 내 대용량 파일 탐색 (50MB 이상)\n'
+        _um_p '  \033[1;33m4.\033[0m 📂 홈폴더 파일 탐색기 열기 (explorer)\n'
+        _um_p '  \033[1;33m5.\033[0m 🗄️  대응 DB 종합 점검 (DB목록·테이블 수·용량·DB유저 권한)\n'
+        _um_p '  \033[1;33m6.\033[0m 💾 대응 DB 안전 백업 (mysqldump)\n'
+        _um_p '  \033[1;33m7.\033[0m 💻 대응 DB 콘솔 접속 (mysql %s)\n' "$u"
+        _um_p '  \033[0;37m0.\033[0m 돌아가기\n'
+        printf '%s\n' "------------------------------------------------------------------------"
+        _um_p '선택 [0-7]: '
+        local _sel=""
+        IFS= read -r _sel </dev/tty
+        case "$_sel" in
+            1)
+                printf '\n'
+                if [ -d "$hom" ]; then
+                    ls -ld "$hom" 2>&1
+                    for _wr in "$hom/public_html" "$hom/www" "$hom/html"; do
+                        [ -d "$_wr" ] && ls -ld "$_wr" 2>&1
+                    done
+                    _um_p '\n▶ 하위 디렉토리 크기 Top 15:\n'
+                    du -h --max-depth=2 "$hom" 2>/dev/null | sort -hr 2>/dev/null | head -n 15 \
+                        || du -sk "$hom"/* 2>/dev/null | sort -rn | head -n 15
+                    if command -v quota >/dev/null 2>&1; then
+                        _um_p '\n▶ 디스크 Quota:\n'
+                        quota -u "$u" 2>&1
+                    fi
+                else
+                    _um_p '⚠ 홈 디렉토리가 존재하지 않습니다: %s\n' "$hom"
+                fi
+                _um_pause
+                ;;
+            2)
+                if [ -d "$hom" ]; then
+                    _um_p '\n홈폴더(%s) 소유권(%s:%s) 및 권한(701 / public_html 750)을 보정할까요? [y/N]: ' "$hom" "$u" "$u"
+                    local _ans=""
+                    IFS= read -r _ans </dev/tty
+                    case "$_ans" in
+                        y|Y)
+                            chmod 701 "$hom" 2>&1
+                            chown "${u}:${u}" "$hom" 2>&1
+                            if [ -d "$hom/public_html" ]; then
+                                chown -R "${u}:${u}" "$hom/public_html" 2>&1
+                                chmod 750 "$hom/public_html" 2>&1
+                            else
+                                _um_p 'public_html 폴더가 없습니다. 새로 생성할까요? [y/N]: '
+                                local _mk=""
+                                IFS= read -r _mk </dev/tty
+                                case "$_mk" in
+                                    y|Y)
+                                        mkdir -p "$hom/public_html"
+                                        chown -R "${u}:${u}" "$hom/public_html"
+                                        chmod 750 "$hom/public_html"
+                                        ;;
+                                esac
+                            fi
+                            ls -ald "$hom" "$hom/public_html" 2>/dev/null
+                            _UM_MSG="✔ '${u}' 홈폴더 권한 보정 완료"
+                            ;;
+                    esac
+                else
+                    _um_p '⚠ 홈 디렉토리가 없습니다: %s\n' "$hom"
+                fi
+                _um_pause
+                ;;
+            3)
+                if [ -d "$hom" ]; then
+                    _um_p '\n▶ %s 내 50MB 이상 대용량 파일 목록:\n' "$hom"
+                    find "$hom" -type f -size +50M -exec ls -lh {} + 2>/dev/null | head -n 30
+                else
+                    _um_p '⚠ 홈 디렉토리가 없습니다: %s\n' "$hom"
+                fi
+                _um_pause
+                ;;
+            4)
+                if [ -d "$hom" ]; then
+                    explorer "$hom"
+                else
+                    _um_p '⚠ 홈 디렉토리가 없습니다: %s\n' "$hom"
+                    _um_pause
+                fi
+                ;;
+            5)
+                printf '\n'
+                if [ -d "/var/lib/mysql/$u" ]; then
+                    _um_p '▶ 물리 DB 디렉토리: '
+                    du -sh "/var/lib/mysql/$u" 2>/dev/null
+                fi
+                if [ -n "$_UM_MYSQL" ]; then
+                    _um_p '▶ 매칭 DB 및 용량 (MB):\n'
+                    "$_UM_MYSQL" -e "
+                        SELECT table_schema AS DB, COUNT(*) AS Tables,
+                               ROUND(SUM(data_length + index_length)/1024/1024, 2) AS Size_MB
+                        FROM information_schema.tables
+                        WHERE table_schema LIKE '${u}%'
+                        GROUP BY table_schema;
+                    " 2>&1 || "$_UM_MYSQL" -e "SHOW DATABASES LIKE '${u}%';" 2>&1
+                    _um_p '\n▶ DB 사용자 계정(mysql.user):\n'
+                    "$_UM_MYSQL" -e "SELECT User, Host FROM mysql.user WHERE User LIKE '${u}%';" 2>&1
+                else
+                    _um_p '⚠ mysql/mariadb 클라이언트를 찾지 못했습니다.\n'
+                fi
+                _um_pause
+                ;;
+            6)
+                local _bdir="/tmp"
+                [ -d /backup/mysqldump ] && _bdir="/backup/mysqldump"
+                [ -d /backup/ban ] && _bdir="/backup/ban"
+                local _bfile="${_bdir}/${u}_$(date +%Y%m%d_%H%M%S).sql"
+                _um_p '\n▶ DB [%s] 백업 -> %s\n' "$u" "$_bfile"
+                if [ -n "$_UM_MYSQLDUMP" ]; then
+                    if "$_UM_MYSQLDUMP" --single-transaction --quick "$u" >"$_bfile" 2>/dev/null \
+                       || "$_UM_MYSQLDUMP" "$u" >"$_bfile" 2>/dev/null; then
+                        ls -lh "$_bfile"
+                        _UM_MSG="✔ DB 백업 완료: $_bfile"
+                    else
+                        rm -f "$_bfile" 2>/dev/null
+                        _um_p '⚠ mysqldump 실패 (DB명 확인 또는 root 인증 필요)\n'
+                    fi
+                else
+                    _um_p '⚠ mysqldump 명령을 찾지 못했습니다.\n'
+                fi
+                _um_pause
+                ;;
+            7)
+                if [ -n "$_UM_MYSQL" ]; then
+                    "$_UM_MYSQL" "$u"
+                else
+                    _um_p '⚠ mysql/mariadb 클라이언트를 찾지 못했습니다.\n'
+                    _um_pause
+                fi
+                ;;
+            0|"") break ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# 액션 6: 호스팅 계정 전용 액션 센터 (H 키 — 로컬 /script/* 자동 연동)
+# ==============================================================================
+_um_hosting_menu() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+
+    if [ "$_UM_HOSTING" -ne 1 ]; then
+        _UM_MSG="ℹ 이 서버에는 로컬 호스팅 관리 스크립트(/script/*)가 설치되어 있지 않습니다."
+        return 0
+    fi
+
+    _um_extract_hosting_contact "$u"
+
+    while :; do
+        tput cnorm 2>/dev/null
+        stty echo 2>/dev/null
+        printf '\033[2J\033[H'
+        _um_p '\033[1;36m* 호스팅 계정 통합 액션 센터: %s\033[0m\n' "$u"
+        _um_p '  도메인: \033[1;37m%s\033[0m  |  메일: \033[1;32m%s\033[0m  |  휴대폰: \033[1;33m%s\033[0m\n' \
+            "${_UM_C_DOMAIN:--}" "${_UM_C_EMAIL:--}" "${_UM_C_PHONE:--}"
+        printf '%s\n' "------------------------------------------------------------------------"
+        _um_p '  \033[1;33m 1.\033[0m 📋 계정 종합 정보 조회 (/script/is)\n'
+        _um_p '  \033[1;33m 2.\033[0m 🌐 전 서버 계정/도메인 검색 (/script/isall)\n'
+        _um_p '  \033[1;33m 3.\033[0m 📊 트래픽 현황 조회 (/script/webfer) & 리셋 로그 (/script/ta)\n'
+        _um_p '  \033[1;33m 4.\033[0m 🔄 트래픽 제한 초기화 (/script/treset)\n'
+        _um_p '  \033[1;33m 5.\033[0m 💿 디스크 Quota 확인/수정 (quota / edquota)\n'
+        _um_p '  \033[1;33m 6.\033[0m 🔐 계정 로그인 테스트 (/script/logincheck)\n'
+        _um_p '  \033[1;33m 7.\033[0m 📧 등록 이메일 수정 (/script/vu) / 안내 메일 발송 (/root/emailsend)\n'
+        _um_p '  \033[1;33m 8.\033[0m 📱 고객 휴대폰 SMS 발송 (/script/sms)\n'
+        _um_p '  \033[1;33m 9.\033[0m 🔒 SSL 인증서 설치/점검 (/script/ssl)\n'
+        _um_p '  \033[1;33m10.\033[0m 🌍 도메인/DNS 변경 (/root/dnschg) & 가상호스트 확인\n'
+        _um_p '  \033[1;33m11.\033[0m 💰 만기·연장·단위 증설 계산 (/root/emoney · /script/da)\n'
+        _um_p '  \033[0;37m 0.\033[0m 돌아가기\n'
+        printf '%s\n' "------------------------------------------------------------------------"
+        _um_p '선택 [0-11]: '
+        local _sel=""
+        IFS= read -r _sel </dev/tty
+        case "$_sel" in
+            1)
+                [ -x /script/is ] && /script/is "$u" 2>&1 | _um_norm_out || _um_p '⚠ /script/is 없음\n'
+                _um_pause ;;
+            2)
+                [ -x /script/isall ] && /script/isall "$u" 2>&1 | _um_norm_out || _um_p '⚠ /script/isall 없음\n'
+                _um_pause ;;
+            3)
+                [ -x /script/webfer ] && /script/webfer "$u" 2>&1 | _um_norm_out
+                [ -x /script/ta ] && { _um_p '\n▶ 최근 트래픽 리셋 로그:\n'; /script/ta 2>&1 | _um_norm_out | tail -n 15; }
+                _um_pause ;;
+            4)
+                if [ -x /script/treset ]; then
+                    _um_p '\n계정 [%s] 트래픽 제한을 초기화할까요? [y/N]: ' "$u"
+                    local _ta=""
+                    IFS= read -r _ta </dev/tty
+                    case "$_ta" in
+                        y|Y)
+                            /script/treset "$u" 2>&1 | _um_norm_out
+                            _UM_MSG="✔ '${u}' 트래픽 초기화 실행 완료"
+                            ;;
+                    esac
+                else
+                    _um_p '⚠ /script/treset 없음\n'
+                fi
+                _um_pause ;;
+            5)
+                if command -v quota >/dev/null 2>&1; then
+                    quota -u "$u" 2>&1
+                    _um_p '\nedquota -u %s 로 용량 제한을 수정할까요? [y/N]: ' "$u"
+                    local _eq=""
+                    IFS= read -r _eq </dev/tty
+                    case "$_eq" in y|Y) edquota -u "$u" ;; esac
+                else
+                    _um_p '⚠ quota 명령 없음\n'
+                fi
+                _um_pause ;;
+            6)
+                if [ -x /script/logincheck ]; then
+                    _um_p '테스트할 비밀번호 입력: '
+                    local _tpw=""
+                    IFS= read -r _tpw </dev/tty
+                    [ -n "$_tpw" ] && /script/logincheck "$u" "$_tpw" 2>&1 | _um_norm_out
+                else
+                    _um_p '⚠ /script/logincheck 없음\n'
+                fi
+                _um_pause ;;
+            7)
+                _um_p '  [1] 등록 이메일 수정 (/script/vu %s)  |  [2] 안내 메일 발송 (/root/emailsend %s) : ' "$u" "$u"
+                local _em=""
+                IFS= read -r _em </dev/tty
+                if [ "$_em" = "1" ] && [ -x /script/vu ]; then
+                    /script/vu "$u"
+                elif [ "$_em" = "2" ] && [ -x /root/emailsend ]; then
+                    /root/emailsend "$u"
+                fi
+                _um_extract_hosting_contact "$u"
+                _um_pause ;;
+            8)
+                if [ -x /script/sms ]; then
+                    local _ph="$_UM_C_PHONE"
+                    _um_p '수신 휴대폰 번호 (Enter=기본 [%s]): ' "${_ph:-없음}"
+                    local _iph=""
+                    IFS= read -r _iph </dev/tty
+                    [ -n "$_iph" ] && _ph="$_iph"
+                    if [ -n "$_ph" ]; then
+                        _um_p '발송할 SMS 내용 입력: '
+                        local _msg=""
+                        IFS= read -r _msg </dev/tty
+                        if [ -n "$_msg" ]; then
+                            /script/sms "$_ph" "$_msg" 2>&1 | _um_norm_out
+                            _UM_MSG="✔ SMS 발송 완료 -> $_ph"
+                        fi
+                    fi
+                else
+                    _um_p '⚠ /script/sms 없음\n'
+                fi
+                _um_pause ;;
+            9)
+                if [ -x /script/ssl ]; then
+                    /script/ssl "$u"
+                else
+                    _um_p '⚠ /script/ssl 없음\n'
+                fi
+                _um_pause ;;
+            10)
+                _um_p '  [1] 가상호스트 설정 검색 (httpd.conf/nginx)  |  [2] 도메인/DNS 변경 (/root/dnschg %s) : ' "$u"
+                local _dn=""
+                IFS= read -r _dn </dev/tty
+                if [ "$_dn" = "1" ]; then
+                    grep -rn -C 3 "$u" /etc/httpd/conf/httpd.conf /etc/httpd/conf.d/ /usr/local/apache*/conf/ /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -n 45
+                elif [ "$_dn" = "2" ] && [ -x /root/dnschg ]; then
+                    /root/dnschg "$u"
+                fi
+                _um_pause ;;
+            11)
+                [ -x /root/emoney ] && { _um_p '▶ 만기/연장 계산 (/root/emoney):\n'; /root/emoney "$u" 2>&1 | _um_norm_out; }
+                [ -x /script/da ] && { _um_p '\n▶ 단위 변경 일할 계산 (/script/da):\n'; /script/da "$u" 2>&1 | _um_norm_out; }
+                _um_pause ;;
+            0|"") break ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# 액션 7: 그룹 · 쉘 · 만료일 관리 (g 키)
+# ==============================================================================
+_um_manage_group_shell() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local shl="${_UM_SHELLS[$idx]}"
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 그룹 · 쉘 · 만료일 관리: %s\033[0m\n' "$u"
+    printf '%s\n' "------------------------------------------------------------------------"
+    id "$u" 2>&1
+    printf '현재 쉘: %s\n' "$shl"
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '  \033[1;33m1.\033[0m 그룹 추가 (sudo / wheel / www-data / 직접입력)\n'
+    _um_p '  \033[1;33m2.\033[0m 로그인 쉘 변경 (/bin/bash, /bin/sh, /sbin/nologin, /bin/pass 등)\n'
+    _um_p '  \033[1;33m3.\033[0m 계정 만료일 조회 / 해제 (chage -E -1)\n'
+    _um_p '  \033[0;37m0.\033[0m 취소\n'
+    _um_p '선택 [0-3]: '
+    local _sel=""
+    IFS= read -r _sel </dev/tty
+    case "$_sel" in
+        1)
+            _um_p '추가할 그룹명 (예: wheel, sudo, www-data): '
+            local _grp=""
+            IFS= read -r _grp </dev/tty
+            if [ -n "$_grp" ]; then
+                usermod -aG "$_grp" "$u" 2>&1 && _UM_MSG="✔ '${u}' -> 그룹 '${_grp}' 추가 완료"
+                id "$u" 2>&1
+                _um_pause
+            fi
+            ;;
+        2)
+            _um_p '  [1] /bin/bash  [2] /bin/sh  [3] /sbin/nologin  [4] /bin/pass  [5] 직접입력 : '
+            local _s="" _nsh=""
+            IFS= read -r _s </dev/tty
+            case "$_s" in
+                1) _nsh="/bin/bash" ;;
+                2) _nsh="/bin/sh" ;;
+                3) _nsh="/sbin/nologin" ;;
+                4) _nsh="/bin/pass" ;;
+                5) _um_p '쉘 경로 입력: '; IFS= read -r _nsh </dev/tty ;;
+            esac
+            if [ -n "$_nsh" ]; then
+                usermod -s "$_nsh" "$u" 2>&1 && { _um_refresh_one "$idx"; _UM_MSG="✔ '${u}' 쉘 변경 완료: $_nsh"; }
+                _um_pause
+            fi
+            ;;
+        3)
+            if command -v chage >/dev/null 2>&1; then
+                chage -l "$u" 2>&1
+                _um_p '\n계정 만료 제한을 해제(chage -E -1 -M 99999)할까요? [y/N]: '
+                local _ch=""
+                IFS= read -r _ch </dev/tty
+                case "$_ch" in
+                    y|Y)
+                        chage -E -1 -M 99999 "$u" 2>&1
+                        _um_refresh_one "$idx"
+                        _UM_MSG="✔ '${u}' 만료 제한 해제 완료"
+                        ;;
+                esac
+            fi
+            _um_pause
+            ;;
+    esac
+}
+
+# ==============================================================================
+# 액션 8: 새 사용자 생성 마법사 (a 키)
+# ==============================================================================
+_um_add_user() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 새 사용자 계정 생성 마법사\033[0m\n'
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '새 계정 ID (영소문자/숫자, 빈 값=취소): '
+    local _nu=""
+    IFS= read -r _nu </dev/tty
+    [ -z "$_nu" ] && { _UM_MSG="취소됨"; return 0; }
+    if id "$_nu" >/dev/null 2>&1; then
+        _UM_MSG="⚠ 이미 존재하는 계정입니다: $_nu"
+        return 1
+    fi
+
+    _um_p '로그인 쉘 (Enter=/bin/bash): '
+    local _nsh=""
+    IFS= read -r _nsh </dev/tty
+    [ -z "$_nsh" ] && _nsh="/bin/bash"
+
+    local _rpw
+    _rpw=$(_um_gen_password 12)
+    _um_p '비밀번호 (Enter=랜덤 자동생성 [%s]): ' "$_rpw"
+    local _npw=""
+    IFS= read -r _npw </dev/tty
+    [ -z "$_npw" ] && _npw="$_rpw"
+
+    _um_p '웹루트(/home/%s/public_html)도 함께 생성할까요? [y/N]: ' "$_nu"
+    local _mkw=""
+    IFS= read -r _mkw </dev/tty
+
+    useradd -m -d "/home/$_nu" -s "$_nsh" "$_nu" 2>&1
+    if [ $? -eq 0 ]; then
+        if command -v chpasswd >/dev/null 2>&1; then
+            printf '%s:%s\n' "$_nu" "$_npw" | chpasswd 2>&1
+        else
+            printf '%s\n' "$_npw" | passwd --stdin "$_nu" 2>&1
+        fi
+        case "$_mkw" in
+            y|Y)
+                mkdir -p "/home/$_nu/public_html"
+                chown -R "${_nu}:${_nu}" "/home/$_nu/public_html"
+                chmod 701 "/home/$_nu"
+                chmod 750 "/home/$_nu/public_html"
+                ;;
+        esac
+        _um_load_users
+        _um_build_view
+        _um_p '\n\033[1;32m✔ 계정 생성 완료!\033[0m  ID: %s  |  PW: \033[1;33m%s\033[0m  |  Shell: %s\n' "$_nu" "$_npw" "$_nsh"
+        _UM_MSG="✔ 새 계정 '${_nu}' 생성 완료 (PW: ${_npw})"
+    else
+        _UM_MSG="✖ 계정 '${_nu}' 생성 실패"
+    fi
+    _um_pause
+}
+
+# ==============================================================================
+# 액션 9: 계정 안전 삭제 (x / D 키 — 핵심 계정 보호 + ID 재입력 이중 확인)
+# ==============================================================================
+_um_delete_user() {
+    local idx="$1"
+    local u="${_UM_NAMES[$idx]}"
+    local uid="${_UM_UIDS[$idx]}"
+    local hom="${_UM_HOMES[$idx]}"
+
+    if _um_is_protected "$u" "$uid" || [ "$uid" -lt "$_UM_MIN_UID" ] 2>/dev/null; then
+        _UM_MSG="⚠ 시스템/핵심 계정 '${u}' (UID:${uid}) 는 안전을 위해 삭제할 수 없습니다."
+        return 1
+    fi
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;31m* 위험 작업: 사용자 계정 삭제 (%s)\033[0m\n' "$u"
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '  대상 계정: \033[1;37m%s\033[0m (UID: %s)  |  홈: %s\n' "$u" "$uid" "$hom"
+    _um_p '  \033[1;33m1.\033[0m 계정만 삭제 (홈 디렉토리 보존: userdel %s)\n' "$u"
+    _um_p '  \033[1;31m2.\033[0m 계정 + 홈 디렉토리 완전 삭제 (userdel -r %s)\n' "$u"
+    [ -x /root/userdrop ] && _um_p '  \033[1;31m3.\033[0m 호스팅 계정 완전 삭제 (/root/userdrop %s)\n' "$u"
+    _um_p '  \033[0;37m0.\033[0m 취소\n'
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '선택 [0-3]: '
+    local _sel=""
+    IFS= read -r _sel </dev/tty
+    case "$_sel" in
+        1|2|3)
+            _um_p '\033[1;31m확인을 위해 삭제할 계정명 [%s] 을(를) 정확히 다시 입력하세요: \033[0m' "$u"
+            local _chk=""
+            IFS= read -r _chk </dev/tty
+            if [ "$_chk" != "$u" ]; then
+                _UM_MSG="취소됨: 계정명 불일치"
+                return 0
+            fi
+            if [ "$_sel" = "1" ]; then
+                userdel "$u" 2>&1
+            elif [ "$_sel" = "2" ]; then
+                userdel -r "$u" 2>&1
+            elif [ "$_sel" = "3" ] && [ -x /root/userdrop ]; then
+                /root/userdrop "$u"
+            fi
+            _um_load_users
+            _um_build_view
+            _UM_MSG="✔ 계정 '${u}' 삭제 처리 완료"
+            _um_pause
+            ;;
+        *)
+            _UM_MSG="삭제 취소됨"
+            ;;
+    esac
+}
+
+# ==============================================================================
+# 도움말 (? / h 키)
+# ==============================================================================
+_um_show_help() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\033[2J\033[H'
+    _um_p '\033[1;36m* 통합 사용자·호스팅 계정 관리 TUI [ums] 도움말\033[0m\n'
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_p '  \033[1;33m↑/↓, j/k\033[0m       : 계정 위/아래 이동\n'
+    _um_p '  \033[1;33m←/→, PgUp/PgDn\033[0m : 이전/다음 페이지 이동\n'
+    _um_p '  \033[1;33mEnter / v\033[0m      : 계정 종합 상세 보기 (권한·락·홈·용량·DB·호스팅정보)\n'
+    _um_p '  \033[1;33mSpace / l\033[0m      : 계정 잠금(Lock) / 해제(Unlock) 토글 (passwd -l/-u)\n'
+    _um_p '  \033[1;33mu\033[0m              : 완전 Unban (faillock/pam_tally2 초기화 + passwd -u + 차단IP 점검)\n'
+    _um_p '  \033[1;33mp\033[0m              : 비밀번호 리셋 (랜덤생성/수동입력) + 호스팅 메일/SMS 발송 연동\n'
+    _um_p '  \033[1;33md\033[0m              : 대응 DB & 홈폴더 통합 점검/권한보정/대용량파일/백업/탐색기\n'
+    _um_p '  \033[1;33mH\033[0m              : 호스팅 계정 전용 액션 센터 (트래픽·Quota·SSL·DNS·메일·SMS·만기)\n'
+    _um_p '  \033[1;33mg\033[0m              : 그룹(sudo/wheel/www-data) · 쉘 · 만료일 관리\n'
+    _um_p '  \033[1;33ma\033[0m              : 새 사용자 계정 생성 마법사\n'
+    _um_p '  \033[1;33mx / D\033[0m          : 계정 안전 삭제 (시스템 계정 보호 + ID 재입력 확인)\n'
+    _um_p '  \033[1;33m/\033[0m              : 실시간 검색 (계정ID / 홈폴더 / 메모)\n'
+    _um_p '  \033[1;33mf\033[0m              : 필터 순환 (일반유저 -> 잠김/실패 -> 활성 -> 관리자 -> 시스템 -> 전체)\n'
+    _um_p '  \033[1;33mr\033[0m              : 계정 목록 전체 새로고침\n'
+    _um_p '  \033[1;33mq / ESC\033[0m        : 종료 (검색 중이면 ESC로 검색어 초기화)\n'
+    printf '%s\n' "------------------------------------------------------------------------"
+    _um_pause "Enter를 누르면 목록으로 돌아갑니다..."
+}
+
+# ==============================================================================
+# 렌더링 엔진 (무깜빡임 델타 렌더링)
+# ==============================================================================
+_um_render_row() {
+    local vidx="$1" is_cur="$2"
+    local idx="${_UM_VIEW[$vidx]}"
+    local nm="${_UM_NAMES[$idx]}"
+    local uid="${_UM_UIDS[$idx]}"
+    local hom="${_UM_HOMES[$idx]}"
+    local shl="${_UM_SHELLS[$idx]}"
+    local st="${_UM_STATES[$idx]}"
+    local fc="${_UM_FAILS[$idx]}"
+    local su="${_UM_SUDO[$idx]}"
+
+    local cur_mark=" "
+    [ "$is_cur" -eq 1 ] && cur_mark="$_UM_S_CUR"
+
+    local st_col='\033[0;32m' st_txt="$st"
+    if [ "$st" = "LOCKED" ]; then
+        st_col='\033[1;31m'
+    elif [ "${fc:-0}" -gt 0 ] 2>/dev/null; then
+        st_col='\033[1;31m'; st_txt="FAIL:${fc}"
+    elif [ "$st" = "NOPW" ] || [ "$st" = "EXPIRED" ]; then
+        st_col='\033[1;33m'
+    fi
+
+    local htag="[OK]"
+    [ -d "$hom" ] || htag="[--]"
+    local stag=""
+    [ "$su" = "1" ] && stag="[SUDO]"
+
+    local sh_short="${shl##*/}"
+    local hom_w=$((_UM_COLS - 62))
+    [ "$hom_w" -lt 12 ] && hom_w=12
+    local hom_disp="$hom"
+    [ ${#hom_disp} -gt "$hom_w" ] && hom_disp="${hom_disp:0:$((hom_w - 2))}.."
+
+    if [ "$is_cur" -eq 1 ]; then
+        printf '\033[1;37;44m %s %-16.16s %-8s %5s %-4s %-*.*s %-10.10s %-6s\033[0m\033[K\n' \
+            "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$hom_w" "$hom_w" "$hom_disp" "$sh_short" "$stag"
+    else
+        printf ' %s \033[1;37m%-16.16s\033[0m %b%-8s\033[0m \033[0;37m%5s\033[0m %-4s \033[0;36m%-*.*s\033[0m \033[0;37m%-10.10s\033[0m \033[1;33m%-6s\033[0m\033[K\n' \
+            "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$htag" "$hom_w" "$hom_w" "$hom_disp" "$sh_short" "$stag"
+    fi
+}
+
+_um_render_footer() {
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
+    if [ "$_UM_VCNT" -gt 0 ]; then
+        local cidx="${_UM_VIEW[$_UM_CUR]}"
+        local cnm="${_UM_NAMES[$cidx]}"
+        local cuid="${_UM_UIDS[$cidx]}"
+        local cgid="${_UM_GIDS[$cidx]}"
+        local chom="${_UM_HOMES[$cidx]}"
+        local cshl="${_UM_SHELLS[$cidx]}"
+        local cst="${_UM_STATES[$cidx]}"
+        local cfc="${_UM_FAILS[$cidx]}"
+        local cgec="${_UM_GECOS[$cidx]}"
+        local dbb
+        dbb=$(_um_quick_db_badge "$cnm")
+        local hstat="존재"
+        [ -d "$chom" ] || hstat="없음"
+
+        printf ' \033[1;33m선택 계정:\033[0m \033[1;37m%s\033[0m  (UID:%s GID:%s | 상태:%s | 실패:%s | %s)\033[K\n' \
+            "$cnm" "$cuid" "$cgid" "$cst" "${cfc:-0}" "$dbb"
+        printf '   %s 홈: \033[0;36m%s\033[0m (%s) | 쉘: \033[0;37m%s\033[0m | 메모: %s\033[K\n' \
+            "$_UM_S_BUL" "$chom" "$hstat" "$cshl" "${cgec:--}"
+        if [ "$_UM_HOSTING" -eq 1 ]; then
+            printf '   %s 동작: [Enter]상세  [Space]잠금토글  [u]Unban  [p]비번리셋+메일/SMS  [d]DB/홈점검  \033[1;32m[H]호스팅액션\033[0m\033[K\n' "$_UM_S_BUL"
+        else
+            printf '   %s 동작: [Enter]상세  [Space]잠금토글  [u]Unban  [p]비번리셋(랜덤/수동)  [d]DB/홈점검  [g]그룹/쉘\033[K\n' "$_UM_S_BUL"
+        fi
+    else
+        printf '\033[K\n\033[K\n\033[K\n'
+    fi
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
+    if [ -n "$_UM_MSG" ]; then
+        printf '\033[1;33m %s\033[0m\033[K' "$_UM_MSG"
+    else
+        if [ "$_UM_HOSTING" -eq 1 ]; then
+            printf ' \033[0;37m[Enter]상세 [Space]잠금 [u]Unban [p]비번리셋 [d]DB/홈 [H]호스팅 [g]그룹 [a]추가 [x]삭제 [/]검색 [f]필터 [r]갱신 [?]도움 [q]종료\033[0m\033[K'
+        else
+            printf ' \033[0;37m[Enter]상세 [Space]잠금 [u]Unban [p]비번리셋 [d]DB/홈 [g]그룹 [a]추가 [x]삭제 [/]검색 [f]필터 [r]갱신 [?]도움 [q]종료\033[0m\033[K'
+        fi
+    fi
+}
+
+_um_render_full_body() {
+    local list_h=$_UM_PAGE_H
+    local cur_pg=1 tot_pg=1
+    if [ "$_UM_VCNT" -gt 0 ]; then
+        cur_pg=$(( (_UM_TOP / list_h) + 1 ))
+        tot_pg=$(( ((_UM_VCNT - 1) / list_h) + 1 ))
+    fi
+    local flabel="일반유저"
+    case "$_UM_FILTER" in
+        locked) flabel="잠김/실패" ;;
+        active) flabel="활성만" ;;
+        sudo)   flabel="관리자(SUDO)" ;;
+        system) flabel="시스템계정" ;;
+        all)    flabel="전체" ;;
+    esac
+    local hbadge=""
+    [ "$_UM_HOSTING" -eq 1 ] && hbadge=" \033[1;32m[Hosting]\033[0m"
+
+    printf '\033[H'
+    printf '\033[1;36m* 통합 사용자 관리 [ums]\033[0m%b  \033[0;37mOS: %s\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)  \033[1;37mP.%d/%d\033[0m' \
+        "$hbadge" "$_UM_OS" "$flabel" "$_UM_VCNT" "$_UM_TOTAL" "$cur_pg" "$tot_pg"
+    [ -n "$_UM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_UM_SEARCH"
+    printf '\033[K\n\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
+
+    local r=0 vidx
+    if [ "$_UM_VCNT" -eq 0 ]; then
+        printf '\033[K\n  (조건에 맞는 사용자가 없습니다. / 로 검색어를 지우거나 f 로 필터를 바꾸세요)\033[K\n'
+        r=2
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\033[K\n'
+            r=$((r + 1))
+        done
+    else
+        while [ "$r" -lt "$list_h" ]; do
+            vidx=$((_UM_TOP + r))
+            [ "$vidx" -ge "$_UM_VCNT" ] && break
+            if [ "$vidx" -eq "$_UM_CUR" ]; then
+                _um_render_row "$vidx" 1
+            else
+                _um_render_row "$vidx" 0
+            fi
+            r=$((r + 1))
+        done
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\033[K\n'
+            r=$((r + 1))
+        done
+    fi
+    _um_render_footer
+    printf '\033[J'
+}
+
+_um_render_delta_body() {
+    local old_row=$((3 + _UM_LAST_CUR - _UM_TOP))
+    local new_row=$((3 + _UM_CUR - _UM_TOP))
+    local foot_row=$((3 + _UM_PAGE_H))
+    printf '\033[%d;1H' "$old_row"
+    _um_render_row "$_UM_LAST_CUR" 0
+    printf '\033[%d;1H' "$new_row"
+    _um_render_row "$_UM_CUR" 1
+    printf '\033[%d;1H' "$foot_row"
+    _um_render_footer
+}
+
+_um_render() {
+    if [ "$_UM_VCNT" -gt 0 ]; then
+        [ "$_UM_CUR" -lt 0 ] && _UM_CUR=0
+        [ "$_UM_CUR" -ge "$_UM_VCNT" ] && _UM_CUR=$((_UM_VCNT - 1))
+        _UM_TOP=$(( (_UM_CUR / _UM_PAGE_H) * _UM_PAGE_H ))
+    else
+        _UM_TOP=0
+    fi
+
+    if [ "${_UM_DIRTY:-1}" = "0" ] && [ "$_UM_VCNT" -gt 0 ] \
+       && [ "$_UM_TOP" = "${_UM_LAST_TOP:--1}" ] && [ "${_UM_LAST_CUR:--1}" -ge 0 ] \
+       && [ "$_UM_LAST_CUR" -lt "$_UM_VCNT" ] && [ -z "$_UM_MSG" ] && [ -z "${_UM_LAST_MSG:-}" ]; then
+        if [ "$_UM_CUR" != "$_UM_LAST_CUR" ]; then
+            if [ "$_UM_ENC" = "euckr" ]; then
+                _um_render_delta_body | _dm_iconv_euckr
+            else
+                _um_render_delta_body
+            fi
+        fi
+    else
+        if [ "$_UM_ENC" = "euckr" ]; then
+            _um_render_full_body | _dm_iconv_euckr
+        else
+            _um_render_full_body
+        fi
+        _UM_DIRTY=0
+    fi
+    _UM_LAST_CUR=$_UM_CUR
+    _UM_LAST_TOP=$_UM_TOP
+    _UM_LAST_MSG="$_UM_MSG"
+}
+
+# 메인 진입 함수: ums [초기검색어]
+ums() {
+    _um_detect_env
+
+    _UM_FILTER="users"
+    _UM_SEARCH="${1:-}"
+    _UM_CUR=0; _UM_TOP=0
+    _UM_MSG=""
+    _UM_LAST_CUR=-1; _UM_LAST_TOP=-1; _UM_LAST_MSG=""
+
+    _um_p '\033[1;36m[ums] %s 사용자 및 잠금 상태 로딩 중...\033[0m\n' "$_UM_OS"
+    _um_load_users
+    _um_build_view
+    # 일반 유저가 0명이고 검색어도 없으면 전체 보기로 자동 전환
+    if [ "$_UM_VCNT" -eq 0 ] && [ -z "$_UM_SEARCH" ]; then
+        _UM_FILTER="all"
+        _um_build_view
+    fi
+    _um_init_layout
+
+    local _esc_t=1
+    [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && _esc_t=0.25
+
+    local _old_trap
+    _old_trap=$(trap -p INT)
+    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+    trap '_um_init_layout' WINCH 2>/dev/null
+
+    printf '\033[2J\033[H'
+    tput civis 2>/dev/null
+    while :; do
+        _um_render
+        _UM_MSG=""
+
+        local _k="" _x="" _x2=""
+        IFS= read -rsn1 _k </dev/tty 2>/dev/null || break
+
+        if [ "$_k" = $'\033' ]; then
+            IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+            if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then
+                if [ -n "$_UM_SEARCH" ]; then
+                    _UM_SEARCH=""
+                    _UM_CUR=0; _UM_TOP=0
+                    _um_build_view
+                    _UM_DIRTY=1
+                    continue
+                fi
+                _k="q"
+            elif [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
+                IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+                case "$_x" in
+                    A) [ "$_UM_CUR" -gt 0 ] && _UM_CUR=$((_UM_CUR - 1)); continue ;;
+                    B) [ "$_UM_CUR" -lt $((_UM_VCNT - 1)) ] && _UM_CUR=$((_UM_CUR + 1)); continue ;;
+                    D) # ← 이전 페이지
+                       local _ph="${_UM_PAGE_H:-10}"
+                       if [ "$_UM_TOP" -gt 0 ]; then
+                           _UM_TOP=$((_UM_TOP - _ph))
+                           [ "$_UM_TOP" -lt 0 ] && _UM_TOP=0
+                           _UM_CUR=$_UM_TOP
+                       else
+                           _UM_CUR=0
+                       fi
+                       continue ;;
+                    C) # → 다음 페이지
+                       local _ph="${_UM_PAGE_H:-10}"
+                       local _nt=$((_UM_TOP + _ph))
+                       if [ "$_nt" -lt "$_UM_VCNT" ]; then
+                           _UM_TOP=$_nt; _UM_CUR=$_UM_TOP
+                       elif [ "$_UM_VCNT" -gt 0 ]; then
+                           _UM_CUR=$((_UM_VCNT - 1))
+                       fi
+                       continue ;;
+                    5) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       local _ph="${_UM_PAGE_H:-10}"
+                       if [ "$_UM_TOP" -gt 0 ]; then
+                           _UM_TOP=$((_UM_TOP - _ph))
+                           [ "$_UM_TOP" -lt 0 ] && _UM_TOP=0
+                           _UM_CUR=$_UM_TOP
+                       else
+                           _UM_CUR=0
+                       fi
+                       continue ;;
+                    6) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       local _ph="${_UM_PAGE_H:-10}"
+                       local _nt=$((_UM_TOP + _ph))
+                       if [ "$_nt" -lt "$_UM_VCNT" ]; then
+                           _UM_TOP=$_nt; _UM_CUR=$_UM_TOP
+                       elif [ "$_UM_VCNT" -gt 0 ]; then
+                           _UM_CUR=$((_UM_VCNT - 1))
+                       fi
+                       continue ;;
+                esac
+                continue
+            else
+                continue
+            fi
+        fi
+
+        case "$_k" in
+            q|Q) break ;;
+            \?|h)
+                _um_show_help
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            k) [ "$_UM_CUR" -gt 0 ] && _UM_CUR=$((_UM_CUR - 1)) ;;
+            j) [ "$_UM_CUR" -lt $((_UM_VCNT - 1)) ] && _UM_CUR=$((_UM_CUR + 1)) ;;
+            /)
+                tput cnorm 2>/dev/null
+                stty echo 2>/dev/null
+                _um_p '\n사용자 검색어 (계정ID/홈/메모, 빈 값=초기화): '
+                IFS= read -r _UM_SEARCH </dev/tty
+                _UM_CUR=0; _UM_TOP=0
+                _um_build_view
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            f|F)
+                case "$_UM_FILTER" in
+                    users)  _UM_FILTER="locked" ;;
+                    locked) _UM_FILTER="active" ;;
+                    active) _UM_FILTER="sudo" ;;
+                    sudo)   _UM_FILTER="system" ;;
+                    system) _UM_FILTER="all" ;;
+                    *)      _UM_FILTER="users" ;;
+                esac
+                _UM_CUR=0; _UM_TOP=0
+                _um_build_view
+                _UM_DIRTY=1
+                ;;
+            r|R)
+                _um_load_users
+                _um_build_view
+                _UM_MSG="✔ 계정 목록 새로고침 완료 (총 ${_UM_TOTAL}명)"
+                _UM_DIRTY=1
+                ;;
+            ""|v|V)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_show_detail "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            " "|l|L)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_toggle_lock "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            u|U)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_unban_user "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            p|P)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_reset_password "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            d)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_check_db_home "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            H)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_hosting_menu "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            g|G)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_manage_group_shell "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            a|A)
+                _um_add_user
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            x|X|D)
+                [ "$_UM_VCNT" -eq 0 ] && continue
+                _um_delete_user "${_UM_VIEW[$_UM_CUR]}"
+                _UM_DIRTY=1; tput civis 2>/dev/null
+                ;;
+        esac
+    done
+
+    tput cnorm 2>/dev/null
+    stty sane 2>/dev/null
+    [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+    printf '\n'
+}
+
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
     rbackup $1 || cp -a $1 $1.bak
