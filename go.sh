@@ -4445,19 +4445,81 @@ sortip() {
     sort -k1,1 -t. -k1,1n -k2,2n -k3,3n -k4,4n
 }
 
+# colored ip 공통 엔진 (mode: full | 24 | 16)
+#  - 256색 콘솔: 남색/검정 배경에서도 선명한 24색 전경 팔레트 우선 (배경색 남용 방지)
+#  - 16색 콘솔 : 어두운 파랑(34) 제외 고대비 전경색 우선 후 배경색 조합
+#  - 기존 gsub(IP, ...) 정규식 오매칭/중첩 버그 제거 (순차 슬라이싱 치환)
+_cip_run() {
+    local _mode="${1:-full}"
+    local _c256=0
+    case "${TERM:-}|${COLORTERM:-}" in
+        *256color*|*truecolor*|*24bit*) _c256=1 ;;
+        *)
+            local _tc
+            _tc="$(tput colors 2>/dev/null)"
+            [ -n "$_tc" ] && [ "$_tc" -ge 256 ] 2>/dev/null && _c256=1
+            ;;
+    esac
+    awkf -v MODE="$_mode" -v C256="$_c256" '
+    BEGIN {
+        if (C256 == 1) {
+            nfg = split("51 226 82 213 208 117 156 220 203 147 87 215 120 183 195 178 177 79 210 159 228 111 219 192", PAL, " ")
+            nbg = split("236 23 53 58 24 52", BGPAL, " ")
+        } else {
+            nfg = split("1;36 1;33 1;32 1;35 1;31 1;37 0;36 0;33 0;32 0;35", PAL, " ")
+            nbg = split("40 44 45 46 41 42", BGPAL, " ")
+        }
+        TC = 0
+    }
+    {
+        line = $0
+        out = ""
+        while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+            pre = substr(line, 1, RSTART - 1)
+            IP  = substr(line, RSTART, RLENGTH)
+            line = substr(line, RSTART + RLENGTH)
+            key = IP
+            if (MODE == "24") sub(/\.[0-9]+$/, "", key)
+            else if (MODE == "16") sub(/\.[0-9]+\.[0-9]+$/, "", key)
+            if (!(key in CODE)) {
+                if (C256 == 1) {
+                    if (TC < nfg) {
+                        CODE[key] = sprintf("\033[1;38;5;%sm", PAL[TC + 1])
+                    } else {
+                        fi = (TC % nfg) + 1
+                        bi = (int(TC / nfg) % nbg) + 1
+                        CODE[key] = sprintf("\033[1;38;5;%s;48;5;%sm", PAL[fi], BGPAL[bi])
+                    }
+                } else {
+                    if (TC < nfg) {
+                        CODE[key] = sprintf("\033[%sm", PAL[TC + 1])
+                    } else {
+                        fi = (TC % 6) + 1
+                        bi = (int(TC / nfg) % nbg) + 1
+                        CODE[key] = sprintf("\033[%s;%sm", PAL[fi], BGPAL[bi])
+                    }
+                }
+                TC++
+            }
+            out = out pre CODE[key] IP "\033[0m"
+        }
+        print out line
+    }' 2>/dev/null
+}
+
 # colored ip (1 line multi ip apply)
-cip() { awkf '{line=$0;while(match(line,/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)){IP=substr(line,RSTART,RLENGTH);line=substr(line,RSTART+RLENGTH);if(!(IP in FC)){BN[IP]=1;if(TC<6){FC[IP]=36-TC;}else{do{FC[IP]=37-(TC-6)%7;BC[IP]=40+(TC-6)%8;TC++;}while(FC[IP]==BC[IP]-10);if(FC[IP]<31)FC[IP]=37;}TC++;}if(TC>6&&BC[IP]>0){CP=sprintf("\033[%d;%d;%dm%s\033[0m",BN[IP],FC[IP],BC[IP],IP);}else{CP=sprintf("\033[%d;%dm%s\033[0m",BN[IP],FC[IP],IP);}gsub(IP,CP,$0);}print}' 2>/dev/null; }
+cip()   { _cip_run full; }
 
 # 실시간 출력 tail -f 등에 즉각 반응
 ipc() { ip a | cgrep DOWN | cgrep1 UP | cip; }
 ipa() { ip a | cgrep DOWN | cgrep1 UP | cip; }
 ipl() { ip l | cgrep DOWN | cgrep1 UP | cip; }
 
-# colred ip cidr/24 -> same color
-cip24() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
+# colored ip cidr/24 -> same color
+cip24() { _cip_run 24; }
 
-# colred ip cidr/16 -> same color
-cip16() { awk '{line=$0; while (match(line, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {IP=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH); Prefix=IP; sub(/\.[0-9]+\.[0-9]+$/, "", Prefix); if (!(Prefix in FC)) {BN[Prefix]=1; if (TC<6) {FC[Prefix]=36-TC;} else { do {FC[Prefix]=30+(TC-6)%8; BC[Prefix]=(40+(TC-6))%48; TC++;} while (FC[Prefix]==BC[Prefix]-10); if (FC[Prefix]==37) {FC[Prefix]--;}} TC++;} if (BC[Prefix]>0) {CP=sprintf("\033[%d;%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], BC[Prefix], IP);} else {CP=sprintf("\033[%d;%dm%s\033[0m", BN[Prefix], FC[Prefix], IP);} gsub(IP, CP, $0);} print;}'; }
+# colored ip cidr/16 -> same color
+cip16() { _cip_run 16; }
 
 # 검색문자열들 색칠(red)
 cgrep() {
