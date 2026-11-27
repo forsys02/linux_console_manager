@@ -13480,7 +13480,7 @@ _um_get_fail_cnt() {
     printf '%s' "$_cnt"
 }
 
-# 전체 계정 목록 로딩 (/etc/passwd + /etc/shadow + /etc/group + faillock 일괄 집계)
+# 전체 계정 목록 로딩 (/etc/passwd + /etc/shadow + /etc/group + faillock + DB/도메인/이메일 일괄 집계)
 _um_load_users() {
     _UM_NAMES=()
     _UM_UIDS=()
@@ -13491,13 +13491,19 @@ _um_load_users() {
     _UM_STATES=()
     _UM_FAILS=()
     _UM_SUDO=()
+    _UM_DBS=()
+    _UM_DOMAINS=()
+    _UM_EMAILS=()
     _UM_TOTAL=0
 
     local _tmp="/tmp/.ums_list.$$"
     local _ftmp="/tmp/.ums_fail.$$"
-    : >"$_ftmp"
+    local _dtmp="/tmp/.ums_dom.$$"
+    local _etmp="/tmp/.ums_eml.$$"
+    local _dbtmp="/tmp/.ums_db.$$"
+    : >"$_ftmp"; : >"$_dtmp"; : >"$_etmp"; : >"$_dbtmp"
 
-    # 로그인 실패 횟수 일괄 수집 (빠른 1회 실행)
+    # 1) 로그인 실패 횟수 일괄 수집
     if [ "$_UM_FAIL_TOOL" = "faillock" ]; then
         faillock 2>/dev/null | awk '
             /:$/ { u=$1; sub(/:$/,"",u); next }
@@ -13508,14 +13514,79 @@ _um_load_users() {
         "$_UM_FAIL_TOOL" 2>/dev/null | awk 'NR>1 && $2 ~ /^[0-9]+$/ && $2+0 > 0 { print $1 "\t" $2 }' >"$_ftmp"
     fi
 
-    # /etc/passwd + /etc/shadow + /etc/group + 실패횟수 통합 파싱
-    awk -F: -v ffile="$_ftmp" '
+    # 2) DB 디렉토리 일괄 수집 (0.01초)
+    if [ -d /var/lib/mysql ]; then
+        ls -1 /var/lib/mysql 2>/dev/null >"$_dbtmp"
+    fi
+
+    # 3) 웹서버 vhost(Apache/Nginx)에서 계정별 대표 도메인 일괄 매핑
+    local _vhf=""
+    for _f in /etc/httpd/conf/httpd.conf /usr/local/apache/conf/httpd.conf /usr/local/apache2/conf/httpd.conf /etc/httpd/conf.d/*.conf /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
+        [ -r "$_f" ] && _vhf="$_vhf $_f"
+    done
+    if [ -n "$_vhf" ]; then
+        awk '
+            /^[ \t]*#/ { next }
+            tolower($1) ~ /^<virtualhost/ || /^[ \t]*server[ \t]*\{/ { sn=""; u=""; next }
+            tolower($1) == "servername" || tolower($1) == "server_name" {
+                d=$2; gsub(/[;"]/,"",d); sub(/^www\./,"",d);
+                if (d != "" && d != "_" && d != "localhost" && sn == "") sn=d;
+            }
+            tolower($1) == "documentroot" || tolower($1) == "root" {
+                p=$2; gsub(/[;"]/,"",p);
+                if (match(p, /\/home[0-9]*\/[^\/]+/)) {
+                    seg=substr(p, RSTART, RLENGTH);
+                    sub(/^\/home[0-9]*\//, "", seg);
+                    u=seg;
+                }
+            }
+            (tolower($1) ~ /^<\/virtualhost/ || /^[ \t]*\}/) {
+                if (u != "" && sn != "" && !(u in dom)) dom[u]=sn;
+                sn=""; u="";
+            }
+            {
+                if (u != "" && sn != "" && !(u in dom)) dom[u]=sn;
+            }
+            END { for (k in dom) print k "\t" dom[k] }
+        ' $_vhf 2>/dev/null >"$_dtmp"
+    fi
+
+    # 4) 로컬 userinfo 등록 이메일 일괄 매핑
+    if [ -r /root/userinfo ]; then
+        awk '{
+            u=$1;
+            for (i=2; i<=NF; i++) {
+                if ($i ~ /@/) {
+                    gsub(/[|,<>]/,"",$i);
+                    print u "\t" $i;
+                    break;
+                }
+            }
+        }' /root/userinfo 2>/dev/null >"$_etmp"
+    fi
+
+    # 5) /etc/passwd + /etc/shadow + /etc/group + 실패/DB/도메인/이메일 통합 파싱
+    awk -F: -v ffile="$_ftmp" -v dbfile="$_dbtmp" -v dfile="$_dtmp" -v efile="$_etmp" '
         BEGIN {
             while ((getline line < ffile) > 0) {
                 split(line, a, "\t");
                 if (a[1] != "") failc[a[1]] = a[2] + 0;
             }
             close(ffile);
+            while ((getline line < dbfile) > 0) {
+                if (line != "") has_db[line] = 1;
+            }
+            close(dbfile);
+            while ((getline line < dfile) > 0) {
+                split(line, a, "\t");
+                if (a[1] != "") dom[a[1]] = a[2];
+            }
+            close(dfile);
+            while ((getline line < efile) > 0) {
+                split(line, a, "\t");
+                if (a[1] != "" && !(a[1] in eml)) eml[a[1]] = a[2];
+            }
+            close(efile);
             while ((getline line < "/etc/group") > 0) {
                 n = split(line, g, ":");
                 if (g[1] == "wheel" || g[1] == "sudo" || g[1] == "admin") {
@@ -13547,12 +13618,16 @@ _um_load_users() {
             if (expd[u] != "" && expd[u] ~ /^[0-9]+$/ && expd[u]+0 > 0 && expd[u]+0 <= 1) st="EXPIRED";
             fc = (u in failc) ? failc[u] : 0;
             su = (u == "root" || (u in is_sudo)) ? 1 : 0;
-            print u "|" uid "|" gid "|" hom "|" shl "|" gec "|" st "|" fc "|" su;
+            db = (u in has_db) ? "DB" : "--";
+            dm = (u in dom) ? dom[u] : "";
+            em = (u in eml) ? eml[u] : "";
+            gsub(/\|/, "", dm); gsub(/\|/, "", em);
+            print u "|" uid "|" gid "|" hom "|" shl "|" gec "|" st "|" fc "|" su "|" db "|" dm "|" em;
         }
     ' /etc/passwd >"$_tmp" 2>/dev/null
 
-    local i=0 _nm _uid _gid _hom _shl _gec _st _fc _su
-    while IFS='|' read -r _nm _uid _gid _hom _shl _gec _st _fc _su; do
+    local i=0 _nm _uid _gid _hom _shl _gec _st _fc _su _db _dm _em
+    while IFS='|' read -r _nm _uid _gid _hom _shl _gec _st _fc _su _db _dm _em; do
         [ -n "$_nm" ] || continue
         _UM_NAMES[$i]="$_nm"
         _UM_UIDS[$i]="$_uid"
@@ -13563,10 +13638,13 @@ _um_load_users() {
         _UM_STATES[$i]="$_st"
         _UM_FAILS[$i]="${_fc:-0}"
         _UM_SUDO[$i]="${_su:-0}"
+        _UM_DBS[$i]="${_db:---}"
+        _UM_DOMAINS[$i]="$_dm"
+        _UM_EMAILS[$i]="$_em"
         i=$((i + 1))
     done <"$_tmp"
     _UM_TOTAL=$i
-    rm -f "$_tmp" "$_ftmp" 2>/dev/null
+    rm -f "$_tmp" "$_ftmp" "$_dtmp" "$_etmp" "$_dbtmp" 2>/dev/null
 }
 
 # 단일 사용자 행 상태만 즉시 갱신 (Lock/Unlock/Unban 직후 초고속 반영)
@@ -13651,7 +13729,7 @@ _um_build_view() {
 
         if [ "$_ok" -eq 1 ] && [ -n "$_sq" ]; then
             local _hay
-            _hay=$(printf '%s %s %s %s' "$_nm" "$_hom" "$_gec" "$_shl" | tr '[:upper:]' '[:lower:]')
+            _hay=$(printf '%s %s %s %s %s %s' "$_nm" "$_hom" "$_gec" "$_shl" "${_UM_DOMAINS[$i]}" "${_UM_EMAILS[$i]}" | tr '[:upper:]' '[:lower:]')
             case "$_hay" in
                 *"$_sq"*) _ok=1 ;;
                 *) _ok=0 ;;
@@ -13670,7 +13748,7 @@ _um_build_view() {
     fi
 }
 
-# 레이아웃 계산 (dms/pms와 동일 규격 — _get_term_size로 실제 창 크기 전체 활용)
+# 레이아웃 계산 (dms/pms와 동일 규격 — _get_term_size로 실제 창 크기 활용 + 적정 가로폭 정렬)
 _um_init_layout() {
     local _TS_LINES="" _TS_COLS=""
     _get_term_size
@@ -13678,9 +13756,10 @@ _um_init_layout() {
     _UM_COLS="${_TS_COLS:-80}"
     [ "$_UM_COLS" -lt 70 ] && _UM_COLS=70
     [ "$_UM_ROWS" -lt 16 ] && _UM_ROWS=16
-    _UM_PAGE_H=$((_UM_ROWS - 9))
+    _UM_PAGE_H=$((_UM_ROWS - 10))
     [ "$_UM_PAGE_H" -lt 6 ] && _UM_PAGE_H=6
     local _w=$((_UM_COLS - 1))
+    [ "$_w" -gt 132 ] && _w=132
     [ "$_w" -lt 60 ] && _w=60
     _UM_HLINE=$(printf '%*s' "$_w" '' | tr ' ' '-')
     _UM_DIRTY=1
@@ -14593,6 +14672,10 @@ _um_render_row() {
     local st="${_UM_STATES[$idx]}"
     local fc="${_UM_FAILS[$idx]}"
     local su="${_UM_SUDO[$idx]}"
+    local db="${_UM_DBS[$idx]}"
+    local dom="${_UM_DOMAINS[$idx]}"
+    local eml="${_UM_EMAILS[$idx]}"
+    local gec="${_UM_GECOS[$idx]}"
 
     local cur_mark=" "
     [ "$is_cur" -eq 1 ] && cur_mark="$_UM_S_CUR"
@@ -14606,23 +14689,52 @@ _um_render_row() {
         st_col='\033[1;33m'
     fi
 
-    local htag="[OK]"
-    [ -d "$hom" ] || htag="[--]"
-    local stag=""
-    [ "$su" = "1" ] && stag="[SUDO]"
+    local htag="[OK]" hcol='\033[0;32m'
+    if [ ! -d "$hom" ]; then htag="[--]"; hcol='\033[0;37m'; fi
+    local dbcol='\033[0;37m'
+    [ "$db" = "DB" ] && dbcol='\033[1;36m'
 
     local sh_short="${shl##*/}"
-    local hom_w=$((_UM_COLS - 62))
-    [ "$hom_w" -lt 12 ] && hom_w=12
     local hom_disp="$hom"
-    [ ${#hom_disp} -gt "$hom_w" ] && hom_disp="${hom_disp:0:$((hom_w - 2))}.."
+    [ ${#hom_disp} -gt 22 ] && hom_disp="${hom_disp:0:20}.."
 
-    if [ "$is_cur" -eq 1 ]; then
-        printf '\033[1;37;44m %s %-16.16s %-8s %5s %-4s %-*.*s %-10.10s %-6s\033[0m\033[K\n' \
-            "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$hom_w" "$hom_w" "$hom_disp" "$sh_short" "$stag"
+    local dom_disp="${dom:--}"
+    [ ${#dom_disp} -gt 26 ] && dom_disp="${dom_disp:0:24}.."
+
+    local info_disp=""
+    [ "$su" = "1" ] && info_disp="[SUDO] "
+    if [ -n "$eml" ]; then
+        info_disp="${info_disp}${eml}"
+    elif [ -n "$gec" ]; then
+        info_disp="${info_disp}${gec}"
+    fi
+    [ -z "$info_disp" ] && info_disp="-"
+    [ ${#info_disp} -gt 28 ] && info_disp="${info_disp:0:26}.."
+
+    if [ "$_UM_COLS" -ge 118 ]; then
+        if [ "$is_cur" -eq 1 ]; then
+            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-7.7s %-22.22s %-26.26s %-28.28s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp" "$dom_disp" "$info_disp"
+        else
+            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-22.22s\033[0m \033[1;33m%-26.26s\033[0m \033[0;37m%-28.28s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp" "$dom_disp" "$info_disp"
+        fi
+    elif [ "$_UM_COLS" -ge 92 ]; then
+        if [ "$is_cur" -eq 1 ]; then
+            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-7.7s %-20.20s %-24.24s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp" "$dom_disp"
+        else
+            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-20.20s\033[0m \033[1;33m%-24.24s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp" "$dom_disp"
+        fi
     else
-        printf ' %s \033[1;37m%-16.16s\033[0m %b%-8s\033[0m \033[0;37m%5s\033[0m %-4s \033[0;36m%-*.*s\033[0m \033[0;37m%-10.10s\033[0m \033[1;33m%-6s\033[0m\033[K\n' \
-            "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$htag" "$hom_w" "$hom_w" "$hom_disp" "$sh_short" "$stag"
+        if [ "$is_cur" -eq 1 ]; then
+            printf '\033[1;37;44m %s %-14.14s %-7s %5s %-4s %-2s %-7.7s %-20.20s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp"
+        else
+            printf ' %s \033[1;37m%-14.14s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-20.20s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp"
+        fi
     fi
 }
 
@@ -14638,13 +14750,19 @@ _um_render_footer() {
         local cst="${_UM_STATES[$cidx]}"
         local cfc="${_UM_FAILS[$cidx]}"
         local cgec="${_UM_GECOS[$cidx]}"
-        local dbb
-        dbb=$(_um_quick_db_badge "$cnm")
+        local cdb="${_UM_DBS[$cidx]}"
+        local cdom="${_UM_DOMAINS[$cidx]}"
+        local ceml="${_UM_EMAILS[$cidx]}"
+        local dbb="DB:-"
+        [ "$cdb" = "DB" ] && dbb="DB:OK"
         local hstat="존재"
         [ -d "$chom" ] || hstat="없음"
 
-        printf ' \033[1;33m선택 계정:\033[0m \033[1;37m%s\033[0m  (UID:%s GID:%s | 상태:%s | 실패:%s | %s)\033[K\n' \
+        printf ' \033[1;33m선택 계정:\033[0m \033[1;37m%s\033[0m  (UID:%s GID:%s | 상태:%s | 실패:%s | %s)' \
             "$cnm" "$cuid" "$cgid" "$cst" "${cfc:-0}" "$dbb"
+        [ -n "$cdom" ] && printf '  |  도메인:\033[1;33m%s\033[0m' "$cdom"
+        [ -n "$ceml" ] && printf '  |  메일:\033[1;32m%s\033[0m' "$ceml"
+        printf '\033[K\n'
         printf '   %s 홈: \033[0;36m%s\033[0m (%s) | 쉘: \033[0;37m%s\033[0m | 메모: %s\033[K\n' \
             "$_UM_S_BUL" "$chom" "$hstat" "$cshl" "${cgec:--}"
         if [ "$_UM_HOSTING" -eq 1 ]; then
@@ -14689,7 +14807,18 @@ _um_render_full_body() {
     printf '\033[1;36m* 통합 사용자 관리 [ums]\033[0m%b  \033[0;37mOS: %s\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)  \033[1;37mP.%d/%d\033[0m' \
         "$hbadge" "$_UM_OS" "$flabel" "$_UM_VCNT" "$_UM_TOTAL" "$cur_pg" "$tot_pg"
     [ -n "$_UM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_UM_SEARCH"
-    printf '\033[K\n\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
+    printf '\033[K\n'
+    if [ "$_UM_COLS" -ge 118 ]; then
+        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-7s %-22s %-26s %-28s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR" "DOMAIN" "EMAIL / INFO"
+    elif [ "$_UM_COLS" -ge 92 ]; then
+        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-7s %-20s %-24s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR" "DOMAIN"
+    else
+        printf '\033[0;36m   %-14s %-7s %5s %-4s %-2s %-7s %-20s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR"
+    fi
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
 
     local r=0 vidx
     if [ "$_UM_VCNT" -eq 0 ]; then
@@ -14720,9 +14849,9 @@ _um_render_full_body() {
 }
 
 _um_render_delta_body() {
-    local old_row=$((3 + _UM_LAST_CUR - _UM_TOP))
-    local new_row=$((3 + _UM_CUR - _UM_TOP))
-    local foot_row=$((3 + _UM_PAGE_H))
+    local old_row=$((4 + _UM_LAST_CUR - _UM_TOP))
+    local new_row=$((4 + _UM_CUR - _UM_TOP))
+    local foot_row=$((4 + _UM_PAGE_H))
     printf '\033[%d;1H' "$old_row"
     _um_render_row "$_UM_LAST_CUR" 0
     printf '\033[%d;1H' "$new_row"
