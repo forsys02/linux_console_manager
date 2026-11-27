@@ -16328,10 +16328,11 @@ _px_load_tab() {
                 for _f in /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf; do
                     [ -f "$_f" ] || continue
                     _node=$(echo "$_f" | awk -F/ '{print $5}')
-                    case "$_f" in
-                        */qemu-server/*) _type="qemu" ;;
-                        *)               _type="lxc" ;;
-                    esac
+                    if echo "$_f" | grep -q '/qemu-server/'; then
+                        _type="qemu"
+                    else
+                        _type="lxc"
+                    fi
                     _vmid=$(basename "$_f" .conf)
                     awk -v t="$_type" -v n="$_node" -v id="$_vmid" '
                         /^\[.*\]$/ {
