@@ -11165,12 +11165,21 @@ _dm_render() {
     local rows=$_TS_LINES cols=$_TS_COLS
     local list_h=$((rows - 10))
     [ "$list_h" -lt 5 ] && list_h=5
+    _DM_PAGE_H=$list_h
 
-    # 뷰포트 스크롤 보정
-    if [ "$_DM_CUR" -lt "$_DM_TOP" ]; then
-        _DM_TOP=$_DM_CUR
-    elif [ "$_DM_CUR" -ge $((_DM_TOP + list_h)) ]; then
-        _DM_TOP=$((_DM_CUR - list_h + 1))
+    # 페이지 단위 뷰포트 정렬 (중복 노출 방지)
+    if [ "$_DM_VCNT" -gt 0 ]; then
+        [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0
+        [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1))
+        _DM_TOP=$(( (_DM_CUR / list_h) * list_h ))
+    else
+        _DM_TOP=0
+    fi
+
+    local cur_pg=1 tot_pg=1
+    if [ "$_DM_VCNT" -gt 0 ]; then
+        cur_pg=$(( (_DM_TOP / list_h) + 1 ))
+        tot_pg=$(( ((_DM_VCNT - 1) / list_h) + 1 ))
     fi
 
     local chg_cnt
@@ -11187,8 +11196,8 @@ _dm_render() {
     hline=$(printf '%*s' "$((cols > 110 ? 110 : cols - 1))" '' | tr ' ' '-')
 
     printf '\033[H\033[J'
-    printf '\033[1;36m* 통합 서버 데몬 관리 [dm]\033[0m  \033[0;37mOS: %s (%s)\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)' \
-        "$_DM_OS" "$_DM_INIT" "$flabel" "$_DM_VCNT" "$_DM_TOTAL"
+    printf '\033[1;36m* 통합 서버 데몬 관리 [dm]\033[0m  \033[0;37mOS: %s (%s)\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)  \033[1;37mP.%d/%d\033[0m' \
+        "$_DM_OS" "$_DM_INIT" "$flabel" "$_DM_VCNT" "$_DM_TOTAL" "$cur_pg" "$tot_pg"
     [ -n "$_DM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_DM_SEARCH"
     [ "$chg_cnt" -gt 0 ] && printf '  \033[1;33m[변경:%d건 u/U원복]\033[0m' "$chg_cnt"
     printf '\n\033[0;34m%s\033[0m\n' "$hline"
@@ -11250,6 +11259,11 @@ _dm_render() {
             fi
             r=$((r + 1))
         done
+        # 마지막 페이지 남은 줄 패딩 (하단 상세 카드 위치 고정)
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\n'
+            r=$((r + 1))
+        done
     fi
 
     # 하단 상세 카드 (커서 항목의 역할 + 실효 설정 파일 미리보기)
@@ -11281,7 +11295,7 @@ _dm_render() {
     if [ -n "$_DM_MSG" ]; then
         printf '\033[1;33m %s\033[0m\n' "$_DM_MSG"
     else
-        printf ' \033[0;37m[↑↓/PgUpDn]이동 [Space]활성토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\n'
+        printf ' \033[0;37m[↑↓]이동 [←→/PgUpDn]페이지 [Space]토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\n'
     fi
 }
 
@@ -11327,10 +11341,46 @@ dm() {
                 case "$_x" in
                     A) [ "$_DM_CUR" -gt 0 ] && _DM_CUR=$((_DM_CUR - 1)); continue ;;
                     B) [ "$_DM_CUR" -lt $((_DM_VCNT - 1)) ] && _DM_CUR=$((_DM_CUR + 1)); continue ;;
+                    D) # ← 이전 페이지 (중복 없이 한 페이지 단위)
+                       local _ph="${_DM_PAGE_H:-10}"
+                       if [ "$_DM_TOP" -gt 0 ]; then
+                           _DM_TOP=$((_DM_TOP - _ph))
+                           [ "$_DM_TOP" -lt 0 ] && _DM_TOP=0
+                           _DM_CUR=$_DM_TOP
+                       else
+                           _DM_CUR=0
+                       fi
+                       continue ;;
+                    C) # → 다음 페이지 (중복 없이 한 페이지 단위)
+                       local _ph="${_DM_PAGE_H:-10}"
+                       local _nt=$((_DM_TOP + _ph))
+                       if [ "$_nt" -lt "$_DM_VCNT" ]; then
+                           _DM_TOP=$_nt
+                           _DM_CUR=$_DM_TOP
+                       elif [ "$_DM_VCNT" -gt 0 ]; then
+                           _DM_CUR=$((_DM_VCNT - 1))
+                       fi
+                       continue ;;
                     5) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
-                       _DM_CUR=$((_DM_CUR - 10)); [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0; continue ;;
+                       local _ph="${_DM_PAGE_H:-10}"
+                       if [ "$_DM_TOP" -gt 0 ]; then
+                           _DM_TOP=$((_DM_TOP - _ph))
+                           [ "$_DM_TOP" -lt 0 ] && _DM_TOP=0
+                           _DM_CUR=$_DM_TOP
+                       else
+                           _DM_CUR=0
+                       fi
+                       continue ;;
                     6) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
-                       _DM_CUR=$((_DM_CUR + 10)); [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1)); continue ;;
+                       local _ph="${_DM_PAGE_H:-10}"
+                       local _nt=$((_DM_TOP + _ph))
+                       if [ "$_nt" -lt "$_DM_VCNT" ]; then
+                           _DM_TOP=$_nt
+                           _DM_CUR=$_DM_TOP
+                       elif [ "$_DM_VCNT" -gt 0 ]; then
+                           _DM_CUR=$((_DM_VCNT - 1))
+                       fi
+                       continue ;;
                 esac
                 continue
             else
