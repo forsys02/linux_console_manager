@@ -3664,7 +3664,7 @@ menufunc() {
                     #[[ -n $cmd_choice && ( $cmd_choice == "0" || ${cmd_choice#0} != "$cmd_choice" || ${cmd_choice//[0-9]/} ) ]] || ! (( cmd_choice >= 1 && cmd_choice <= 99 )) 2>/dev/null &&
                     # 숫자판정 : [[ ]] 안에서 문자열에 -ge 를 쓰면 bash 가 "syntax error in conditional expression" 을 뱉고
                     # case 자체가 실행되지 않았음 → 숫자인지 먼저 expr 로 확인한다
-                    if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '^[0-9]\+$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
+                    if [ -n "$cmd_choice" ] && { [ "$cmd_choice" = "0" ] || [ "${cmd_choice#0}" != "$cmd_choice" ] || [ -n "${cmd_choice//[0-9]/}" ] || { expr "$cmd_choice" : '[0-9][0-9]*$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ]; }; }; then
                         case "$cmd_choice" in
                             "]" | "[" | "A" | "all" | "I" | "II") ;;
                             *)
@@ -3922,39 +3922,29 @@ menufunc() {
                                 }
 
                             # Check 2-1: proxmox vm enter? 100~
-                            elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '^[0-9]\+$' >/dev/null && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+                            elif [[ -z $cmd_choice1 ]] && expr "$cmd_choice" : '[0-9][0-9]*$' >/dev/null 2>&1 && [ "$cmd_choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
                                 dline
                                 vmslistview | cgrepn running -3 | cgrepn1 $cmd_choice 3
                                 readxy "Proxmox vm --> $(RED1)$cmd_choice$(NC) Enter" && enter "$cmd_choice"
                                 continue
-                            # Check 3: Valid Linux command? (Not purely numeric and exists)
-                            #elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "$cmd_choice" &>/dev/null; then
-                            elif [[ "${cmd_choice//[0-9]/}" ]] && command -v "${cmd_choice%%[|;]*}" &>/dev/null; then
+                            # Check 3: Valid Linux command? (Not purely numeric, exists, and NOT an alias)
+                            elif [[ "${cmd_choice//[0-9]/}" ]] && [ "$(type -t "${cmd_choice%%[|;]*}" 2>/dev/null)" != "alias" ] && command -v "${cmd_choice%%[|;]*}" >/dev/null 2>&1; then
                                 echo # Newline for formatting
                                 echo "Executing command: $cmd_choice $cmd_choice1"
                                 process_commands "$cmd_choice $cmd_choice1" y
-                                # Log the executed command
-                                # history -s "$cmd_choice $cmd_choice1"
-                                # echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                                 continue
 
-                                # Check 4: Alias from .bashrc? (Fallback if not a command)
-                                #elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$cmd_choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
-                            elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$cmd_choice=" ~/.bashrc | sed -e "s/^[[:space:]]*alias[[:space:]]\+$cmd_choice='\(.*\)'/\1/") && [[ -n $aliascmd ]]; then
+                            # Check 4: Alias from .bashrc? (Fallback if not a command or is an alias)
+                            elif [ "${cmd_choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+${cmd_choice}=" ~/.bashrc 2>/dev/null | tail -n 1 | sed -e "s/^[[:space:]]*alias[[:space:]]*${cmd_choice}=//" -e "s/^['\"]//" -e "s/['\"]$//") && [[ -n $aliascmd ]]; then
 
-                                # Found alias definition 'aliascmd'.
-                                # echo "cmd_choice:$cmd_choice -> Found alias in .bashrc: $cmd_choice='$aliascmd'"
                                 echo "Executing in subshell with argument '$cmd_choice1': $aliascmd $cmd_choice1"
 
                                 GRN1
                                 dline
                                 NC
-                                # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
-                                # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
-                                # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                                # Bash 2.05 ~ 5.x 호환: shopt -s expand_aliases 를 source 보다 먼저 켜고, eval -- 대신 eval 사용
                                 trap 'stty sane' SIGINT
-                                bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
-                                #eval "$cmd_choice" "$cmd_choice1"
+                                bash -c 'shopt -s expand_aliases; source ~/.bashrc 2>/dev/null; eval "$0" "$@"' "$cmd_choice" ${cmd_choice1:+"$cmd_choice1"}
                                 trap - INT
                                 GRN1
                                 dline
@@ -4211,13 +4201,13 @@ menufunc() {
                     #readxx $LINENO shortcut move choice $choice
 
                 # Check : proxmox vm enter? 100~
-                elif [[ -z $choice1 ]] && expr "$choice" : '^[0-9]\+$' >/dev/null && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
+                elif [[ -z $choice1 ]] && expr "$choice" : '[0-9][0-9]*$' >/dev/null 2>&1 && [ "$choice" -ge 100 ] && command -v pct >/dev/null 2>&1; then
                     dline
                     vmslistview | cgrepn running -3 | cgrepn1 $choice 3
                     readxy "Proxmox vm --> $(RED1)$choice$(NC) Enter" && enter "$choice"
 
                 # Check : 범위를 벗어난 번호 (예: 99 는 바로가기 내부값)
-                elif expr "$choice" : '^[0-9]\+$' >/dev/null; then
+                elif expr "$choice" : '[0-9][0-9]*$' >/dev/null 2>&1; then
                     echo "'$choice' 는 이 화면에 없는 번호입니다. (0~$menu_idx 또는 단축키)"
                     choice=""
 
@@ -4229,34 +4219,24 @@ menufunc() {
                     [ "$choice" = "conf" ] && [ -n "${_m_nav_cur:-}" ] && _CONF_CUR_MENU_KEY="${_m_item_keys[$_m_nav_cur]-}"
                     "$choice" $choice1
 
-                # 실제 리눅스 명령이 들어온 경우 실행
-                # Check: is not purely numeric AND is a valid command
-                elif [ "${choice//[0-9]/}" ] && command -v "$choice" &>/dev/null; then
+                # 실제 리눅스 명령이 들어온 경우 실행 (alias 는 Check 4 로 넘김)
+                elif [ "${choice//[0-9]/}" ] && [ "$(type -t "$choice" 2>/dev/null)" != "alias" ] && command -v "$choice" >/dev/null 2>&1; then
                     {
                         echo "Executing command: $choice $choice1"
                         process_commands "$choice $choice1" y
-                        # log
-                        # history -s "$choice $choice1"
-                        # echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
                     }
 
-                    # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
-                    # Check: is not purely numeric AND is defined as an alias in .bashrc
-                    # elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -E "s/^[[:space:]]*alias[[:space:]]+$choice='(.*)'/\1/") && [[ -n $aliascmd ]]; then
-                elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+$choice=" ~/.bashrc | sed -e "s/^[[:space:]]*alias[[:space:]]\+$choice='\(.*\)'/\1/") && [[ -n $aliascmd ]]; then
+                # choice 가 이까지 왔으면 .bashrc alias 평소 습관처럼 쳤다고 봐야지
+                elif [ "${choice//[0-9]/}" ] && aliascmd=$(grep -E "^[[:space:]]*alias[[:space:]]+${choice}=" ~/.bashrc 2>/dev/null | tail -n 1 | sed -e "s/^[[:space:]]*alias[[:space:]]*${choice}=//" -e "s/^['\"]//" -e "s/['\"]$//") && [[ -n $aliascmd ]]; then
 
-                    # echo "Choice:$choice -> Found alias in .bashrc: $choice='$aliascmd'"
                     echo "Executing in subshell with argument '$choice1': $aliascmd $choice1"
 
                     GRN1
                     dline
                     NC
-                    # Execute in a subshell: Source .bashrc (to get all alias definitions, ignoring errors), enable alias expansion, then execute the original alias name ($cmd_choice, passed as $0) with arguments ($cmd_choice1 etc., passed via $@).
-                    # This allows nested aliases like 'alias ll="ls -l"' and 'alias myll="ll -h"' to work correctly.
-                    # WARNING: Sourcing .bashrc might fail silently or have side effects if it has strict interactive guards ([ -z "$PS1" ] && return).
+                    # Bash 2.05 ~ 5.x 호환: shopt -s expand_aliases 를 source 보다 먼저 켜고, eval -- 대신 eval 사용
                     trap 'stty sane' SIGINT
-                    bash -c 'source ~/.bashrc 2>/dev/null; shopt -s expand_aliases; eval -- "$0" "$@"' "$choice" ${choice1:+"$choice1"}
-                    #eval "$choice" "$choice1"
+                    bash -c 'shopt -s expand_aliases; source ~/.bashrc 2>/dev/null; eval "$0" "$@"' "$choice" ${choice1:+"$choice1"}
                     trap - INT
                     GRN1
                     dline
