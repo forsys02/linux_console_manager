@@ -16099,6 +16099,1209 @@ Containers:
     printf '\n'
 }
 
+# ==============================================================================
+# 통합 Proxmox VM & CT 관리 TUI: pxms (Proxmox VM & CT Manager Studio)
+# - Proxmox WebUI + proxmox vms manager 36개 메뉴를 방향키 + 엔터 + 원키로 통합 제어
+# - 6개 탭: [1]VM&CT [2]Snapshots [3]Backups [4]Storage&ISO [5]Node&Tasks [6]Tools(36)
+# - pvesh + jq 기반 클러스터/단일 노드 자동 호환 (qm/pct 자동 폴백)
+# - Bash 3.x+ 및 EUC-KR/UTF-8 완벽 호환 (연관배열 미사용, 무깜빡임 델타 렌더링)
+# ==============================================================================
+
+_px_p() {
+    local _fmt="$1"
+    shift
+    if [ "$_PX_ENC" = "euckr" ] && declare -f _dm_iconv_euckr >/dev/null 2>&1; then
+        printf "$_fmt" "$@" | _dm_iconv_euckr | iconv -f UTF-8 -t EUC-KR//TRANSLIT 2>/dev/null || printf "$_fmt" "$@"
+    else
+        printf "$_fmt" "$@"
+    fi
+}
+
+_px_pause() {
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    _px_p '\n\033[1;33m[아무 키나 누르면 pxms 로 돌아갑니다...]\033[0m'
+    IFS= read -rsn1 _ </dev/tty
+}
+
+_px_detect_env() {
+    _PX_ENC="utf8"
+    _PX_NODE=""
+    _PX_PVE_VER="N/A"
+    _PX_HAS_JQ=0
+    _PX_HAS_PVESH=0
+
+    local _loc="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$_loc" in
+        *[Ee][Uu][Cc]*[Kk][Rr]*|*[Kk][Oo]_[Kk][Rr]|ko)
+            command -v iconv >/dev/null 2>&1 && _PX_ENC="euckr" ;;
+    esac
+
+    if ! command -v pvesh >/dev/null 2>&1 && ! command -v qm >/dev/null 2>&1 && ! command -v pct >/dev/null 2>&1; then
+        _px_p '\033[1;31m[오류] Proxmox 명령(pvesh / qm / pct)을 찾을 수 없습니다.\033[0m\n'
+        _px_p 'Proxmox VE 호스트 서버에서 실행해 주세요.\n'
+        return 1
+    fi
+
+    command -v jq >/dev/null 2>&1 && _PX_HAS_JQ=1
+    command -v pvesh >/dev/null 2>&1 && _PX_HAS_PVESH=1
+
+    _PX_NODE=$(basename "$(readlink /etc/pve/local 2>/dev/null)" 2>/dev/null)
+    [ -z "$_PX_NODE" ] && _PX_NODE=$(hostname -s 2>/dev/null || hostname 2>/dev/null)
+
+    if command -v pveversion >/dev/null 2>&1; then
+        _PX_PVE_VER=$(pveversion 2>/dev/null | awk -F/ '{print $2}' | awk '{print $1}')
+    fi
+    [ -z "$_PX_PVE_VER" ] && _PX_PVE_VER="PVE"
+    return 0
+}
+
+_px_find_conf() {
+    local _vmid="$1" _type="$2" _node="$3" _c=""
+    if [ -n "$_node" ] && [ -n "$_type" ]; then
+        if [ "$_type" = "qemu" ] && [ -f "/etc/pve/nodes/${_node}/qemu-server/${_vmid}.conf" ]; then
+            echo "/etc/pve/nodes/${_node}/qemu-server/${_vmid}.conf"
+            return 0
+        elif [ "$_type" = "lxc" ] && [ -f "/etc/pve/nodes/${_node}/lxc/${_vmid}.conf" ]; then
+            echo "/etc/pve/nodes/${_node}/lxc/${_vmid}.conf"
+            return 0
+        fi
+    fi
+    _c=$(find /etc/pve/nodes -maxdepth 3 -name "${_vmid}.conf" 2>/dev/null | head -n1)
+    [ -n "$_c" ] && echo "$_c"
+}
+
+_px_pick_backup_storage() {
+    local _st="" _list="" _cnt=0 _ans=""
+    if command -v pvesm >/dev/null 2>&1; then
+        _list=$(pvesm status --content backup 2>/dev/null | awk 'NR>1 && $3=="active" {print $1}')
+    fi
+    if [ -z "$_list" ]; then
+        echo "local"
+        return 0
+    fi
+    _cnt=$(printf '%s\n' "$_list" | grep -c .)
+    if [ "$_cnt" -le 1 ]; then
+        printf '%s\n' "$_list" | head -n1
+        return 0
+    fi
+    _px_p '\033[1;36m백업 스토리지 선택:\033[0m\n' >/dev/tty
+    local _i=1 _s _arr=()
+    while IFS= read -r _s; do
+        [ -z "$_s" ] && continue
+        _arr[$_i]="$_s"
+        printf '  %d) %s\n' "$_i" "$_s" >/dev/tty
+        _i=$((_i + 1))
+    done < <(printf '%s\n' "$_list")
+    read -p "번호 선택 [1]: " _ans </dev/tty
+    [ -z "$_ans" ] && _ans=1
+    _st="${_arr[$_ans]}"
+    [ -z "$_st" ] && _st="${_arr[1]}"
+    echo "${_st:-local}"
+}
+
+_px_load_summary() {
+    _PX_CNT_RUN=0
+    _PX_CNT_STOP=0
+    _PX_CNT_VM=0
+    _PX_CNT_CT=0
+    _PX_LOAD=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo "-")
+    _PX_MEM_PCT=$(free 2>/dev/null | awk '/Mem:/ {if($2>0) printf "%.0f%%", $3*100/$2; else print "-"}')
+    [ -z "$_PX_MEM_PCT" ] && _PX_MEM_PCT="-"
+
+    local _t _st
+    if [ "$_PX_HAS_PVESH" = "1" ] && [ "$_PX_HAS_JQ" = "1" ]; then
+        while IFS='|' read -r _t _st; do
+            [ -z "$_t" ] && continue
+            [ "$_t" = "qemu" ] && _PX_CNT_VM=$((_PX_CNT_VM + 1))
+            [ "$_t" = "lxc" ]  && _PX_CNT_CT=$((_PX_CNT_CT + 1))
+            if [ "$_st" = "running" ]; then
+                _PX_CNT_RUN=$((_PX_CNT_RUN + 1))
+            else
+                _PX_CNT_STOP=$((_PX_CNT_STOP + 1))
+            fi
+        done < <(pvesh get /cluster/resources -type vm --output-format json 2>/dev/null | jq -r '.[] | "\(.type // "")|\(.status // "")"' 2>/dev/null)
+    else
+        if command -v qm >/dev/null 2>&1; then
+            while read -r _id _nm _st _; do
+                case "$_id" in [0-9]*) ;; *) continue ;; esac
+                _PX_CNT_VM=$((_PX_CNT_VM + 1))
+                [ "$_st" = "running" ] && _PX_CNT_RUN=$((_PX_CNT_RUN + 1)) || _PX_CNT_STOP=$((_PX_CNT_STOP + 1))
+            done < <(qm list 2>/dev/null)
+        fi
+        if command -v pct >/dev/null 2>&1; then
+            while read -r _id _st _; do
+                case "$_id" in [0-9]*) ;; *) continue ;; esac
+                _PX_CNT_CT=$((_PX_CNT_CT + 1))
+                [ "$_st" = "running" ] && _PX_CNT_RUN=$((_PX_CNT_RUN + 1)) || _PX_CNT_STOP=$((_PX_CNT_STOP + 1))
+            done < <(pct list 2>/dev/null)
+        fi
+    fi
+}
+
+_px_load_tab() {
+    _PX_IDS=()
+    _PX_NAMES=()
+    _PX_STATE=()
+    _PX_COL2=()
+    _PX_COL3=()
+    _PX_META=()
+    _PX_TOTAL=0
+
+    local _c1 _c2 _c3 _c4 _c5 _c6 _c7 _c8 _f _vmid _type _node _sn _st _desc _tm _stg _line _tname _sz _fmt
+    case "$_PX_TAB" in
+        1) # VM & CT (QEMU + LXC unified)
+            if [ "$_PX_HAS_PVESH" = "1" ] && [ "$_PX_HAS_JQ" = "1" ]; then
+                while IFS='|' read -r _c1 _c2 _c3 _c4 _c5 _c6 _c7 _c8; do
+                    [ -z "$_c1" ] && continue
+                    # c1=vmid c2=type c3=name c4=status c5=node c6=cpu% c7=mem_str c8=lock
+                    _PX_IDS[$_PX_TOTAL]="$_c1"
+                    _PX_NAMES[$_PX_TOTAL]="${_c2}/${_c1} ${_c3}"
+                    if [ -n "$_c8" ]; then
+                        _PX_STATE[$_PX_TOTAL]="locked"
+                        _PX_COL2[$_PX_TOTAL]="${_c4} [${_c8}]"
+                    else
+                        _PX_STATE[$_PX_TOTAL]="$_c4"
+                        _PX_COL2[$_PX_TOTAL]="$_c4"
+                    fi
+                    if [ "$_c4" = "running" ]; then
+                        _PX_COL3[$_PX_TOTAL]="CPU:${_c6}%  MEM:${_c7}  @${_c5}"
+                    else
+                        _PX_COL3[$_PX_TOTAL]="MEM:${_c7}  @${_c5}"
+                    fi
+                    _PX_META[$_PX_TOTAL]="${_c2}|${_c5}|${_c1}|${_c3}|${_c8}"
+                    _PX_TOTAL=$((_PX_TOTAL + 1))
+                done < <(pvesh get /cluster/resources -type vm --output-format json 2>/dev/null | jq -r '
+                    sort_by(.vmid) | .[] |
+                    (((.cpu // 0) * 100) | floor) as $cp |
+                    (((.mem // 0) / 1073741824 * 10) | floor / 10) as $mu |
+                    (((.maxmem // 0) / 1073741824 * 10) | floor / 10) as $mt |
+                    "\(.vmid)|\(.type)|\(.name // "unknown")|\(.status // "unknown")|\(.node // "-")|\($cp)|\($mu)G/\($mt)G|\(.lock // "")"
+                ' 2>/dev/null)
+            fi
+            # Fallback if pvesh/jq unavailable or empty
+            if [ "$_PX_TOTAL" -eq 0 ]; then
+                if command -v pct >/dev/null 2>&1; then
+                    while read -r _c1 _c2 _c3 _c4; do
+                        case "$_c1" in [0-9]*) ;; *) continue ;; esac
+                        local _nm="${_c4:-$_c3}"
+                        _PX_IDS[$_PX_TOTAL]="$_c1"
+                        _PX_NAMES[$_PX_TOTAL]="lxc/${_c1} ${_nm}"
+                        _PX_STATE[$_PX_TOTAL]="$_c2"
+                        _PX_COL2[$_PX_TOTAL]="$_c2"
+                        _PX_COL3[$_PX_TOTAL]="@${_PX_NODE}"
+                        _PX_META[$_PX_TOTAL]="lxc|${_PX_NODE}|${_c1}|${_nm}|"
+                        _PX_TOTAL=$((_PX_TOTAL + 1))
+                    done < <(pct list 2>/dev/null)
+                fi
+                if command -v qm >/dev/null 2>&1; then
+                    while read -r _c1 _c2 _c3 _c4 _c5 _; do
+                        case "$_c1" in [0-9]*) ;; *) continue ;; esac
+                        _PX_IDS[$_PX_TOTAL]="$_c1"
+                        _PX_NAMES[$_PX_TOTAL]="qemu/${_c1} ${_c2}"
+                        _PX_STATE[$_PX_TOTAL]="$_c3"
+                        _PX_COL2[$_PX_TOTAL]="$_c3"
+                        _PX_COL3[$_PX_TOTAL]="MEM:${_c4}M  DISK:${_c5}G  @${_PX_NODE}"
+                        _PX_META[$_PX_TOTAL]="qemu|${_PX_NODE}|${_c1}|${_c2}|"
+                        _PX_TOTAL=$((_PX_TOTAL + 1))
+                    done < <(qm list 2>/dev/null)
+                fi
+            fi
+            ;;
+
+        2) # Snapshots (fast .conf scan across /etc/pve/nodes)
+            while IFS='|' read -r _c1 _c2 _c3 _c4 _c5 _c6; do
+                [ -z "$_c1" ] && continue
+                # c1=type c2=node c3=vmid c4=snapname c5=snaptime c6=desc
+                local _dt="-"
+                if [ -n "$_c5" ] && [ "$_c5" != "0" ]; then
+                    _dt=$(date -d "@${_c5}" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$_c5")
+                fi
+                _PX_IDS[$_PX_TOTAL]="$_c3"
+                _PX_NAMES[$_PX_TOTAL]="${_c1}/${_c3}  ${_c4}"
+                _PX_STATE[$_PX_TOTAL]="snap"
+                _PX_COL2[$_PX_TOTAL]="$_dt"
+                _PX_COL3[$_PX_TOTAL]="${_c6:-@${_c2}}"
+                _PX_META[$_PX_TOTAL]="${_c1}|${_c2}|${_c3}|${_c4}"
+                _PX_TOTAL=$((_PX_TOTAL + 1))
+            done < <(
+                for _f in /etc/pve/nodes/*/qemu-server/*.conf /etc/pve/nodes/*/lxc/*.conf; do
+                    [ -f "$_f" ] || continue
+                    _node=$(echo "$_f" | awk -F/ '{print $5}')
+                    case "$_f" in
+                        */qemu-server/*) _type="qemu" ;;
+                        *)               _type="lxc" ;;
+                    esac
+                    _vmid=$(basename "$_f" .conf)
+                    awk -v t="$_type" -v n="$_node" -v id="$_vmid" '
+                        /^\[.*\]$/ {
+                            if (sn != "" && sn != "PENDING") printf "%s|%s|%s|%s|%s|%s\n", t, n, id, sn, tm, ds;
+                            sn=$0; gsub(/^\[|\]$/, "", sn); tm=""; ds=""; next
+                        }
+                        sn != "" && /^snaptime:/ { sub(/^snaptime:[ \t]*/, ""); tm=$0; next }
+                        sn != "" && /^description:/ { sub(/^description:[ \t]*/, ""); ds=$0; next }
+                        END {
+                            if (sn != "" && sn != "PENDING") printf "%s|%s|%s|%s|%s|%s\n", t, n, id, sn, tm, ds;
+                        }
+                    ' "$_f" 2>/dev/null
+                done
+            )
+            ;;
+
+        3) # Backups (vzdump archives across active backup storages)
+            if command -v pvesm >/dev/null 2>&1; then
+                while IFS= read -r _stg; do
+                    [ -z "$_stg" ] && continue
+                    while read -r _c1 _c2 _c3 _c4 _c5 _; do
+                        [ -z "$_c1" ] && continue
+                        case "$_c1" in Volid|volid|---*) continue ;; esac
+                        # c1=volid c2=format c3=type c4=size(bytes) c5=vmid
+                        local _fn="${_c1##*/}"
+                        local _gb=""
+                        if echo "$_c4" | grep -qE '^[0-9]+$'; then
+                            _gb=$(awk -v b="$_c4" 'BEGIN { if (b>=1073741824) printf "%.2fG", b/1073741824; else printf "%.1fM", b/1048576 }')
+                        else
+                            _gb="$_c4"
+                        fi
+                        _PX_IDS[$_PX_TOTAL]="$_c1"
+                        _PX_NAMES[$_PX_TOTAL]="$_fn"
+                        _PX_STATE[$_PX_TOTAL]="backup"
+                        _PX_COL2[$_PX_TOTAL]="VM:${_c5:-?}  ${_gb}"
+                        _PX_COL3[$_PX_TOTAL]="${_stg} (${_c2})"
+                        _PX_META[$_PX_TOTAL]="${_stg}|${_c5}|${_c1}|${_c2}"
+                        _PX_TOTAL=$((_PX_TOTAL + 1))
+                    done < <(pvesm list "$_stg" --content backup 2>/dev/null | sort -r)
+                done < <(pvesm status --content backup 2>/dev/null | awk 'NR>1 && $3=="active" {print $1}')
+            fi
+            ;;
+
+        4) # Storage & ISO
+            if command -v pvesm >/dev/null 2>&1; then
+                while read -r _c1 _c2 _c3 _c4 _c5 _c6 _c7; do
+                    [ -z "$_c1" ] && continue
+                    case "$_c1" in Name|---*) continue ;; esac
+                    local _u _t _a
+                    _t=$(awk -v k="${_c4:-0}" 'BEGIN { printf "%.1fG", k/1048576 }')
+                    _u=$(awk -v k="${_c5:-0}" 'BEGIN { printf "%.1fG", k/1048576 }')
+                    _a=$(awk -v k="${_c6:-0}" 'BEGIN { printf "%.1fG", k/1048576 }')
+                    _PX_IDS[$_PX_TOTAL]="$_c1"
+                    _PX_NAMES[$_PX_TOTAL]="$_c1"
+                    if [ "$_c3" = "active" ]; then
+                        _PX_STATE[$_PX_TOTAL]="running"
+                    else
+                        _PX_STATE[$_PX_TOTAL]="stopped"
+                    fi
+                    _PX_COL2[$_PX_TOTAL]="${_c2}  ${_c7}"
+                    _PX_COL3[$_PX_TOTAL]="Used:${_u}/${_t} (Avail:${_a})"
+                    _PX_META[$_PX_TOTAL]="${_c2}|${_c3}"
+                    _PX_TOTAL=$((_PX_TOTAL + 1))
+                done < <(pvesm status 2>/dev/null)
+            fi
+            ;;
+
+        5) # Node & Tasks
+            if [ "$_PX_HAS_PVESH" = "1" ] && [ "$_PX_HAS_JQ" = "1" ]; then
+                while IFS='|' read -r _c1 _c2 _c3 _c4 _c5 _c6; do
+                    [ -z "$_c1" ] && continue
+                    # c1=upid c2=type c3=id c4=status c5=starttime c6=user
+                    local _dt=""
+                    if echo "$_c5" | grep -qE '^[0-9]+$'; then
+                        _dt=$(date -d "@${_c5}" "+%m-%d %H:%M:%S" 2>/dev/null || echo "$_c5")
+                    else
+                        _dt="$_c5"
+                    fi
+                    _PX_IDS[$_PX_TOTAL]="$_c1"
+                    _PX_NAMES[$_PX_TOTAL]="${_c2} ${_c3}"
+                    case "$_c4" in
+                        OK)        _PX_STATE[$_PX_TOTAL]="running" ;;
+                        ""|running*) _PX_STATE[$_PX_TOTAL]="locked" ;;
+                        *)         _PX_STATE[$_PX_TOTAL]="stopped" ;;
+                    esac
+                    _PX_COL2[$_PX_TOTAL]="${_c4:-running}"
+                    _PX_COL3[$_PX_TOTAL]="${_dt}  (${_c6})"
+                    _PX_META[$_PX_TOTAL]="${_c1}|${_PX_NODE}"
+                    _PX_TOTAL=$((_PX_TOTAL + 1))
+                done < <(pvesh get "/nodes/${_PX_NODE}/tasks" --limit 40 --output-format json 2>/dev/null | jq -r '
+                    .[] | "\(.upid // "")|\(.type // "-")|\(.id // "-")|\(.status // "running")|\(.starttime // "")|\(.user // "-")"
+                ' 2>/dev/null)
+            fi
+            ;;
+
+        6) # Tools & Menus (all 36 proxmox vms manager menus)
+            while IFS='|' read -r _c1 _c2 _c3 _c4; do
+                [ -z "$_c1" ] && continue
+                _PX_IDS[$_PX_TOTAL]="$_c1"
+                _PX_NAMES[$_PX_TOTAL]="[${_c1}] ${_c2}"
+                _PX_STATE[$_PX_TOTAL]="tool"
+                _PX_COL2[$_PX_TOTAL]="$_c3"
+                _PX_COL3[$_PX_TOTAL]="$_c4"
+                _PX_META[$_PX_TOTAL]="$_c1"
+                _PX_TOTAL=$((_PX_TOTAL + 1))
+            done <<'EOF'
+px|manage vms|[VM/제어]|LXC/KVM 목록·시작·중지·재부팅 기본 관리
+pxx|start stop enter vm|[VM/제어]|빠른 VM/CT 제어 및 진입 (vm 함수)
+pxm|monitoring vms|[모니터링]|VM/CT 리소스 실시간 모니터링
+pxs|storage|[스토리지]|LVM/Thin/ZFS/디렉터리 스토리지 관리
+pxc|cluster/node|[클러스터]|클러스터 상태·노드·corosync 관리
+pxmerge|cluster merge / vmid remap|[클러스터]|클러스터 병합 및 VMID 중복 리매핑
+node|node reset|[클러스터]|클러스터 노드 탈퇴·초기화 (주의)
+iso|iso/lxc download|[스토리지]|ISO 이미지 및 LXC 템플릿 다운로드
+pvssl|webui ssl-cert set|[보안/인증]|Proxmox WebUI SSL 인증서 설정
+pxdump|backup vms|[백업/복구]|vzdump 스냅샷 백업 도구 모음
+pxl|log / fail2ban|[모니터링]|PVE 시스템 로그 및 Fail2ban 차단 관리
+snap|snapshot|[백업/복구]|VM/CT 스냅샷 생성·목록·롤백·삭제
+pxg|gpu intel 1 - passthrough|[GPU패스스루]|Intel GPU 패스스루 1단계
+pxgg|gpu intel 2 - SR-IOV|[GPU패스스루]|Intel i915 SR-IOV DKMS 설정
+pxggg|gpu intel 3 - grub|[GPU패스스루]|Intel GPU 패스스루 GRUB 커널 옵션
+pxga|gpu amd passthrough|[GPU패스스루]|AMD GPU 패스스루 설정
+pxup|upgrade && noti-push|[유지보수]|PVE 업그레이드 및 푸시 알림
+pxh|helper script|[유지보수]|Proxmox Helper Scripts 원클릭 실행
+pbs|vm - backup server|[VM/템플릿]|Proxmox Backup Server(PBS) 구축
+win11|vm - win11|[VM/템플릿]|Windows 11 VM 구축 가이드
+bliss|vm - blissos Android|[VM/템플릿]|BlissOS 안드로이드 VM 구축
+gphoto|vm - google photo backup|[VM/템플릿]|BlissOS 구글포토 무제한 백업 설정
+nas|vm - xpenology nas|[VM/템플릿]|Xpenology 시놀로지 NAS VM 구축
+opn|vm - opnsense firewall|[VM/템플릿]|OPNsense 방화벽 VM 구축
+ubun|vm - ubuntu desktop/etc|[VM/템플릿]|Ubuntu Desktop 등 범용 VM 구축
+pxci|host - cloud init generic|[Cloud-Init]|범용 Cloud-Init VM 템플릿 생성
+pxcc|host - cloud init custom|[Cloud-Init]|기존 VM을 Cloud-Init 템플릿으로 변환
+pxb|host - backup/restore/vnc|[백업/복구]|호스트 백업·복원·VNC 설정 모음
+pxr|host - recover deleted vm|[백업/복구]|삭제된 VM/디스크 긴급 복구
+pxt|host - tailscale vpn|[네트워크]|Tailscale VPN 서버 구축
+pxd|host - dhcp server|[네트워크]|호스트 DHCP 서버 설정
+ovs|host - open-vswitch|[네트워크]|Open vSwitch 가상 스위치 설정
+mig|vmware(vmdk) migration|[마이그레이션]|VMware VMDK -> Proxmox 변환 이전
+pxwg|emergency vm tunnel/switch|[네트워크/비상]|비상 VM 터널 및 트래픽 전환
+pve_ip|host ip switch & net check|[네트워크/비상]|공인/사설/DHCP/USB IP 전환 및 점검
+idc_ip|IDC 무작정 아이피 잡기|[네트워크/비상]|IDC 자동 대역 탐색·충돌감지·핑
+EOF
+            ;;
+    esac
+}
+
+_px_build_view() {
+    _PX_VIEW=()
+    _PX_VCNT=0
+    local _i _q _hay
+    _q=$(printf '%s' "$_PX_SEARCH" | tr '[:upper:]' '[:lower:]')
+    _i=0
+    while [ "$_i" -lt "$_PX_TOTAL" ]; do
+        if [ -z "$_q" ]; then
+            _PX_VIEW[$_PX_VCNT]="$_i"
+            _PX_VCNT=$((_PX_VCNT + 1))
+        else
+            _hay=$(printf '%s %s %s %s' "${_PX_NAMES[$_i]}" "${_PX_COL2[$_i]}" "${_PX_COL3[$_i]}" "${_PX_META[$_i]}" | tr '[:upper:]' '[:lower:]')
+            case "$_hay" in
+                *"$_q"*)
+                    _PX_VIEW[$_PX_VCNT]="$_i"
+                    _PX_VCNT=$((_PX_VCNT + 1))
+                    ;;
+            esac
+        fi
+        _i=$((_i + 1))
+    done
+    [ "$_PX_CUR" -ge "$_PX_VCNT" ] && _PX_CUR=$((_PX_VCNT > 0 ? _PX_VCNT - 1 : 0))
+    [ "$_PX_CUR" -lt 0 ] && _PX_CUR=0
+    [ "$_PX_TOP" -gt "$_PX_CUR" ] && _PX_TOP="$_PX_CUR"
+}
+
+_px_render_row() {
+    local _vidx="$1" _is_cur="$2"
+    local _idx="${_PX_VIEW[$_vidx]}"
+    local _st="${_PX_STATE[$_idx]}"
+    local _nm="${_PX_NAMES[$_idx]}"
+    local _c2="${_PX_COL2[$_idx]}"
+    local _c3="${_PX_COL3[$_idx]}"
+    local _mark=" " _bg="" _rst='\033[0m' _ico _iclr
+
+    case "$_st" in
+        running) _ico="●"; _iclr='\033[1;32m' ;;
+        locked)  _ico="◐"; _iclr='\033[1;33m' ;;
+        snap)    _ico="◈"; _iclr='\033[1;35m' ;;
+        backup)  _ico="◆"; _iclr='\033[1;36m' ;;
+        tool)    _ico="▸"; _iclr='\033[1;36m' ;;
+        *)       _ico="○"; _iclr='\033[1;31m' ;;
+    esac
+
+    if [ "$_is_cur" = "1" ]; then
+        _mark="▶"
+        _bg='\033[44;1;37m'
+        _iclr='\033[44;1;33m'
+    fi
+
+    [ "${#_nm}" -gt 30 ] && _nm="${_nm:0:29}~"
+    [ "${#_c2}" -gt 20 ] && _c2="${_c2:0:19}~"
+    local _c3_max=$((_PX_COLS - 58))
+    [ "$_c3_max" -lt 16 ] && _c3_max=16
+    [ "${#_c3}" -gt "$_c3_max" ] && _c3="${_c3:0:$((_c3_max - 1))}~"
+
+    _px_p "${_bg} %s ${_iclr}%s${_rst}${_bg} %-30s  %-20s  %s\033[K${_rst}" "$_mark" "$_ico" "$_nm" "$_c2" "$_c3"
+}
+
+_px_render_full() {
+    _PX_LINES=$(tput lines 2>/dev/null || echo 24)
+    _PX_COLS=$(tput cols 2>/dev/null || echo 100)
+    [ "$_PX_LINES" -lt 16 ] && _PX_LINES=16
+    [ "$_PX_COLS" -lt 70 ] && _PX_COLS=70
+    _PX_PAGE=$((_PX_LINES - 9))
+    [ "$_PX_PAGE" -lt 5 ] && _PX_PAGE=5
+
+    if [ "$_PX_CUR" -lt "$_PX_TOP" ]; then
+        _PX_TOP="$_PX_CUR"
+    elif [ "$_PX_CUR" -ge $((_PX_TOP + _PX_PAGE)) ]; then
+        _PX_TOP=$((_PX_CUR - _PX_PAGE + 1))
+    fi
+
+    printf '\033[H'
+    # Line 1: Header
+    _px_p '\033[1;36m◈ Proxmox VM & CT Studio [pxms]\033[0m  \033[1;37m%s\033[0m  PVE:%s  \033[1;32mRun:%s\033[0m/\033[1;31mStop:%s\033[0m  VM:%s CT:%s  Load:%s MEM:%s\033[K\n' \
+        "$_PX_NODE" "$_PX_PVE_VER" "$_PX_CNT_RUN" "$_PX_CNT_STOP" "$_PX_CNT_VM" "$_PX_CNT_CT" "$_PX_LOAD" "$_PX_MEM_PCT"
+
+    # Line 2: Tab Bar
+    local _t _tlbl _tbar=""
+    for _t in 1 2 3 4 5 6; do
+        case "$_t" in
+            1) _tlbl="1:VM&CT" ;;
+            2) _tlbl="2:Snapshots" ;;
+            3) _tlbl="3:Backups" ;;
+            4) _tlbl="4:Storage&ISO" ;;
+            5) _tlbl="5:Node&Tasks" ;;
+            6) _tlbl="6:Tools(36)" ;;
+        esac
+        if [ "$_t" = "$_PX_TAB" ]; then
+            _tbar="${_tbar}\033[46;1;30m [${_tlbl}] \033[0m "
+        else
+            _tbar="${_tbar}\033[0;37m ${_tlbl} \033[0m "
+        fi
+    done
+    _px_p "${_tbar}\033[K\n"
+
+    # Line 3: Divider + Search status
+    if [ -n "$_PX_SEARCH" ]; then
+        _px_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m\033[K\n' "$_PX_SEARCH" "$_PX_VCNT"
+    else
+        _px_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m (%d건)\033[K\n' "$_PX_VCNT"
+    fi
+
+    # Line 4: Column Header
+    case "$_PX_TAB" in
+        1) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID NAME" "STATUS" "RESOURCES / NODE" ;;
+        2) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TYPE/ID  SNAPSHOT" "CREATED" "DESCRIPTION" ;;
+        3) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "BACKUP ARCHIVE" "VMID / SIZE" "STORAGE (FMT)" ;;
+        4) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "STORAGE NAME" "TYPE / USE%" "CAPACITY" ;;
+        5) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "TASK TYPE / TARGET" "STATUS" "START TIME (USER)" ;;
+        6) _px_p '\033[1;37m     %-30s  %-20s  %s\033[0m\033[K\n' "[KEY] MENU NAME" "CATEGORY" "DESCRIPTION" ;;
+    esac
+
+    # Lines 5..(5+PAGE-1): List rows
+    local _r=0 _v
+    while [ "$_r" -lt "$_PX_PAGE" ]; do
+        _v=$((_PX_TOP + _r))
+        if [ "$_v" -lt "$_PX_VCNT" ]; then
+            if [ "$_v" -eq "$_PX_CUR" ]; then
+                _px_render_row "$_v" 1
+            else
+                _px_render_row "$_v" 0
+            fi
+            printf '\n'
+        else
+            if [ "$_r" -eq 0 ] && [ "$_PX_VCNT" -eq 0 ]; then
+                _px_p '   \033[0;33m(표시할 항목이 없습니다. Tab/1~6 으로 다른 탭을 보거나 r 로 새로고침)\033[0m\033[K\n'
+            else
+                printf '\033[K\n'
+            fi
+        fi
+        _r=$((_r + 1))
+    done
+
+    # Footer: Tab-specific hotkeys
+    _px_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m\033[K\n'
+    case "$_PX_TAB" in
+        1) _px_p '\033[1;33m[Enter]\033[0m메뉴 \033[1;32m[s]\033[0mStart/Stop \033[1;36m[R]\033[0m재부팅 \033[1;37m[e]\033[0m진입 \033[1;36m[i]\033[0m상세 \033[1;33m[c]\033[0mConf \033[1;35m[S]\033[0m스냅샷 \033[1;32m[b]\033[0m백업 \033[1;33m[u]\033[0m언락 \033[1;31m[d]\033[0m삭제\033[K\n' ;;
+        2) _px_p '\033[1;33m[Enter/i]\033[0m스냅샷목록 \033[1;32m[n]\033[0m새스냅샷 \033[1;35m[B]\033[0m롤백(Rollback) \033[1;31m[d]\033[0m스냅샷삭제\033[K\n' ;;
+        3) _px_p '\033[1;33m[Enter/i]\033[0m상세 \033[1;32m[b]\033[0mVM백업 \033[1;36m[A]\033[0m실행중전체백업 \033[1;35m[R]\033[0m복원(Restore) \033[1;31m[d]\033[0m삭제\033[K\n' ;;
+        4) _px_p '\033[1;33m[Enter/i]\033[0m내부파일(pvesm list) \033[1;36m[l]\033[0mLVM/Thin(lvs) \033[1;32m[I]\033[0mISO/템플릿(pveam) \033[1;35m[z]\033[0mZFS상태\033[K\n' ;;
+        5) _px_p '\033[1;33m[Enter/i]\033[0mTask로그 \033[1;36m[c]\033[0m클러스터(pvecm) \033[1;32m[t]\033[0m실시간모니터 \033[1;35m[l]\033[0mPVE/fail2ban로그 \033[1;31m[S]\033[0m서비스재시작\033[K\n' ;;
+        6) _px_p '\033[1;33m[Enter]\033[0m선택한 Proxmox 고급 메뉴 실행 (종료 후 pxms 자동 복귀)  \033[1;36m[/]\033[0m키워드검색\033[K\n' ;;
+    esac
+    _px_p '\033[0;37m[↑↓]이동 [←→/Tab/1-6]탭전환 [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
+    _px_p '\033[1;32m%s\033[0m\033[K' "${_PX_MSG:-}"
+    _PX_DIRTY=0
+    _PX_PREV_CUR="$_PX_CUR"
+    _PX_PREV_TOP="$_PX_TOP"
+}
+
+_px_render_delta() {
+    if [ "$_PX_DIRTY" = "1" ] || [ "$_PX_TOP" -ne "$_PX_PREV_TOP" ] || [ "$_PX_CUR" -lt "$_PX_TOP" ] || [ "$_PX_CUR" -ge $((_PX_TOP + _PX_PAGE)) ]; then
+        _px_render_full
+        return
+    fi
+    if [ "$_PX_PREV_CUR" -ne "$_PX_CUR" ]; then
+        local _r1=$((5 + _PX_PREV_CUR - _PX_TOP))
+        local _r2=$((5 + _PX_CUR - _PX_TOP))
+        printf '\033[%d;1H' "$_r1"
+        _px_render_row "$_PX_PREV_CUR" 0
+        printf '\033[%d;1H' "$_r2"
+        _px_render_row "$_PX_CUR" 1
+        _PX_PREV_CUR="$_PX_CUR"
+    fi
+}
+
+_px_show_help() {
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _px_p '\033[1;36m◈ 통합 Proxmox VM & CT 관리 TUI [pxms] 단축키 도움말\033[0m\n\n'
+    _px_p '  \033[1;37m[공통 이동/탭]\033[0m\n'
+    _px_p '    ↑/↓, j/k       : 항목 이동 (PgUp/PgDn 페이지, Home/End 처음/끝)\n'
+    _px_p '    ←/→, Tab, 1~6  : 6개 탭 즉시 전환 (VM&CT/Snapshots/Backups/Storage/Node/Tools)\n'
+    _px_p '    /              : 현재 탭 키워드 필터 검색 (빈 값 Enter 또는 Esc = 초기화)\n'
+    _px_p '    r              : 데이터 새로고침   |   q : 종료\n\n'
+    _px_p '  \033[1;37m[Tab 1: VM & CT (QEMU + LXC 통합)]\033[0m\n'
+    _px_p '    Enter : 종합 액션 메뉴 (Start/Stop/HardStop/Reboot/Enter/Config/Snap/Backup/Clone/Destroy)\n'
+    _px_p '    s : Start/Shutdown 토글 | R : 재부팅 | e : 쉘진입(pct enter / qssh / qm terminal)\n'
+    _px_p '    i : 상세정보+IP+LVM디스크 | c : .conf vi2 편집 | S : 빠른스냅샷 | b : 빠른백업 | u : 언락 | d : 삭제\n\n'
+    _px_p '  \033[1;37m[Tab 2~5: Snapshots / Backups / Storage&ISO / Node&Tasks]\033[0m\n'
+    _px_p '    Tab 2 : n 새스냅샷 | B 롤백 | d 삭제\n'
+    _px_p '    Tab 3 : b 선택VM백업 | A 실행중전체백업 | R 복원(qmrestore/pct restore) | d 삭제\n'
+    _px_p '    Tab 4 : Enter/i 스토리지내부목록 | l LVM(lvs) | I ISO/템플릿(pveam) | z ZFS상태\n'
+    _px_p '    Tab 5 : Enter/i Task상세로그 | c 클러스터(pvecm) | t 실시간모니터 | l PVE/fail2ban로그 | S 서비스재시작\n\n'
+    _px_p '  \033[1;37m[Tab 6: Tools (36개 Proxmox 고급 메뉴 전체 런처)]\033[0m\n'
+    _px_p '    / 로 키워드 검색 후 Enter 로 즉시 실행 (종료 시 pxms 로 자동 복귀)\n'
+    _px_pause
+}
+
+_px_vm_inspect() {
+    local _type="$1" _node="$2" _vmid="$3" _nm="$4"
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _px_p '\033[1;36m◈ %s/%s (%s) @%s 상세 정보\033[0m\n' "$_type" "$_vmid" "$_nm" "$_node"
+    _px_p '──────────────────────────────────────────────────────────────────────\n'
+    if [ "$_PX_HAS_PVESH" = "1" ]; then
+        pvesh get "/nodes/${_node}/${_type}/${_vmid}/status/current" --noborder 2>/dev/null
+    elif [ "$_type" = "qemu" ]; then
+        qm status "$_vmid" --verbose 2>/dev/null
+    else
+        pct status "$_vmid" --verbose 2>/dev/null
+    fi
+    _px_p '\n\033[1;33m[네트워크 / IP]\033[0m\n'
+    if declare -f vmip >/dev/null 2>&1; then
+        vmip "$_vmid" 2>/dev/null
+    elif [ "$_type" = "lxc" ]; then
+        pct exec "$_vmid" -- ip -4 -br addr 2>/dev/null
+    else
+        qm guest cmd "$_vmid" network-get-interfaces 2>/dev/null | head -n 30
+    fi
+    _px_p '\n\033[1;33m[LVM 디스크 볼륨]\033[0m\n'
+    lvs --noheadings --units g -o lv_name,lv_size,data_percent 2>/dev/null | awk -v id="vm-${_vmid}-" '$1 ~ "^"id {printf "  %-28s Size:%-8s Used:%s%%\n", $1, $2, $3}'
+    _px_p '\n\033[1;33m[설정 요약 (.conf)]\033[0m\n'
+    local _conf
+    _conf=$(_px_find_conf "$_vmid" "$_type" "$_node")
+    if [ -n "$_conf" ] && [ -f "$_conf" ]; then
+        grep -E '^(name|hostname|cores|sockets|memory|balloon|ostype|onboot|boot|net[0-9]|scsi[0-9]|virtio[0-9]|rootfs|mp[0-9]|hostpci|lock):' "$_conf" 2>/dev/null | head -n 25
+    fi
+    _px_pause
+}
+
+_px_vm_action() {
+    local _act="$1" _idx="$2"
+    local _meta="${_PX_META[$_idx]}"
+    local _type _node _vmid _nm _lock _st _ans _conf _sn _desc _stg _newid _newnm _path _out
+    IFS='|' read -r _type _node _vmid _nm _lock < <(printf '%s\n' "$_meta")
+    _st="${_PX_STATE[$_idx]}"
+    _path="/nodes/${_node}/${_type}/${_vmid}"
+
+    case "$_act" in
+        menu)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;36m◈ VM/CT 종합 액션: %s/%s (%s) [%s] @%s\033[0m\n' "$_type" "$_vmid" "$_nm" "$_st" "$_node"
+            _px_p '──────────────────────────────────────────────────────────────────────\n'
+            _px_p '   1) Start / Shutdown(정상종료) 토글\n'
+            _px_p '   2) 강제 중지 (Hard Stop)\n'
+            _px_p '   3) 재부팅 (Reboot)\n'
+            _px_p '   4) 쉘 진입 (LXC: pct enter / VM: qssh 또는 qm terminal)\n'
+            _px_p '   5) 상세 정보 + IP + LVM 디스크 + 설정 요약\n'
+            _px_p '   6) 설정 파일(.conf) 편집 (vi2)\n'
+            _px_p '   7) 빠른 스냅샷 생성 (snapshot)\n'
+            _px_p '   8) 즉시 백업 실행 (vzdump zstd)\n'
+            _px_p '   9) 복제 (Clone -> 새 VMID)\n'
+            _px_p '  10) 락 해제 (unlock)\n'
+            _px_p '  11) VM/CT 영구 삭제 (destroy)\n'
+            _px_p '   0) 취소\n'
+            read -p "선택 [0-11]: " _ans </dev/tty
+            case "$_ans" in
+                1)  _px_vm_action toggle "$_idx" ;;
+                2)  _px_vm_action hardstop "$_idx" ;;
+                3)  _px_vm_action reboot "$_idx" ;;
+                4)  _px_vm_action enter "$_idx" ;;
+                5)  _px_vm_inspect "$_type" "$_node" "$_vmid" "$_nm" ;;
+                6)  _px_vm_action edit_conf "$_idx" ;;
+                7)  _px_vm_action snapshot "$_idx" ;;
+                8)  _px_vm_action backup "$_idx" ;;
+                9)  _px_vm_action clone "$_idx" ;;
+                10) _px_vm_action unlock "$_idx" ;;
+                11) _px_vm_action destroy "$_idx" ;;
+            esac
+            return
+            ;;
+
+        toggle)
+            if [ "$_st" = "running" ]; then
+                if [ "$_PX_HAS_PVESH" = "1" ]; then
+                    _out=$(pvesh create "${_path}/status/shutdown" 2>&1)
+                elif [ "$_type" = "qemu" ]; then
+                    _out=$(qm shutdown "$_vmid" 2>&1)
+                else
+                    _out=$(pct shutdown "$_vmid" 2>&1)
+                fi
+                if [ $? -eq 0 ]; then
+                    _PX_MSG="✔ 정상 종료(shutdown) 요청: ${_type}/${_vmid} (${_nm})"
+                else
+                    _PX_MSG="✖ 종료 실패: ${_out}"
+                fi
+            else
+                if [ "$_PX_HAS_PVESH" = "1" ]; then
+                    _out=$(pvesh create "${_path}/status/start" 2>&1)
+                elif [ "$_type" = "qemu" ]; then
+                    _out=$(qm start "$_vmid" 2>&1)
+                else
+                    _out=$(pct start "$_vmid" 2>&1)
+                fi
+                if [ $? -eq 0 ]; then
+                    _PX_MSG="✔ 시작(start) 요청 완료: ${_type}/${_vmid} (${_nm})"
+                else
+                    _PX_MSG="✖ 시작 실패: ${_out}"
+                fi
+            fi
+            sleep 1
+            _px_load_summary; _px_load_tab; _px_build_view
+            ;;
+
+        hardstop)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;31m⚠ 강제 중지 (Hard Stop): %s/%s (%s)\033[0m\n' "$_type" "$_vmid" "$_nm"
+            read -p "정말 강제 중지할까요? [y/N]: " _ans </dev/tty
+            if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                if [ "$_PX_HAS_PVESH" = "1" ]; then
+                    pvesh create "${_path}/status/stop" >/dev/null 2>&1 && _PX_MSG="✔ 강제 중지 완료: ${_vmid}" || _PX_MSG="✖ 강제 중지 실패: ${_vmid}"
+                elif [ "$_type" = "qemu" ]; then
+                    qm stop "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ 강제 중지 완료: ${_vmid}" || _PX_MSG="✖ 강제 중지 실패: ${_vmid}"
+                else
+                    pct stop "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ 강제 중지 완료: ${_vmid}" || _PX_MSG="✖ 강제 중지 실패: ${_vmid}"
+                fi
+                sleep 1
+                _px_load_summary; _px_load_tab; _px_build_view
+            fi
+            ;;
+
+        reboot)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;36m◈ 재부팅 확인: %s/%s (%s)\033[0m\n' "$_type" "$_vmid" "$_nm"
+            read -p "재부팅할까요? [y/N]: " _ans </dev/tty
+            if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                if [ "$_PX_HAS_PVESH" = "1" ]; then
+                    pvesh create "${_path}/status/reboot" >/dev/null 2>&1 && _PX_MSG="✔ 재부팅 요청: ${_vmid}" || _PX_MSG="✖ 재부팅 실패: ${_vmid}"
+                elif [ "$_type" = "qemu" ]; then
+                    qm reboot "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ 재부팅 요청: ${_vmid}" || _PX_MSG="✖ 재부팅 실패: ${_vmid}"
+                else
+                    pct reboot "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ 재부팅 요청: ${_vmid}" || _PX_MSG="✖ 재부팅 실패: ${_vmid}"
+                fi
+                sleep 1
+                _px_load_summary; _px_load_tab; _px_build_view
+            fi
+            ;;
+
+        enter)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;36m◈ 쉘 진입: %s/%s (%s) @%s (종료: exit 또는 Ctrl+O)\033[0m\n' "$_type" "$_vmid" "$_nm" "$_node"
+            if [ "$_st" != "running" ]; then
+                read -p "현재 중지 상태입니다. 먼저 시작하고 진입할까요? [Y/n]: " _ans </dev/tty
+                if printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+                    return
+                fi
+                if [ "$_PX_HAS_PVESH" = "1" ]; then
+                    pvesh create "${_path}/status/start"
+                elif [ "$_type" = "qemu" ]; then
+                    qm start "$_vmid"
+                else
+                    pct start "$_vmid"
+                fi
+                sleep 3
+            fi
+            if [ "$_type" = "lxc" ]; then
+                if [ "$_node" = "$_PX_NODE" ]; then
+                    pct enter "$_vmid"
+                else
+                    ssh -t "$_node" "pct enter ${_vmid}"
+                fi
+            else
+                _px_p '  1) SSH 접속 (qssh %s root)\n  2) 시리얼 콘솔 (qm terminal %s)\n  0) 취소\n' "$_vmid" "$_vmid"
+                read -p "진입 방식 선택 [1]: " _ans </dev/tty
+                case "$_ans" in
+                    0) return ;;
+                    2)
+                        if [ "$_node" = "$_PX_NODE" ]; then
+                            qm terminal "$_vmid"
+                        else
+                            ssh -t "$_node" "qm terminal ${_vmid}"
+                        fi
+                        ;;
+                    *)
+                        if declare -f qssh >/dev/null 2>&1; then
+                            qssh "$_vmid" root
+                        else
+                            _px_p '\033[1;33mqssh 함수를 찾을 수 없어 qm terminal 로 전환합니다.\033[0m\n'
+                            qm terminal "$_vmid"
+                        fi
+                        ;;
+                esac
+            fi
+            _PX_MSG="✔ 쉘 세션 종료: ${_type}/${_vmid} (${_nm})"
+            _px_load_summary; _px_load_tab; _px_build_view
+            ;;
+
+        inspect)
+            _px_vm_inspect "$_type" "$_node" "$_vmid" "$_nm"
+            ;;
+
+        edit_conf)
+            _conf=$(_px_find_conf "$_vmid" "$_type" "$_node")
+            if [ -n "$_conf" ] && [ -f "$_conf" ]; then
+                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                if declare -f vi2 >/dev/null 2>&1; then
+                    vi2 "$_conf"
+                else
+                    vi "$_conf"
+                fi
+                _PX_MSG="✔ 설정 편집 완료: ${_conf}"
+                _px_load_summary; _px_load_tab; _px_build_view
+            else
+                _PX_MSG="✖ 설정 파일을 찾을 수 없음: ${_vmid}.conf"
+            fi
+            ;;
+
+        snapshot)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            local _def_sn="at_$(date '+%Y%m%d_%H%M%S')"
+            _px_p '\033[1;35m◈ 스냅샷 생성: %s/%s (%s)\033[0m\n' "$_type" "$_vmid" "$_nm"
+            read -p "스냅샷 이름 [기본: ${_def_sn}]: " _sn </dev/tty
+            [ -z "$_sn" ] && _sn="$_def_sn"
+            read -p "설명 (선택): " _desc </dev/tty
+            [ -z "$_desc" ] && _desc="Created by pxms"
+            if [ "$_type" = "qemu" ]; then
+                qm snapshot "$_vmid" "$_sn" --description "$_desc" && _PX_MSG="✔ 스냅샷 생성: ${_vmid}@${_sn}" || _PX_MSG="✖ 스냅샷 실패: ${_vmid}"
+            else
+                pct snapshot "$_vmid" "$_sn" --description "$_desc" && _PX_MSG="✔ 스냅샷 생성: ${_vmid}@${_sn}" || _PX_MSG="✖ 스냅샷 실패: ${_vmid}"
+            fi
+            _px_pause
+            ;;
+
+        backup)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;32m◈ 즉시 스냅샷 백업 (vzdump): %s/%s (%s)\033[0m\n' "$_type" "$_vmid" "$_nm"
+            _stg=$(_px_pick_backup_storage)
+            _px_p '대상 스토리지: \033[1;36m%s\033[0m (mode=snapshot, compress=zstd)\n' "$_stg"
+            read -p "백업을 시작할까요? [Y/n]: " _ans </dev/tty
+            if ! printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+                vzdump "$_vmid" --mode snapshot --storage "$_stg" --compress zstd --notes-template "{{guestname}}" --remove 0 \
+                    && _PX_MSG="✔ 백업 완료: ${_vmid} -> ${_stg}" || _PX_MSG="✖ 백업 실패: ${_vmid}"
+                _px_pause
+            fi
+            ;;
+
+        clone)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;36m◈ VM/CT 복제 (Clone): %s/%s (%s)\033[0m\n' "$_type" "$_vmid" "$_nm"
+            read -p "새 VMID 입력 (취소=빈값): " _newid </dev/tty
+            [ -z "$_newid" ] && return
+            read -p "새 이름/호스트명 [기본: ${_nm}-clone]: " _newnm </dev/tty
+            [ -z "$_newnm" ] && _newnm="${_nm}-clone"
+            if [ "$_type" = "qemu" ]; then
+                qm clone "$_vmid" "$_newid" --name "$_newnm" --full 1 && _PX_MSG="✔ 복제 완료: ${_vmid} -> ${_newid}" || _PX_MSG="✖ 복제 실패"
+            else
+                pct clone "$_vmid" "$_newid" --hostname "$_newnm" --full 1 && _PX_MSG="✔ 복제 완료: ${_vmid} -> ${_newid}" || _PX_MSG="✖ 복제 실패"
+            fi
+            _px_load_summary; _px_load_tab; _px_build_view
+            _px_pause
+            ;;
+
+        unlock)
+            if [ "$_type" = "qemu" ]; then
+                qm unlock "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ Unlock 완료: qemu/${_vmid}" || _PX_MSG="✖ Unlock 실패: qemu/${_vmid}"
+            else
+                pct unlock "$_vmid" >/dev/null 2>&1 && _PX_MSG="✔ Unlock 완료: lxc/${_vmid}" || _PX_MSG="✖ Unlock 실패: lxc/${_vmid}"
+            fi
+            _px_load_summary; _px_load_tab; _px_build_view
+            ;;
+
+        destroy)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _px_p '\033[1;31m⚠ 영구 삭제 경고: %s/%s (%s) @%s\033[0m\n' "$_type" "$_vmid" "$_nm" "$_node"
+            _px_p '이 작업은 디스크와 설정을 모두 삭제하며 되돌릴 수 없습니다!\n'
+            read -p "확인을 위해 VMID (${_vmid}) 를 직접 입력하세요: " _ans </dev/tty
+            if [ "$_ans" = "$_vmid" ]; then
+                if [ "$_type" = "qemu" ]; then
+                    qm stop "$_vmid" >/dev/null 2>&1
+                    qm destroy "$_vmid" --purge && _PX_MSG="✔ 삭제 완료: qemu/${_vmid}" || _PX_MSG="✖ 삭제 실패: qemu/${_vmid}"
+                else
+                    pct stop "$_vmid" >/dev/null 2>&1
+                    pct destroy "$_vmid" --purge && _PX_MSG="✔ 삭제 완료: lxc/${_vmid}" || _PX_MSG="✖ 삭제 실패: lxc/${_vmid}"
+                fi
+                _px_load_summary; _px_load_tab; _px_build_view
+                _px_pause
+            else
+                _PX_MSG="삭제 취소됨: ${_vmid}"
+            fi
+            ;;
+    esac
+}
+
+pxms() {
+    _px_detect_env || return 1
+
+    _PX_TAB=1
+    _PX_CUR=0
+    _PX_TOP=0
+    _PX_PREV_CUR=0
+    _PX_PREV_TOP=0
+    _PX_SEARCH=""
+    _PX_MSG="✔ pxms 준비 완료 (1~6 탭전환, Enter 메뉴, / 검색, ? 도움말)"
+    _PX_DIRTY=1
+
+    _px_load_summary
+    _px_load_tab
+    _px_build_view
+
+    local _old_trap _k _k2 _k3 _idx _ans _meta _t _n _id _sn _stg _vol _fmt _upid _newid _def_sn _desc _tkey _vms
+    _old_trap=$(trap -p INT)
+    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+
+    tput civis 2>/dev/null
+    printf '\033[2J\033[H'
+
+    while true; do
+        _px_render_delta
+        stty -echo 2>/dev/null
+        IFS= read -rsn1 _k </dev/tty
+
+        # Arrow / Page / Home / End escape sequences
+        if [ "$_k" = $'\x1b' ]; then
+            IFS= read -rsn1 -t 1 _k2 </dev/tty
+            if [ "$_k2" = "[" ]; then
+                IFS= read -rsn1 -t 1 _k3 </dev/tty
+                case "$_k3" in
+                    A) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
+                    B) [ "$_PX_CUR" -lt $((_PX_VCNT - 1)) ] && _PX_CUR=$((_PX_CUR + 1)) ;;
+                    C) _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab; _px_build_view; _PX_DIRTY=1 ;;
+                    D) _PX_TAB=$(( (_PX_TAB + 4) % 6 + 1 )); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab; _px_build_view; _PX_DIRTY=1 ;;
+                    5) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR - _PX_PAGE)); [ "$_PX_CUR" -lt 0 ] && _PX_CUR=0; _PX_DIRTY=1 ;;
+                    6) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR + _PX_PAGE)); [ "$_PX_CUR" -ge "$_PX_VCNT" ] && _PX_CUR=$((_PX_VCNT > 0 ? _PX_VCNT - 1 : 0)); _PX_DIRTY=1 ;;
+                    H) _PX_CUR=0; _PX_DIRTY=1 ;;
+                    F) _PX_CUR=$((_PX_VCNT > 0 ? _PX_VCNT - 1 : 0)); _PX_DIRTY=1 ;;
+                esac
+            else
+                if [ -n "$_PX_SEARCH" ]; then
+                    _PX_SEARCH=""; _PX_CUR=0; _PX_TOP=0; _px_build_view; _PX_DIRTY=1
+                fi
+            fi
+            continue
+        fi
+
+        case "$_k" in
+            q|Q) break ;;
+            $'\t')
+                _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
+                _px_load_tab; _px_build_view; _PX_DIRTY=1
+                ;;
+            1|2|3|4|5|6)
+                if [ "$_PX_TAB" != "$_k" ]; then
+                    _PX_TAB="$_k"; _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
+                    _px_load_tab; _px_build_view; _PX_DIRTY=1
+                fi
+                ;;
+            k) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
+            j) [ "$_PX_CUR" -lt $((_PX_VCNT - 1)) ] && _PX_CUR=$((_PX_CUR + 1)) ;;
+            \?|h)
+                _px_show_help; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+            /)
+                tput cnorm 2>/dev/null; stty echo 2>/dev/null
+                _px_p '\n검색어 입력 (빈 값=초기화): '
+                IFS= read -r _PX_SEARCH </dev/tty
+                _PX_CUR=0; _PX_TOP=0; _px_build_view; _PX_DIRTY=1; tput civis 2>/dev/null
+                ;;
+            r)
+                _px_load_summary; _px_load_tab; _px_build_view
+                _PX_MSG="✔ 새로고침 완료"
+                _PX_DIRTY=1
+                ;;
+            *)
+                _idx=""
+                [ "$_PX_VCNT" -gt 0 ] && _idx="${_PX_VIEW[$_PX_CUR]}"
+                case "$_PX_TAB" in
+                    1) # VM & CT
+                        [ -z "$_idx" ] && continue
+                        case "$_k" in
+                            "") _px_vm_action menu "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            s)  _px_vm_action toggle "$_idx"; _PX_DIRTY=1 ;;
+                            R)  _px_vm_action reboot "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            e)  _px_vm_action enter "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            i)  _px_vm_action inspect "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            c)  _px_vm_action edit_conf "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            S)  _px_vm_action snapshot "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            b)  _px_vm_action backup "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                            u)  _px_vm_action unlock "$_idx"; _PX_DIRTY=1 ;;
+                            d)  _px_vm_action destroy "$_idx"; _PX_DIRTY=1; tput civis 2>/dev/null ;;
+                        esac
+                        ;;
+
+                    2) # Snapshots
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _t _n _id _sn < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ 스냅샷 트리: %s/%s\033[0m\n' "$_t" "$_id"
+                                [ "$_t" = "qemu" ] && qm listsnapshot "$_id" 2>/dev/null || pct listsnapshot "$_id" 2>/dev/null
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            n)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;35m◈ 새 스냅샷 생성\033[0m\n'
+                                read -p "대상 VMID 입력: " _id </dev/tty
+                                [ -z "$_id" ] && { _PX_DIRTY=1; tput civis 2>/dev/null; continue; }
+                                _def_sn="at_$(date '+%Y%m%d_%H%M%S')"
+                                read -p "스냅샷 이름 [기본: ${_def_sn}]: " _sn </dev/tty
+                                [ -z "$_sn" ] && _sn="$_def_sn"
+                                read -p "설명 (선택): " _desc </dev/tty
+                                [ -z "$_desc" ] && _desc="Created by pxms"
+                                if [ -f "/etc/pve/nodes/${_PX_NODE}/qemu-server/${_id}.conf" ]; then
+                                    qm snapshot "$_id" "$_sn" --description "$_desc" && _PX_MSG="✔ 스냅샷 생성: qemu/${_id}@${_sn}" || _PX_MSG="✖ 스냅샷 실패"
+                                elif [ -f "/etc/pve/nodes/${_PX_NODE}/lxc/${_id}.conf" ]; then
+                                    pct snapshot "$_id" "$_sn" --description "$_desc" && _PX_MSG="✔ 스냅샷 생성: lxc/${_id}@${_sn}" || _PX_MSG="✖ 스냅샷 실패"
+                                else
+                                    _PX_MSG="✖ 로컬 노드(${_PX_NODE})에서 VMID ${_id} 를 찾을 수 없습니다"
+                                fi
+                                _px_load_tab; _px_build_view; _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            B)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _t _n _id _sn < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;31m⚠ 스냅샷 롤백 (Rollback): %s/%s -> [%s]\033[0m\n' "$_t" "$_id" "$_sn"
+                                _px_p '현재 상태가 해당 스냅샷 시점으로 되돌아갑니다.\n'
+                                read -p "정말 롤백할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    if [ "$_t" = "qemu" ]; then
+                                        qm rollback "$_id" "$_sn" && _PX_MSG="✔ 롤백 완료: qemu/${_id}@${_sn}" || _PX_MSG="✖ 롤백 실패"
+                                    else
+                                        pct rollback "$_id" "$_sn" && _PX_MSG="✔ 롤백 완료: lxc/${_id}@${_sn}" || _PX_MSG="✖ 롤백 실패"
+                                    fi
+                                    _px_pause
+                                fi
+                                _px_load_summary; _px_load_tab; _px_build_view; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            d)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _t _n _id _sn < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "스냅샷 삭제 (${_t}/${_id} @ ${_sn})? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    if [ "$_t" = "qemu" ]; then
+                                        qm delsnapshot "$_id" "$_sn" && _PX_MSG="✔ 스냅샷 삭제: ${_id}@${_sn}" || _PX_MSG="✖ 삭제 실패"
+                                    else
+                                        pct delsnapshot "$_id" "$_sn" && _PX_MSG="✔ 스냅샷 삭제: ${_id}@${_sn}" || _PX_MSG="✖ 삭제 실패"
+                                    fi
+                                    _px_load_tab; _px_build_view; _px_pause
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+
+                    3) # Backups
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _stg _id _vol _fmt < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ 백업 아카이브 상세\033[0m\n'
+                                _px_p '  VolID   : %s\n  Storage : %s\n  VMID    : %s\n  Format  : %s\n' "$_vol" "$_stg" "$_id" "$_fmt"
+                                _px_p '  Path    : %s\n' "$(pvesm path "$_vol" 2>/dev/null || echo '-')"
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            b)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;32m◈ VM/CT 지정 백업 (vzdump)\033[0m\n'
+                                read -p "백업할 VMID (공백 구분 복수 가능): " _id </dev/tty
+                                [ -z "$_id" ] && { _PX_DIRTY=1; tput civis 2>/dev/null; continue; }
+                                _stg=$(_px_pick_backup_storage)
+                                vzdump $_id --mode snapshot --storage "$_stg" --compress zstd --notes-template "{{guestname}}" --remove 0 \
+                                    && _PX_MSG="✔ 백업 완료: ${_id} -> ${_stg}" || _PX_MSG="✖ 백업 실패"
+                                _px_load_tab; _px_build_view; _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            A)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _vms=$( { pct list 2>/dev/null; qm list 2>/dev/null; } | awk '/running/ {print $1}' | tr '\n' ' ')
+                                _px_p '\033[1;36m◈ 실행 중인 전체 VM/CT 일괄 백업\033[0m\n  대상: %s\n' "${_vms:-없음}"
+                                [ -z "$_vms" ] && { _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null; continue; }
+                                _stg=$(_px_pick_backup_storage)
+                                read -p "실행할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    vzdump $_vms --mode snapshot --storage "$_stg" --compress zstd --notes-template "{{guestname}}" --remove 0 \
+                                        && _PX_MSG="✔ 일괄 백업 완료" || _PX_MSG="✖ 일괄 백업 일부 실패"
+                                    _px_load_tab; _px_build_view; _px_pause
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            R)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _stg _id _vol _fmt < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;35m◈ 백업 복원 (Restore)\033[0m\n  원본: %s\n' "$_vol"
+                                read -p "복원할 대상 VMID (신규 ID 권장): " _newid </dev/tty
+                                [ -z "$_newid" ] && { _PX_DIRTY=1; tput civis 2>/dev/null; continue; }
+                                read -p "대상 디스크 스토리지 [기본: local-lvm]: " _ans </dev/tty
+                                [ -z "$_ans" ] && _ans="local-lvm"
+                                case "$_vol" in
+                                    *vzdump-lxc-*)
+                                        pct restore "$_newid" "$_vol" --storage "$_ans" && _PX_MSG="✔ LXC 복원 완료: ${_newid}" || _PX_MSG="✖ LXC 복원 실패" ;;
+                                    *)
+                                        qmrestore "$_vol" "$_newid" --storage "$_ans" && _PX_MSG="✔ QEMU 복원 완료: ${_newid}" || _PX_MSG="✖ QEMU 복원 실패" ;;
+                                esac
+                                _px_load_summary; _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            d)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _stg _id _vol _fmt < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "백업 파일 영구 삭제 (${_vol})? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    pvesm free "$_vol" && _PX_MSG="✔ 백업 삭제 완료" || _PX_MSG="✖ 백업 삭제 실패"
+                                    _px_load_tab; _px_build_view; _px_pause
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+
+                    4) # Storage & ISO
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ 스토리지 콘텐츠: %s\033[0m\n' "${_PX_IDS[$_idx]}"
+                                pvesm list "${_PX_IDS[$_idx]}" 2>/dev/null | less -RX
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            l)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ LVM / Thin 볼륨 상세 (vgs & lvs)\033[0m\n'
+                                vgs 2>/dev/null; echo; lvs 2>/dev/null
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            I)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ ISO & LXC 템플릿 목록 (local)\033[0m\n'
+                                pvesm list local --content iso 2>/dev/null
+                                echo
+                                pvesm list local --content vztmpl 2>/dev/null
+                                echo
+                                read -p "ISO/LXC 다운로드 메뉴 [iso] 로 이동할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    declare -f process_commands >/dev/null 2>&1 && process_commands iso
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            z)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ ZFS 풀 & 데이터셋 상태\033[0m\n'
+                                if command -v zpool >/dev/null 2>&1; then
+                                    zpool status 2>/dev/null; echo; zfs list 2>/dev/null
+                                else
+                                    _px_p 'ZFS 가 설치/구성되어 있지 않습니다.\n'
+                                fi
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+
+                    5) # Node & Tasks
+                        case "$_k" in
+                            ""|i)
+                                [ -z "$_idx" ] && continue
+                                IFS='|' read -r _upid _n < <(printf '%s\n' "${_PX_META[$_idx]}")
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ Task 로그: %s\033[0m\n' "${_PX_NAMES[$_idx]}"
+                                if [ "$_PX_HAS_JQ" = "1" ]; then
+                                    pvesh get "/nodes/${_n}/tasks/${_upid}/log" --limit 500 --output-format json 2>/dev/null | jq -r '.[] | .t' | less -RX
+                                else
+                                    pvesh get "/nodes/${_n}/tasks/${_upid}/log" --limit 200 --noborder 2>/dev/null | less -RX
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            c)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ 클러스터 상태 (pvecm status & nodes)\033[0m\n'
+                                pvecm status 2>/dev/null; echo; pvecm nodes 2>/dev/null
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            t)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                if command -v htop >/dev/null 2>&1; then
+                                    htop
+                                else
+                                    top
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            l)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _px_p '\033[1;36m◈ PVE 데몬 최근 로그 & Fail2ban\033[0m\n'
+                                journalctl -u pvedaemon -u pveproxy -n 40 --no-pager 2>/dev/null
+                                if command -v fail2ban-client >/dev/null 2>&1; then
+                                    _px_p '\n\033[1;33m[Fail2ban 상태]\033[0m\n'
+                                    fail2ban-client status 2>/dev/null
+                                fi
+                                _px_pause; _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            S)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                read -p "pveproxy 및 pvedaemon 서비스를 재시작할까요? [y/N]: " _ans </dev/tty
+                                if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                                    systemctl restart pveproxy pvedaemon && _PX_MSG="✔ pveproxy/pvedaemon 재시작 완료" || _PX_MSG="✖ 서비스 재시작 실패"
+                                    _px_pause
+                                fi
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+
+                    6) # Tools (36 menus launcher)
+                        case "$_k" in
+                            "")
+                                [ -z "$_idx" ] && continue
+                                _tkey="${_PX_IDS[$_idx]}"
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                if declare -f process_commands >/dev/null 2>&1; then
+                                    process_commands "$_tkey"
+                                else
+                                    _px_p '\033[1;31mprocess_commands 함수를 찾을 수 없습니다.\033[0m\n'
+                                    _px_pause
+                                fi
+                                _PX_MSG="✔ 메뉴 종료 후 복귀: [${_tkey}]"
+                                _px_load_summary; _px_load_tab; _px_build_view
+                                _PX_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                esac
+                ;;
+        esac
+    done
+
+    tput cnorm 2>/dev/null
+    stty sane 2>/dev/null
+    [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+    printf '\n'
+}
+
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
     rbackup $1 || cp -a $1 $1.bak
