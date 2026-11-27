@@ -10522,13 +10522,19 @@ _dm_find_configs() {
             ;;
     esac
 
-    # 2) 동적 탐지: systemd 유닛 속성 / init.d 스크립트에서 설정 경로 추출
+    # 2) 동적 탐지: systemd 유닛 속성(1회 호출) / init.d 스크립트에서 설정 경로 추출
     if [ "$_DM_INIT" = "systemd" ]; then
-        local _frag="" _drop="" _envf="" _exec="" _tok="" _prev=""
-        _frag=$(systemctl show -p FragmentPath --value "${svc}.service" 2>/dev/null)
-        _drop=$(systemctl show -p DropInPaths --value "${svc}.service" 2>/dev/null)
-        _envf=$(systemctl show -p EnvironmentFiles --value "${svc}.service" 2>/dev/null)
-        _exec=$(systemctl show -p ExecStart --value "${svc}.service" 2>/dev/null)
+        local _frag="" _drop="" _envf="" _exec="" _tok="" _prev="" _prop=""
+        while IFS= read -r _prop; do
+            case "$_prop" in
+                FragmentPath=*)     _frag="${_prop#FragmentPath=}" ;;
+                DropInPaths=*)      _drop="${_prop#DropInPaths=}" ;;
+                EnvironmentFiles=*) _envf="${_prop#EnvironmentFiles=}" ;;
+                ExecStart=*)        _exec="${_prop#ExecStart=}" ;;
+            esac
+        done <<EOF
+$(systemctl show -p FragmentPath -p DropInPaths -p EnvironmentFiles -p ExecStart "${svc}.service" 2>/dev/null)
+EOF
 
         # ExecStart 안의 -c /path, -f /path, --config=/path 추출
         for _tok in $_exec; do
@@ -11204,32 +11210,123 @@ _dm_show_status() {
     _dm_refresh_one "$idx"
 }
 
-# TUI 메인 화면 렌더링 (내부 출력 -> EUC-KR 일괄 변환)
-_dm_render_body() {
+# 화면 레이아웃/기호 캐시 (진입 시 1회 & 창 크기 변경 시에만 갱신)
+_dm_init_layout() {
     local _TS_LINES="" _TS_COLS=""
     _get_term_size
-    local rows=$_TS_LINES cols=$_TS_COLS
-    local list_h=$((rows - 10))
-    [ "$list_h" -lt 5 ] && list_h=5
-    _DM_PAGE_H=$list_h
-
-    # 페이지 단위 뷰포트 정렬 (중복 노출 방지)
-    if [ "$_DM_VCNT" -gt 0 ]; then
-        [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0
-        [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1))
-        _DM_TOP=$(( (_DM_CUR / list_h) * list_h ))
+    _DM_ROWS=$_TS_LINES
+    _DM_COLS=$_TS_COLS
+    _DM_PAGE_H=$((_DM_ROWS - 10))
+    [ "$_DM_PAGE_H" -lt 5 ] && _DM_PAGE_H=5
+    local _w=$((_DM_COLS > 110 ? 110 : _DM_COLS - 1))
+    _DM_HLINE=$(printf '%*s' "$_w" '' | tr ' ' '-')
+    if [ "$_DM_ENC" = "euckr" ]; then
+        _DM_S_CUR=">"; _DM_S_ACT="*"; _DM_S_FAIL="!"; _DM_S_OFF="."; _DM_S_INFO="[i]"; _DM_S_BUL="-"; _DM_S_DASH="-"
     else
-        _DM_TOP=0
+        _DM_S_CUR="▶"; _DM_S_ACT="●"; _DM_S_FAIL="✖"; _DM_S_OFF="○"; _DM_S_INFO="🔍"; _DM_S_BUL="•"; _DM_S_DASH="—"
+    fi
+    _DM_DIRTY=1
+}
+
+# 단일 목록 줄 렌더링 (끝에 \033[K 로 줄 잔상만 제거 -> 깜빡임 0%)
+_dm_render_row() {
+    local vidx="$1" is_cur="$2"
+    local idx="${_DM_VIEW[$vidx]}"
+    local nm="${_DM_NAMES[$idx]}" bt="${_DM_BOOT[$idx]}" rn="${_DM_RUN[$idx]}"
+    local ds="${_DM_DESC[$idx]}" rk="${_DM_RISK[$idx]}"
+    local b_tag r_col r_sym rk_tag mod_mk
+
+    if [ "$_DM_ENC" = "euckr" ]; then
+        case "$bt" in
+            enabled|enabled-runtime) b_tag=$'\033[1;32m[*]\033[0m' ;;
+            disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
+            masked)                  b_tag=$'\033[0;31m[x]\033[0m' ;;
+            *)                       b_tag=$'\033[1;30m[-]\033[0m' ;;
+        esac
+    else
+        case "$bt" in
+            enabled|enabled-runtime) b_tag=$'\033[1;32m[✓]\033[0m' ;;
+            disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
+            masked)                  b_tag=$'\033[0;31m[✕]\033[0m' ;;
+            *)                       b_tag=$'\033[1;30m[-]\033[0m' ;;
+        esac
     fi
 
+    case "$rn" in
+        active) r_col=$'\033[1;32m'; r_sym="$_DM_S_ACT" ;;
+        failed) r_col=$'\033[1;31m'; r_sym="$_DM_S_FAIL" ;;
+        *)      r_col=$'\033[0;37m'; r_sym="$_DM_S_OFF" ;;
+    esac
+
+    case "$rk" in
+        CRIT) rk_tag=$'\033[1;31m[잠금]\033[0m' ;;
+        WARN) rk_tag=$'\033[1;33m[주의]\033[0m' ;;
+        *)    rk_tag="      " ;;
+    esac
+
+    if [ "$bt" != "${_DM_INIT_BOOT[$idx]}" ] || [ "$rn" != "${_DM_INIT_RUN[$idx]}" ]; then
+        mod_mk=$'\033[1;33m*\033[0m'
+    else
+        mod_mk=" "
+    fi
+
+    local max_d=$((_DM_COLS - 54))
+    [ "$max_d" -lt 16 ] && max_d=16
+    case "$ds" in
+        *[![:print:]]*) ;;
+        *) [ "${#ds}" -gt "$max_d" ] && ds="${ds:0:$((max_d - 2))}.." ;;
+    esac
+
+    if [ "$is_cur" = "1" ]; then
+        printf '\033[1;33m%s\033[0m%s %s %s%s\033[0m \033[7m %-24.24s \033[0m %-8.8s %s %s\033[K\n' \
+            "$_DM_S_CUR" "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+    else
+        printf ' %s %s %s%s\033[0m  %-24.24s  %-8.8s %s %s\033[K\n' \
+            "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+    fi
+}
+
+# 하단 상세 카드 + 상태바 렌더링
+_dm_render_footer() {
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_DM_HLINE"
+    if [ "$_DM_VCNT" -gt 0 ]; then
+        local cidx="${_DM_VIEW[$_DM_CUR]}"
+        local cnm="${_DM_NAMES[$cidx]}"
+        local cds="${_DM_DESC[$cidx]}"
+        [ -z "$cds" ] && cds="(설명 없음)"
+        _dm_risk_info "$cnm"
+        printf '\033[1;36m%s %s\033[0m %s %s\033[K\n' "$_DM_S_INFO" "$cnm" "$_DM_S_DASH" "$cds"
+        printf '   %s 상태: 부팅=\033[1;37m%s\033[0m (초기:%s) | 실행=\033[1;37m%s\033[0m (초기:%s)' \
+            "$_DM_S_BUL" "${_DM_BOOT[$cidx]}" "${_DM_INIT_BOOT[$cidx]}" "${_DM_RUN[$cidx]}" "${_DM_INIT_RUN[$cidx]}"
+        [ "$_DM_R_LVL" = "CRIT" ] && printf '  \033[1;31m[원격/시스템 보호됨]\033[0m'
+        [ "$_DM_R_LVL" = "WARN" ] && printf '  \033[1;33m[주요서비스 주의]\033[0m'
+        printf '\033[K\n'
+        local _first_cfg="${_DM_CFG_CACHE[$cidx]}"
+        [ -z "$_first_cfg" ] && _first_cfg="(탐지된 설정 파일 없음)"
+        printf '   %s 설정: \033[0;32m%s\033[0m\033[K\n' "$_DM_S_BUL" "$_first_cfg"
+    else
+        printf '\033[K\n\033[K\n\033[K\n'
+    fi
+    printf '\033[0;34m%s\033[0m\033[K\n' "$_DM_HLINE"
+    if [ -n "$_DM_MSG" ]; then
+        printf '\033[1;33m %s\033[0m\033[K' "$_DM_MSG"
+    else
+        if [ "$_DM_ENC" = "euckr" ]; then
+            printf ' \033[0;37m[Up/Dn]이동 [Lt/Rt/PgUpDn]페이지 [Space]토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\033[K'
+        else
+            printf ' \033[0;37m[↑↓]이동 [←→/PgUpDn]페이지 [Space]토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\033[K'
+        fi
+    fi
+}
+
+# 전체 페이지 렌더링 (제자리 덮어쓰기: \033[H + 줄별 \033[K -> 무깜빡임)
+_dm_render_full_body() {
+    local list_h=$_DM_PAGE_H
     local cur_pg=1 tot_pg=1
     if [ "$_DM_VCNT" -gt 0 ]; then
         cur_pg=$(( (_DM_TOP / list_h) + 1 ))
         tot_pg=$(( ((_DM_VCNT - 1) / list_h) + 1 ))
     fi
-
-    local chg_cnt
-    chg_cnt=$(_dm_count_changed)
     local flabel="전체"
     case "$_DM_FILTER" in
         enabled) flabel="부팅활성" ;;
@@ -11238,139 +11335,57 @@ _dm_render_body() {
         changed) flabel="변경됨" ;;
     esac
 
-    local hline
-    hline=$(printf '%*s' "$((cols > 110 ? 110 : cols - 1))" '' | tr ' ' '-')
-
-    # 인코딩별 안전 기호 (EUC-KR 구서버는 100% ASCII 기호 사용 -> 줄밀림/깨짐 원천 차단)
-    local sym_cur="▶" sym_act="●" sym_fail="✖" sym_off="○" sym_info="🔍" sym_bul="•" sym_dash="—"
-    local tag_crit="[잠금]" tag_warn="[주의]"
-    if [ "$_DM_ENC" = "euckr" ]; then
-        sym_cur=">" sym_act="*" sym_fail="!" sym_off="." sym_info="[i]" sym_bul="-" sym_dash="-"
-    fi
-
-    printf '\033[H\033[J'
+    printf '\033[H'
     printf '\033[1;36m* 통합 서버 데몬 관리 [dms]\033[0m  \033[0;37mOS: %s (%s)\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)  \033[1;37mP.%d/%d\033[0m' \
         "$_DM_OS" "$_DM_INIT" "$flabel" "$_DM_VCNT" "$_DM_TOTAL" "$cur_pg" "$tot_pg"
     [ -n "$_DM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_DM_SEARCH"
-    [ "$chg_cnt" -gt 0 ] && printf '  \033[1;33m[변경:%d건 u/U원복]\033[0m' "$chg_cnt"
-    printf '\n\033[0;34m%s\033[0m\n' "$hline"
+    [ "${_DM_CHG_CNT:-0}" -gt 0 ] && printf '  \033[1;33m[변경:%d건 u/U원복]\033[0m' "$_DM_CHG_CNT"
+    printf '\033[K\n\033[0;34m%s\033[0m\033[K\n' "$_DM_HLINE"
 
+    local r=0 vidx
     if [ "$_DM_VCNT" -eq 0 ]; then
-        printf '\n  (조건에 맞는 데몬이 없습니다. / 로 검색어를 지우거나 f 로 필터를 바꾸세요)\n'
+        printf '\033[K\n  (조건에 맞는 데몬이 없습니다. / 로 검색어를 지우거나 f 로 필터를 바꾸세요)\033[K\n'
+        r=2
+        while [ "$r" -lt "$list_h" ]; do
+            printf '\033[K\n'
+            r=$((r + 1))
+        done
     else
-        local r=0 vidx idx nm bt rn ds rk mod_mk b_tag r_col r_sym rk_tag
         while [ "$r" -lt "$list_h" ]; do
             vidx=$((_DM_TOP + r))
             [ "$vidx" -ge "$_DM_VCNT" ] && break
-            idx="${_DM_VIEW[$vidx]}"
-            nm="${_DM_NAMES[$idx]}"
-            bt="${_DM_BOOT[$idx]}"
-            rn="${_DM_RUN[$idx]}"
-            ds="${_DM_DESC[$idx]}"
-            rk="${_DM_RISK[$idx]}"
-
-            # 부팅 자동실행 체크박스 (UTF-8: [✓]/[ ]/[-]/[✕], EUC-KR: [*]/[ ]/[-]/[x])
-            if [ "$_DM_ENC" = "euckr" ]; then
-                case "$bt" in
-                    enabled|enabled-runtime) b_tag=$'\033[1;32m[*]\033[0m' ;;
-                    disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
-                    masked)                  b_tag=$'\033[0;31m[x]\033[0m' ;;
-                    *)                       b_tag=$'\033[1;30m[-]\033[0m' ;;
-                esac
-            else
-                case "$bt" in
-                    enabled|enabled-runtime) b_tag=$'\033[1;32m[✓]\033[0m' ;;
-                    disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
-                    masked)                  b_tag=$'\033[0;31m[✕]\033[0m' ;;
-                    *)                       b_tag=$'\033[1;30m[-]\033[0m' ;;
-                esac
-            fi
-
-            # 현재 실행 상태
-            case "$rn" in
-                active)   r_col=$'\033[1;32m'; r_sym="$sym_act" ;;
-                failed)   r_col=$'\033[1;31m'; r_sym="$sym_fail" ;;
-                *)        r_col=$'\033[0;37m'; r_sym="$sym_off" ;;
-            esac
-
-            # 위험 등급 마크
-            case "$rk" in
-                CRIT) rk_tag=$'\033[1;31m'"${tag_crit}"$'\033[0m' ;;
-                WARN) rk_tag=$'\033[1;33m'"${tag_warn}"$'\033[0m' ;;
-                *)    rk_tag="      " ;;
-            esac
-
-            # 진입 시점 대비 변경 여부
-            if [ "$bt" != "${_DM_INIT_BOOT[$idx]}" ] || [ "$rn" != "${_DM_INIT_RUN[$idx]}" ]; then
-                mod_mk=$'\033[1;33m*\033[0m'
-            else
-                mod_mk=" "
-            fi
-
-            # 설명 길이 자르기 (멀티바이트 중간 절단 방지: 순수 ASCII 긴 설명만 자름)
-            local max_d=$((cols - 54))
-            [ "$max_d" -lt 16 ] && max_d=16
-            case "$ds" in
-                *[![:print:]]*) ;;
-                *) [ "${#ds}" -gt "$max_d" ] && ds="${ds:0:$((max_d - 2))}.." ;;
-            esac
-
             if [ "$vidx" -eq "$_DM_CUR" ]; then
-                printf '\033[1;33m%s\033[0m%s %s %s%s\033[0m \033[7m %-24.24s \033[0m %-8.8s %s %s\n' \
-                    "$sym_cur" "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+                _dm_render_row "$vidx" 1
             else
-                printf ' %s %s %s%s\033[0m  %-24.24s  %-8.8s %s %s\n' \
-                    "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+                _dm_render_row "$vidx" 0
             fi
             r=$((r + 1))
         done
-        # 마지막 페이지 남은 줄 패딩 (하단 상세 카드 위치 고정)
         while [ "$r" -lt "$list_h" ]; do
-            printf '\n'
+            printf '\033[K\n'
             r=$((r + 1))
         done
     fi
+    _dm_render_footer
+    printf '\033[J'
+}
 
-    # 하단 상세 카드 (커서 항목의 역할 + 실효 설정 파일 미리보기)
-    printf '\033[0;34m%s\033[0m\n' "$hline"
-    if [ "$_DM_VCNT" -gt 0 ]; then
-        local cidx="${_DM_VIEW[$_DM_CUR]}"
-        local cnm="${_DM_NAMES[$cidx]}"
-        local cds="${_DM_DESC[$cidx]}"
-        [ -z "$cds" ] && cds="(설명 없음)"
-        _dm_risk_info "$cnm"
-        printf '\033[1;36m%s %s\033[0m %s %s\n' "$sym_info" "$cnm" "$sym_dash" "$cds"
-        printf '   %s 상태: 부팅=\033[1;37m%s\033[0m (초기:%s) | 실행=\033[1;37m%s\033[0m (초기:%s)' \
-            "$sym_bul" "${_DM_BOOT[$cidx]}" "${_DM_INIT_BOOT[$cidx]}" "${_DM_RUN[$cidx]}" "${_DM_INIT_RUN[$cidx]}"
-        [ "$_DM_R_LVL" = "CRIT" ] && printf '  \033[1;31m[원격/시스템 보호됨]\033[0m'
-        [ "$_DM_R_LVL" = "WARN" ] && printf '  \033[1;33m[주요서비스 주의]\033[0m'
-        printf '\n'
-        local _first_cfg
-        _first_cfg=$(_dm_find_configs "$cnm" | head -n 2 | tr '\n' ' ')
-        [ -z "$_first_cfg" ] && _first_cfg="(탐지된 설정 파일 없음)"
-        printf '   %s 설정: \033[0;32m%s\033[0m\n' "$sym_bul" "$_first_cfg"
-    else
-        printf '\n\n\n'
-    fi
-    printf '\033[0;34m%s\033[0m\n' "$hline"
-    if [ -n "$_DM_MSG" ]; then
-        printf '\033[1;33m %s\033[0m\n' "$_DM_MSG"
-    else
-        if [ "$_DM_ENC" = "euckr" ]; then
-            printf ' \033[0;37m[Up/Dn]이동 [Lt/Rt/PgUpDn]페이지 [Space]토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\n'
-        else
-            printf ' \033[0;37m[↑↓]이동 [←→/PgUpDn]페이지 [Space]토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\n'
-        fi
-    fi
+# 같은 페이지 내 초고속 부분(델타) 렌더링 (이전 커서 1줄 + 새 커서 1줄 + 하단 카드만 갱신)
+_dm_render_delta_body() {
+    local old_row=$((3 + _DM_LAST_CUR - _DM_TOP))
+    local new_row=$((3 + _DM_CUR - _DM_TOP))
+    local foot_row=$((3 + _DM_PAGE_H))
+    printf '\033[%d;1H' "$old_row"
+    _dm_render_row "$_DM_LAST_CUR" 0
+    printf '\033[%d;1H' "$new_row"
+    _dm_render_row "$_DM_CUR" 1
+    printf '\033[%d;1H' "$foot_row"
+    _dm_render_footer
 }
 
 _dm_render() {
-    # 커서 항목의 시스템 설명 캐시 갱신 (서브셸 파이프 전에 부모 셸에서 갱신!)
+    # 커서 범위 & 페이지 경계 정렬 + 커서 항목 캐시 보충 (부모 셸에서 실행)
     if [ "$_DM_VCNT" -gt 0 ]; then
-        local _TS_LINES="" _TS_COLS=""
-        _get_term_size
-        _DM_PAGE_H=$((_TS_LINES - 10))
-        [ "$_DM_PAGE_H" -lt 5 ] && _DM_PAGE_H=5
         [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0
         [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1))
         _DM_TOP=$(( (_DM_CUR / _DM_PAGE_H) * _DM_PAGE_H ))
@@ -11378,15 +11393,40 @@ _dm_render() {
         if [ -z "${_DM_DESC[$_cidx]}" ]; then
             local _cds
             _cds=$(_dm_fetch_sys_desc "${_DM_NAMES[$_cidx]}")
-            [ -n "$_cds" ] && _DM_DESC[$_cidx]="$_cds"
+            [ -n "$_cds" ] && _DM_DESC[$_cidx]="$_cds" || _DM_DESC[$_cidx]=" "
         fi
+        if [ -z "${_DM_CFG_CACHE[$_cidx]}" ]; then
+            local _fc
+            _fc=$(_dm_find_configs "${_DM_NAMES[$_cidx]}" | head -n 2 | tr '\n' ' ')
+            [ -n "$_fc" ] && _DM_CFG_CACHE[$_cidx]="$_fc" || _DM_CFG_CACHE[$_cidx]="(탐지된 설정 파일 없음)"
+        fi
+    else
+        _DM_TOP=0
     fi
 
-    if [ "$_DM_ENC" = "euckr" ]; then
-        _dm_render_body | _dm_iconv_euckr
+    # 같은 페이지 안에서 커서만 이동했고, 이전 메시지도 없으면 초고속 델타 렌더링!
+    if [ "${_DM_DIRTY:-1}" = "0" ] && [ "$_DM_VCNT" -gt 0 ] \
+       && [ "$_DM_TOP" = "${_DM_LAST_TOP:--1}" ] && [ "${_DM_LAST_CUR:--1}" -ge 0 ] \
+       && [ "$_DM_LAST_CUR" -lt "$_DM_VCNT" ] && [ -z "$_DM_MSG" ] && [ -z "${_DM_LAST_MSG:-}" ]; then
+        if [ "$_DM_CUR" != "$_DM_LAST_CUR" ]; then
+            if [ "$_DM_ENC" = "euckr" ]; then
+                _dm_render_delta_body | _dm_iconv_euckr
+            else
+                _dm_render_delta_body
+            fi
+        fi
     else
-        _dm_render_body
+        _DM_CHG_CNT=$(_dm_count_changed)
+        if [ "$_DM_ENC" = "euckr" ]; then
+            _dm_render_full_body | _dm_iconv_euckr
+        else
+            _dm_render_full_body
+        fi
+        _DM_DIRTY=0
     fi
+    _DM_LAST_CUR=$_DM_CUR
+    _DM_LAST_TOP=$_DM_TOP
+    _DM_LAST_MSG="$_DM_MSG"
 }
 
 # 메인 진입 함수: dms [초기검색어]
@@ -11402,10 +11442,16 @@ dms() {
     _DM_CUR=0
     _DM_TOP=0
     _DM_MSG=""
+    _DM_LAST_CUR=-1
+    _DM_LAST_TOP=-1
+    _DM_LAST_MSG=""
+    _DM_CHG_CNT=0
+    _DM_CFG_CACHE=()
 
     _dm_p '\033[1;36m[dms] %s (%s) 서비스 목록 및 초기 스냅샷 로딩 중...\033[0m\n' "$_DM_OS" "$_DM_INIT"
     _dm_load_services 1
     _dm_build_view
+    _dm_init_layout
 
     local _esc_t=1
     [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && _esc_t=0.25
@@ -11413,9 +11459,11 @@ dms() {
     local _old_trap
     _old_trap=$(trap -p INT)
     trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+    trap '_dm_init_layout' WINCH 2>/dev/null
 
+    printf '\033[2J\033[H'
+    tput civis 2>/dev/null
     while :; do
-        tput civis 2>/dev/null
         _dm_render
         _DM_MSG=""
 
@@ -11491,7 +11539,7 @@ dms() {
                     IFS= read -r _qans </dev/tty
                     case "$_qans" in
                         u|U) _dm_undo_all && break ;;
-                        c|C) continue ;;
+                        c|C) _DM_DIRTY=1; tput civis 2>/dev/null; continue ;;
                         *)   break ;;
                     esac
                 else
@@ -11530,10 +11578,12 @@ dms() {
                         fi
                     fi
                 fi
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             ""|e|E)
                 [ "$_DM_VCNT" -eq 0 ] && continue
                 _dm_edit_config "${_DM_VIEW[$_DM_CUR]}"
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             s|S)
                 [ "$_DM_VCNT" -eq 0 ] && continue
@@ -11542,6 +11592,7 @@ dms() {
                 local _rc=$?
                 _dm_refresh_one "$_idx"
                 [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 시작(start) 완료" || _DM_MSG="✖ ${_svc} 시작 실패: $(printf '%s' "$_out" | head -n1)"
+                _DM_DIRTY=1
                 ;;
             x|X)
                 [ "$_DM_VCNT" -eq 0 ] && continue
@@ -11558,6 +11609,7 @@ dms() {
                         [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 중지(stop) 완료" || _DM_MSG="✖ ${_svc} 중지 실패: $(printf '%s' "$_out" | head -n1)"
                     fi
                 fi
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             r|R)
                 [ "$_DM_VCNT" -eq 0 ] && continue
@@ -11569,6 +11621,7 @@ dms() {
                     printf '아무 키나 누르면 돌아갑니다...'
                     IFS= read -rsn1 _ </dev/tty 2>/dev/null
                     _DM_MSG="✖ ${_svc} 문법 오류로 재시작 차단됨"
+                    _DM_DIRTY=1; tput civis 2>/dev/null
                     continue
                 fi
                 if _dm_guard_confirm "$_svc" restart; then
@@ -11583,10 +11636,12 @@ dms() {
                         [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 재시작(restart) 완료" || _DM_MSG="✖ ${_svc} 재시작 실패: $(printf '%s' "$_out" | head -n1)"
                     fi
                 fi
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             i|I|l|L)
                 [ "$_DM_VCNT" -eq 0 ] && continue
                 _dm_show_status "${_DM_VIEW[$_DM_CUR]}"
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             /)
                 tput cnorm 2>/dev/null
@@ -11595,6 +11650,7 @@ dms() {
                 IFS= read -r _DM_SEARCH </dev/tty
                 _DM_CUR=0; _DM_TOP=0
                 _dm_build_view
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
             f|F)
                 case "$_DM_FILTER" in
@@ -11606,6 +11662,7 @@ dms() {
                 esac
                 _DM_CUR=0; _DM_TOP=0
                 _dm_build_view
+                _DM_DIRTY=1
                 ;;
             u)
                 [ "$_DM_VCNT" -eq 0 ] && continue
@@ -11616,9 +11673,11 @@ dms() {
                     _dm_undo_one "$_idx"
                     _DM_MSG="✔ '${_svc}' 진입 시점 초기 상태로 원복 완료!"
                 fi
+                _DM_DIRTY=1
                 ;;
             U)
                 _dm_undo_all
+                _DM_DIRTY=1; tput civis 2>/dev/null
                 ;;
         esac
     done
