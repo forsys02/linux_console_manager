@@ -15500,8 +15500,10 @@ _dk_render_full() {
     done
     _dk_p "${_tbar}\033[K\n"
 
-    # Line 3: Divider + Search status
-    if [ -n "$_DK_SEARCH" ]; then
+    # Line 3: Divider + Search / Loading status
+    if [ "${_DK_LOADING:-0}" = "1" ]; then
+        _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m \033[1;33m(데이터 불러오는 중...)\033[0m\033[K\n'
+    elif [ -n "$_DK_SEARCH" ]; then
         _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m \033[1;33m[검색: %s (%d건)]\033[0m\033[K\n' "$_DK_SEARCH" "$_DK_VCNT"
     else
         _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m (%d건)\033[K\n' "$_DK_VCNT"
@@ -15529,7 +15531,31 @@ _dk_render_full() {
             fi
             printf '\n'
         else
-            if [ "$_r" -eq 0 ] && [ "$_DK_VCNT" -eq 0 ]; then
+            if [ "$_r" -eq 0 ] && [ "${_DK_LOADING:-0}" = "1" ]; then
+                case "$_DK_TAB" in
+                    2)
+                        if [ "$_DK_ENC" = "euckr" ]; then
+                            _dk_p '   \033[1;33m... Compose 스택(compose.yml) 디렉터리를 스캔하는 중입니다. 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        else
+                            _dk_p '   \033[1;33m⏳ Compose 스택(compose.yml) 디렉터리를 스캔하는 중입니다... 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        fi
+                        ;;
+                    6)
+                        if [ "$_DK_ENC" = "euckr" ]; then
+                            _dk_p '   \033[1;33m... 실시간 Docker Stats(docker stats --no-stream)를 수집하는 중입니다. 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        else
+                            _dk_p '   \033[1;33m⏳ 실시간 Docker Stats(docker stats --no-stream)를 수집하는 중입니다... 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        fi
+                        ;;
+                    *)
+                        if [ "$_DK_ENC" = "euckr" ]; then
+                            _dk_p '   \033[1;33m... 데이터를 불러오는 중입니다. 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        else
+                            _dk_p '   \033[1;33m⏳ 데이터를 불러오는 중입니다... 잠시만 기다려 주세요.\033[0m\033[K\n'
+                        fi
+                        ;;
+                esac
+            elif [ "$_r" -eq 0 ] && [ "$_DK_VCNT" -eq 0 ]; then
                 _dk_p '   \033[0;33m(표시할 항목이 없습니다. Tab/1~6 으로 다른 탭을 보거나 n 으로 스택 생성)\033[0m\033[K\n'
             else
                 printf '\033[K\n'
@@ -15569,6 +15595,31 @@ _dk_render_delta() {
         _dk_render_row "$_DK_CUR" 1
         _DK_PREV_CUR="$_DK_CUR"
     fi
+}
+
+_dk_load_tab_async() {
+    _DK_IDS=()
+    _DK_NAMES=()
+    _DK_STATE=()
+    _DK_COL2=()
+    _DK_COL3=()
+    _DK_META=()
+    _DK_TOTAL=0
+    _DK_VIEW=()
+    _DK_VCNT=0
+    _DK_LOADING=1
+    if [ "$_DK_ENC" = "euckr" ]; then
+        _DK_MSG="... 데이터 불러오는 중"
+    else
+        _DK_MSG="⏳ 데이터 불러오는 중..."
+    fi
+    _DK_DIRTY=1
+    _dk_render_full
+    _dk_load_tab
+    _DK_LOADING=0
+    _dk_build_view
+    _DK_MSG=""
+    _DK_DIRTY=1
 }
 
 _dk_show_help() {
@@ -15825,12 +15876,9 @@ dkms() {
     _DK_PREV_CUR=0
     _DK_PREV_TOP=0
     _DK_SEARCH=""
-    _DK_MSG="✔ dkms 준비 완료 (1~6 탭전환, Enter 메뉴, ? 도움말)"
+    _DK_LOADING=0
+    _DK_CNT_RUN="-"; _DK_CNT_STOP="-"; _DK_CNT_IMG="-"; _DK_CNT_VOL="-"; _DK_CNT_NET="-"
     _DK_DIRTY=1
-
-    _dk_load_summary
-    _dk_load_tab
-    _dk_build_view
 
     local _old_trap _k _k2 _k3 _idx _ans _img _ndir
     _old_trap=$(trap -p INT)
@@ -15838,6 +15886,10 @@ dkms() {
 
     tput civis 2>/dev/null
     printf '\033[2J\033[H'
+
+    _dk_load_tab_async
+    _dk_load_summary
+    _DK_MSG="✔ dkms 준비 완료 (1~6 탭전환, Enter 메뉴, ? 도움말)"
 
     while true; do
         _dk_render_delta
@@ -15852,8 +15904,8 @@ dkms() {
                 case "$_k3" in
                     A) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
                     B) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
-                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab; _dk_build_view; _DK_DIRTY=1 ;;
-                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab; _dk_build_view; _DK_DIRTY=1 ;;
+                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async ;;
+                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async ;;
                     5) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR - _DK_PAGE)); [ "$_DK_CUR" -lt 0 ] && _DK_CUR=0; _DK_DIRTY=1 ;;
                     6) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR + _DK_PAGE)); [ "$_DK_CUR" -ge "$_DK_VCNT" ] && _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0)); _DK_DIRTY=1 ;;
                     H) _DK_CUR=0; _DK_DIRTY=1 ;;
@@ -15872,12 +15924,12 @@ dkms() {
             q|Q) break ;;
             $'\t')
                 _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
-                _dk_load_tab; _dk_build_view; _DK_DIRTY=1
+                _dk_load_tab_async
                 ;;
             1|2|3|4|5|6)
                 if [ "$_DK_TAB" != "$_k" ]; then
                     _DK_TAB="$_k"; _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
-                    _dk_load_tab; _dk_build_view; _DK_DIRTY=1
+                    _dk_load_tab_async
                 fi
                 ;;
             k) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
@@ -15891,7 +15943,8 @@ dkms() {
                 _DK_CUR=0; _DK_TOP=0; _dk_build_view; _DK_DIRTY=1; tput civis 2>/dev/null
                 ;;
             r)
-                _dk_load_summary; _dk_load_tab; _dk_build_view
+                _dk_load_tab_async
+                _dk_load_summary
                 _DK_MSG="✔ 새로고침 완료"
                 _DK_DIRTY=1
                 ;;
