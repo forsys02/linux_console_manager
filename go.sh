@@ -3954,8 +3954,7 @@ menufunc() {
 
                                 # Optional: Log execution
                                 echo "$cmd_choice $cmd_choice1" >>"$gotmp"/go_history.txt 2>/dev/null
-                                echo 'Alias (from .bashrc) executed. Done... Sleep 2sec'
-                                if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
+                                echo -en "--> \033[1;34mDone...\033[0m [Enter] " && IFS=' ' read -re newcmds newcmds1 </dev/tty
                                 unset -v aliascmd
                                 continue
 
@@ -4243,8 +4242,7 @@ menufunc() {
                     NC
 
                     echo "$choice $choice1" >>"$gotmp"/go_history.txt 2>/dev/null
-                    echo 'Alias (from .bashrc) executed. Done... Sleep 2sec' && noclear="y"
-                    if ! echo "$aliascmd" | grep -q "ssh"; then sleep 2; fi
+                    echo -en "--> \033[1;34mDone...\033[0m [Enter] " && IFS=' ' read -re newcmds newcmds1 </dev/tty
                     unset -v aliascmd
 
                 fi
