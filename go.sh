@@ -16123,7 +16123,7 @@ rrnet() {
 
     if [ ! -f /etc/network/interfaces ]; then
         echo "Error: /etc/network/interfaces does not exist."
-        exit 1
+        return 1
     fi
 
     backup_files=("/etc/network/interfaces.backup" "/etc/network/interfaces.1.bak" "/etc/network/interfaces.2.bak" "/etc/network/interfaces.3.bak")
