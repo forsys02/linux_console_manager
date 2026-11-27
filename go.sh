@@ -10190,14 +10190,11 @@ _dm_detect_env() {
     _DM_INIT=""
     _DM_OS="Linux"
     _DM_RUNLEVEL="3"
-    _DM_ENC="${GOTERM_ENC:-utf8}"
-    if [ "$_DM_ENC" != "euckr" ]; then
-        case "$(locale charmap 2>/dev/null)" in
-            EUC-KR|euc-KR|CP949|cp949) _DM_ENC="euckr" ;;
-        esac
-        case "${LANG:-}" in
-            *[Uu][Tt][Ff]*) ;;
-            *[Kk][Oo]*) _DM_ENC="euckr" ;;
+    _DM_ENC="${GOTERM_ENC:-}"
+    if [ -z "$_DM_ENC" ]; then
+        case "${LANG:-} $(locale charmap 2>/dev/null)" in
+            *[Uu][Tt][Ff]*) _DM_ENC="utf8" ;;
+            *) _DM_ENC="euckr" ;;
         esac
     fi
     if [ -f /etc/os-release ]; then
