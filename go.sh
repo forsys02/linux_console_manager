@@ -13430,7 +13430,7 @@ _um_p() {
     fi
 }
 
-# 외부 호스팅 스크립트 출력 인코딩 정규화 (UTF-8 터미널에서 EUC-KR 스크립트 출력 자동 변환)
+# 외부 호스팅 스크립트 출력 인코딩 정규화 (UTF-8 터미널에서 EUC-KR/혼합 출력 줄 단위 자동 변환)
 _um_norm_out() {
     if [ "$_UM_ENC" = "utf8" ] && command -v iconv >/dev/null 2>&1; then
         local _tmp="/tmp/.ums_out.$$"
@@ -13438,11 +13438,62 @@ _um_norm_out() {
         if iconv -f utf-8 -t utf-8 "$_tmp" >/dev/null 2>&1; then
             cat "$_tmp"
         else
-            iconv -f euc-kr -t utf-8//IGNORE "$_tmp" 2>/dev/null || cat "$_tmp"
+            # 시스템 메시지(UTF-8)와 레거시 스크립트(EUC-KR/CP949)가 섞인 출력은 줄 단위로 판별 변환
+            local _line _conv
+            while IFS= read -r _line || [ -n "$_line" ]; do
+                if printf '%s\n' "$_line" | iconv -f utf-8 -t utf-8 >/dev/null 2>&1; then
+                    printf '%s\n' "$_line"
+                else
+                    _conv=$(printf '%s' "$_line" | iconv -f cp949 -t utf-8//IGNORE 2>/dev/null)
+                    if [ -z "$_conv" ] && [ -n "$_line" ]; then
+                        _conv=$(printf '%s' "$_line" | iconv -f euc-kr -t utf-8//IGNORE 2>/dev/null)
+                    fi
+                    if [ -n "$_conv" ]; then
+                        printf '%s\n' "$_conv"
+                    else
+                        printf '%s\n' "$_line"
+                    fi
+                fi
+            done <"$_tmp"
         fi
         rm -f "$_tmp" 2>/dev/null
     else
         cat
+    fi
+}
+
+# /script/is 실행 전 필수 호스팅 데이터 파일 사전 확인 헬퍼
+_um_has_is_data() {
+    [ -r /etc/httpd/conf/httpd.conf ] || [ -r /root/userinfo ] || \
+    [ -r /root/binu.txt.userinfo.all ] || [ -r /root/binu.txt.userinfo.all.datefix ]
+}
+
+# /script/is 안전 실행 (필수 파일 사전 점검 + 누락 안내 + stderr 노이즈 제거 + 인코딩 정규화)
+_um_run_is() {
+    local _u="$1"
+    local _max="${2:-0}"
+    if [ ! -x /script/is ]; then
+        _um_p '  ⚠ /script/is 없음\n'
+        return 1
+    fi
+    local _f _ok=0 _miss=""
+    for _f in /etc/httpd/conf/httpd.conf /root/userinfo /root/binu.txt.userinfo.all /root/binu.txt.userinfo.all.datefix; do
+        if [ -r "$_f" ]; then
+            _ok=$((_ok + 1))
+        else
+            _miss="${_miss:+${_miss}, }$_f"
+        fi
+    done
+    if [ "$_ok" -eq 0 ]; then
+        _um_p '  ℹ 호스팅 계정 데이터 파일 없음 — 조회 생략\n'
+        _um_p '    (누락: %s)\n' "$_miss"
+        return 1
+    fi
+    [ -n "$_miss" ] && _um_p '  ℹ 일부 파일 없음(생략): %s\n' "$_miss"
+    if [ "$_max" -gt 0 ] 2>/dev/null; then
+        /script/is "$_u" 2>/dev/null | _um_norm_out | head -n "$_max"
+    else
+        /script/is "$_u" 2>/dev/null | _um_norm_out
     fi
 }
 
@@ -13818,7 +13869,7 @@ _um_extract_hosting_contact() {
     _UM_C_PHONE=""
     _UM_C_DOMAIN=""
 
-    if [ -x /script/is ]; then
+    if [ -x /script/is ] && _um_has_is_data; then
         local _is_out
         _is_out=$(/script/is "$_u" 2>/dev/null | _um_norm_out)
         _UM_C_EMAIL=$(printf '%s\n' "$_is_out" | grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | head -n1)
@@ -13908,7 +13959,7 @@ _um_show_detail() {
 
     if [ "$_UM_HOSTING" -eq 1 ] && [ -x /script/is ]; then
         _um_p '\n\033[1;33m[5] 호스팅 계정 종합 정보 (/script/is %s)\033[0m\n' "$u"
-        /script/is "$u" 2>&1 | _um_norm_out | head -n 30
+        _um_run_is "$u" 30
     fi
 
     printf '%s\n' "------------------------------------------------------------------------"
@@ -14369,7 +14420,7 @@ _um_hosting_menu() {
         IFS= read -r _sel </dev/tty
         case "$_sel" in
             1)
-                [ -x /script/is ] && /script/is "$u" 2>&1 | _um_norm_out || _um_p '⚠ /script/is 없음\n'
+                _um_run_is "$u"
                 _um_pause ;;
             2)
                 [ -x /script/isall ] && /script/isall "$u" 2>&1 | _um_norm_out || _um_p '⚠ /script/isall 없음\n'
