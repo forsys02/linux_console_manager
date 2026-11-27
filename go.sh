@@ -4821,7 +4821,7 @@ _inject_cmd_sep() {
                 rest = substr(s, i + 1)
                 sub(/^[ \t]+/, "", rest)
                 next_tok = rest
-                sub(/[ \t;)}|&].*$/, "", next_tok)
+                sub(/[ \t;)}&|].*$/, "", next_tok)
 
                 # 앞쪽 세그먼트 정리
                 prev = seg
@@ -4835,7 +4835,7 @@ _inject_cmd_sep() {
                 if (prev == "" || rest == "") skip = 1
                 if (rest ~ /^[})#]/) skip = 1
                 if (next_tok ~ /^(then|do|done|fi|else|elif|esac|in)$/) skip = 1
-                if (prev_last ~ /^(then|do|else|elif|in|&&|\|\|)$/) skip = 1
+                if (prev_last ~ /^(&&|then|do|else|elif|in|\|\|)$/) skip = 1
                 if (prev ~ /^[A-Za-z_][A-Za-z0-9_]*=/) skip = 1
                 if (prev_first ~ /^(export|local|unset|cd|alias|unalias|readonly|declare|typeset|trap|set|shopt|ulimit|umask|source|\.|true|false|:|for|while|until|if|elif|case|select)$/) skip = 1
                 if (prev ~ /echo[ \t]+["\047]?[-=]{3,}/) skip = 1
@@ -10177,6 +10177,1317 @@ ssp() { systemctl status $(systemctl | awk '/php[0-9.]*-fpm/ {for(i=1;i<=NF;i++)
 ssf() { systemctl status $(systemctl list-unit-files --type=service | grep ftp | awk -F'.service' '{print $1}'); } # ftp
 # Proxmox 관련 (사용 중이라면)
 ssv() { systemctl status $(echo pvedaemon pveproxy qmeventd lxc | pipemenu); }
+
+###############################################################
+# 통합 서버 데몬 관리 TUI (dm — Daemon Manager)
+# - CentOS/RHEL/Alma/Rocky (systemd / chkconfig) + Debian/Ubuntu (systemd / update-rc.d) 통합
+# - 진입 시점 스냅샷 저장 및 개별(u)/전체(U) 원복 지원
+# - SSH/네트워크/Proxmox/핵심 OS 데몬 사전 차단 (Proxmox 파쇄식 확인 타이핑 필수)
+# - 실효 환경 파일 자동 탐지 -> vi2 편집 -> 문법 사전 검증(sshd -t 등) -> 재시작 제안
+# - Bash 3.x+ 호환 (연관 배열 미사용, 인덱스 배열만 사용)
+###############################################################
+_dm_detect_env() {
+    _DM_INIT=""
+    _DM_OS="Linux"
+    _DM_RUNLEVEL="3"
+    if [ -f /etc/os-release ]; then
+        _DM_OS=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/,"",$2); print $2; exit}' /etc/os-release 2>/dev/null)
+    elif [ -f /etc/redhat-release ]; then
+        _DM_OS=$(head -n1 /etc/redhat-release 2>/dev/null)
+    elif [ -f /etc/debian_version ]; then
+        _DM_OS="Debian $(cat /etc/debian_version 2>/dev/null)"
+    fi
+    [ -z "$_DM_OS" ] && _DM_OS="$(uname -s 2>/dev/null)"
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        _DM_INIT="systemd"
+    elif command -v chkconfig >/dev/null 2>&1; then
+        _DM_INIT="sysv_rh"
+        local _rl
+        _rl=$(runlevel 2>/dev/null | awk '{print $2}')
+        case "$_rl" in [0-6]) _DM_RUNLEVEL="$_rl" ;; *) _DM_RUNLEVEL="3" ;; esac
+    elif [ -d /etc/init.d ]; then
+        _DM_INIT="sysv_deb"
+        local _rl
+        _rl=$(runlevel 2>/dev/null | awk '{print $2}')
+        case "$_rl" in [0-6]) _DM_RUNLEVEL="$_rl" ;; *) _DM_RUNLEVEL="2" ;; esac
+    else
+        _DM_INIT="unknown"
+    fi
+}
+
+# 위험 등급 및 사전 경고 문구 판별
+# 출력(전역): _DM_R_LVL (CRIT|WARN|OK), _DM_R_MSG
+_dm_risk_info() {
+    local svc="$1"
+    _DM_R_LVL="OK"
+    _DM_R_MSG=""
+    case "$svc" in
+        ssh|sshd|dropbear|openssh-server|openssh)
+            _DM_R_LVL="CRIT"
+            _DM_R_MSG="원격 SSH 접속이 끊겨 서버에 다시 들어올 수 없게 됩니다!"
+            ;;
+        network|networking|NetworkManager|systemd-networkd|systemd-resolved|netplan*|ifupdown*|wg-quick*|tailscaled|openvpn*)
+            _DM_R_LVL="CRIT"
+            _DM_R_MSG="네트워크가 중단되어 모든 원격 연결(SSH 포함)이 즉시 끊깁니다!"
+            ;;
+        pve-cluster|corosync|pvedaemon|pveproxy|pvestatd|qmeventd|pve-ha-lrm|pve-ha-crm)
+            _DM_R_LVL="CRIT"
+            _DM_R_MSG="Proxmox 클러스터/웹UI/VM 제어가 마비될 수 있습니다!"
+            ;;
+        dbus|systemd-udevd|systemd-logind|systemd-journald|udev|lvm2*|mdmonitor|multipathd|polkit|systemd-homed)
+            _DM_R_LVL="CRIT"
+            _DM_R_MSG="OS 핵심 시스템 데몬으로 중단 시 부팅/로그인/디스크가 마비될 수 있습니다!"
+            ;;
+        firewalld|ufw|iptables|ip6tables|nftables|fail2ban|csf|lfd)
+            _DM_R_LVL="WARN"
+            _DM_R_MSG="방화벽/보안 규칙 변경으로 접속이 차단되거나 보안이 해제될 수 있습니다."
+            ;;
+        httpd|apache2|nginx|mariadb|mysqld|mysql|postgresql*|named|bind9|postfix|sendmail|exim*|dovecot|vsftpd|proftpd|pure-ftpd|php*-fpm|docker|containerd|crond|cron|haproxy|redis*|memcached|smb|smbd|nmbd)
+            _DM_R_LVL="WARN"
+            _DM_R_MSG="운영 중인 주요 서버 서비스(웹/DB/DNS/메일 등)가 중단됩니다."
+            ;;
+    esac
+}
+
+# 핵심 데몬 한글 역할 사전 (없으면 빈 문자열 -> 시스템 Description 폴백)
+_dm_builtin_desc() {
+    case "$1" in
+        ssh|sshd|openssh-server) echo "SSH 원격 접속 서버 (OpenSSH)" ;;
+        dropbear) echo "경량 SSH 원격 접속 서버" ;;
+        httpd|apache2) echo "Apache HTTP 웹 서버" ;;
+        nginx) echo "Nginx 고성능 웹 서버 / 리버스 프록시" ;;
+        mariadb) echo "MariaDB 관계형 데이터베이스 서버" ;;
+        mysqld|mysql) echo "MySQL 관계형 데이터베이스 서버" ;;
+        postgresql*) echo "PostgreSQL 관계형 데이터베이스 서버" ;;
+        named|bind9) echo "BIND DNS 네임서버" ;;
+        postfix) echo "Postfix SMTP 메일 전송 서버" ;;
+        sendmail) echo "Sendmail SMTP 메일 전송 서버" ;;
+        exim*) echo "Exim SMTP 메일 전송 서버" ;;
+        dovecot) echo "Dovecot IMAP/POP3 메일 수신 서버" ;;
+        vsftpd) echo "vsftpd FTP 파일 전송 서버" ;;
+        proftpd) echo "ProFTPD FTP 파일 전송 서버" ;;
+        pure-ftpd) echo "Pure-FTPd FTP 파일 전송 서버" ;;
+        php*-fpm) echo "PHP FastCGI 프로세스 매니저 (PHP-FPM)" ;;
+        crond|cron) echo "정기 예약 작업(Cron) 스케줄러" ;;
+        atd) echo "일회성 예약 작업(at) 데몬" ;;
+        rsyslog|syslog|syslog-ng) echo "시스템 로그 수집/기록 데몬" ;;
+        systemd-journald) echo "Systemd 바이너리 저널 로그 데몬" ;;
+        chronyd) echo "Chrony NTP 시간 동기화 데몬" ;;
+        ntpd|ntp|systemd-timesyncd) echo "NTP 네트워크 시간 동기화 데몬" ;;
+        firewalld) echo "Firewalld 동적 방화벽 관리 데몬" ;;
+        ufw) echo "UFW(Uncomplicated Firewall) 방화벽" ;;
+        iptables|ip6tables) echo "IPTables 패킷 필터 방화벽" ;;
+        nftables) echo "nftables 차세대 패킷 필터 방화벽" ;;
+        fail2ban) echo "로그 기반 브루트포스 침입 차단 데몬" ;;
+        network|networking) echo "시스템 네트워크 인터페이스 관리" ;;
+        NetworkManager) echo "동적 네트워크 연결 관리 데몬" ;;
+        systemd-networkd) echo "Systemd 네트워크 설정 데몬" ;;
+        systemd-resolved) echo "Systemd 로컬 DNS 리졸버" ;;
+        docker) echo "Docker 컨테이너 엔진 데몬" ;;
+        containerd) echo "컨테이너 런타임 데몬 (containerd)" ;;
+        haproxy) echo "HAProxy 로드밸런서 / 프록시" ;;
+        redis|redis-server) echo "Redis 인메모리 캐시/데이터 저장소" ;;
+        memcached) echo "Memcached 인메모리 객체 캐시" ;;
+        smb|smbd) echo "Samba SMB/CIFS 파일 공유 서버" ;;
+        nmb|nmbd) echo "Samba NetBIOS 이름 서비스" ;;
+        nfs-server|nfs|nfsd) echo "NFS 네트워크 파일시스템 서버" ;;
+        rpcbind|portmap) echo "RPC 포트 매핑 데몬 (NFS 의존)" ;;
+        xinetd) echo "확장 인터넷 슈퍼 데몬 (온디맨드 서비스)" ;;
+        snmpd) echo "SNMP 네트워크 모니터링 에이전트" ;;
+        smartd|smartmontools) echo "디스크 S.M.A.R.T. 상태 감시 데몬" ;;
+        auditd) echo "리눅스 커널 보안 감사 로그 데몬" ;;
+        irqbalance) echo "멀티코어 CPU 인터럽트 부하 분산" ;;
+        tuned) echo "시스템 성능 프로파일 자동 튜닝" ;;
+        dbus) echo "시스템 프로세스 간 메시지 버스 (D-Bus)" ;;
+        systemd-logind) echo "사용자 로그인/세션 관리 데몬" ;;
+        systemd-udevd|udev) echo "커널 장치 노드(/dev) 동적 관리" ;;
+        pveproxy) echo "Proxmox VE 웹 관리 API 프록시 (8006)" ;;
+        pvedaemon) echo "Proxmox VE 백엔드 관리 데몬" ;;
+        pve-cluster) echo "Proxmox 클러스터 파일시스템 (/etc/pve)" ;;
+        pvestatd) echo "Proxmox 노드/VM 상태 통계 수집" ;;
+        corosync) echo "Proxmox 고가용성 클러스터 통신 엔진" ;;
+        qmeventd) echo "Proxmox QEMU/KVM 이벤트 감시 데몬" ;;
+        lxc*|pve-guests) echo "Proxmox LXC/VM 게스트 자동시작 관리" ;;
+        tailscaled) echo "Tailscale 메시 VPN 데몬" ;;
+        wg-quick*) echo "WireGuard VPN 터널 인터페이스" ;;
+        openvpn*) echo "OpenVPN 가상 사설망 데몬" ;;
+        clamd*|clamav*) echo "ClamAV 악성코드/바이러스 백신 데몬" ;;
+        spamassassin|spamd) echo "SpamAssassin 스팸 메일 필터 데몬" ;;
+        mysqld_safe) echo "MySQL 안전 래퍼 데몬" ;;
+        webmin) echo "Webmin 웹 기반 서버 관리 도구" ;;
+        cockpit*) echo "Cockpit 웹 기반 리눅스 관리 콘솔" ;;
+        avahi-daemon) echo "mDNS/DNS-SD 로컬 네트워크 탐색" ;;
+        cups|cupsd) echo "CUPS 프린터 인쇄 서버" ;;
+        bluetooth) echo "블루투스 장치 관리 데몬" ;;
+        ModemManager) echo "모바일 광대역 모뎀 관리 데몬" ;;
+        getty@*|serial-getty@*) echo "가상/시리얼 터미널 로그인 콘솔" ;;
+        *) echo "" ;;
+    esac
+}
+
+# 주요 서버 데몬 필터 판별 (f 키 '주요서버' 모드용)
+_dm_is_major() {
+    case "$1" in
+        ssh|sshd|dropbear|httpd|apache2|nginx|mariadb|mysqld|mysql|postgresql*|named|bind9|\
+        postfix|sendmail|exim*|dovecot|vsftpd|proftpd|pure-ftpd|php*-fpm|crond|cron|\
+        firewalld|ufw|iptables|nftables|fail2ban|network|networking|NetworkManager|\
+        systemd-networkd|systemd-resolved|docker|containerd|haproxy|redis*|memcached|\
+        smb|smbd|nfs*|rsyslog|chronyd|ntpd|xinetd|pveproxy|pvedaemon|pve-cluster|corosync|\
+        tailscaled|wg-quick*|openvpn*)
+            return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 시스템에서 서비스 설명 보충 조회 (캐시되지 않았거나 빈 설명일 때)
+_dm_fetch_sys_desc() {
+    local svc="$1" d=""
+    if [ "$_DM_INIT" = "systemd" ]; then
+        d=$(systemctl show -p Description --value "${svc}.service" 2>/dev/null)
+        [ -z "$d" ] && d=$(systemctl show -p Description "${svc}.service" 2>/dev/null | sed 's/^Description=//')
+    else
+        local f=""
+        [ -f "/etc/rc.d/init.d/$svc" ] && f="/etc/rc.d/init.d/$svc"
+        [ -z "$f" ] && [ -f "/etc/init.d/$svc" ] && f="/etc/init.d/$svc"
+        if [ -n "$f" ]; then
+            d=$(awk '
+                /^#[[:space:]]*Short-Description:/ { sub(/^#[[:space:]]*Short-Description:[[:space:]]*/,""); print; exit }
+                /^#[[:space:]]*description:/ { sub(/^#[[:space:]]*description:[[:space:]]*/,""); gsub(/\\$/,""); print; exit }
+            ' "$f" 2>/dev/null)
+        fi
+    fi
+    echo "$d"
+}
+
+# 데몬 실효 설정 파일 후보 탐지 (한 줄에 1경로, 중복 제거, 실제 존재 파일만)
+_dm_find_configs() {
+    local svc="$1"
+    local raw="" c="" f=""
+    _add_if_file() {
+        local p
+        for p in "$@"; do
+            [ -f "$p" ] && raw="${raw}${p}"$'\n'
+        done
+    }
+
+    # 1) 배포판 통합 주요 서비스 실효 설정 매핑 (CentOS + Debian 공통)
+    case "$svc" in
+        ssh|sshd|openssh-server)
+            _add_if_file /etc/ssh/sshd_config /etc/ssh/ssh_config
+            for f in /etc/ssh/sshd_config.d/*.conf; do _add_if_file "$f"; done
+            ;;
+        dropbear)
+            _add_if_file /etc/default/dropbear /etc/sysconfig/dropbear
+            ;;
+        httpd)
+            _add_if_file /etc/httpd/conf/httpd.conf /etc/httpd/conf.d/ssl.conf /etc/httpd/conf.d/vhost.conf /etc/sysconfig/httpd
+            ;;
+        apache2)
+            _add_if_file /etc/apache2/apache2.conf /etc/apache2/ports.conf /etc/apache2/envvars /etc/apache2/sites-enabled/000-default.conf
+            ;;
+        nginx)
+            _add_if_file /etc/nginx/nginx.conf /etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/default
+            ;;
+        mariadb|mysqld|mysql)
+            _add_if_file /etc/my.cnf /etc/my.cnf.d/mariadb-server.cnf /etc/my.cnf.d/server.cnf /etc/mysql/my.cnf /etc/mysql/mariadb.conf.d/50-server.cnf /etc/mysql/mysql.conf.d/mysqld.cnf
+            ;;
+        postgresql*)
+            for f in /etc/postgresql/*/*/postgresql.conf /var/lib/pgsql/data/postgresql.conf /var/lib/pgsql/*/data/postgresql.conf; do _add_if_file "$f"; done
+            ;;
+        named|bind9)
+            _add_if_file /etc/named.conf /etc/named.rfc1912.zones /etc/bind/named.conf /etc/bind/named.conf.options /etc/bind/named.conf.local /etc/sysconfig/named
+            ;;
+        postfix)
+            _add_if_file /etc/postfix/main.cf /etc/postfix/master.cf
+            ;;
+        sendmail)
+            _add_if_file /etc/mail/sendmail.mc /etc/mail/sendmail.cf /etc/mail/access /etc/mail/local-host-names
+            ;;
+        dovecot)
+            _add_if_file /etc/dovecot/dovecot.conf /etc/dovecot/conf.d/10-mail.conf /etc/dovecot/conf.d/10-auth.conf /etc/dovecot/conf.d/10-ssl.conf
+            ;;
+        vsftpd)
+            _add_if_file /etc/vsftpd/vsftpd.conf /etc/vsftpd.conf /etc/vsftpd/user_list
+            ;;
+        proftpd)
+            _add_if_file /etc/proftpd.conf /etc/proftpd/proftpd.conf
+            ;;
+        php*-fpm)
+            _add_if_file /etc/php-fpm.conf /etc/php-fpm.d/www.conf /etc/php.ini
+            for f in /etc/php/*/fpm/php-fpm.conf /etc/php/*/fpm/pool.d/www.conf /etc/php/*/fpm/php.ini; do _add_if_file "$f"; done
+            ;;
+        crond|cron)
+            _add_if_file /etc/crontab /etc/sysconfig/crond /etc/default/cron
+            ;;
+        fail2ban)
+            _add_if_file /etc/fail2ban/jail.local /etc/fail2ban/jail.conf /etc/fail2ban/fail2ban.conf
+            ;;
+        firewalld)
+            _add_if_file /etc/firewalld/firewalld.conf
+            ;;
+        ufw)
+            _add_if_file /etc/ufw/ufw.conf /etc/default/ufw
+            ;;
+        iptables|ip6tables)
+            _add_if_file /etc/sysconfig/iptables /etc/sysconfig/iptables-config /etc/iptables/rules.v4
+            ;;
+        nftables)
+            _add_if_file /etc/nftables.conf /etc/sysconfig/nftables.conf
+            ;;
+        rsyslog)
+            _add_if_file /etc/rsyslog.conf
+            ;;
+        chronyd)
+            _add_if_file /etc/chrony.conf /etc/chrony/chrony.conf
+            ;;
+        ntpd|ntp)
+            _add_if_file /etc/ntp.conf
+            ;;
+        haproxy)
+            _add_if_file /etc/haproxy/haproxy.cfg
+            ;;
+        redis|redis-server)
+            _add_if_file /etc/redis.conf /etc/redis/redis.conf
+            ;;
+        memcached)
+            _add_if_file /etc/sysconfig/memcached /etc/memcached.conf
+            ;;
+        smb|smbd|nmb|nmbd)
+            _add_if_file /etc/samba/smb.conf
+            ;;
+        docker)
+            _add_if_file /etc/docker/daemon.json
+            ;;
+        xinetd)
+            _add_if_file /etc/xinetd.conf
+            ;;
+        networking|network)
+            _add_if_file /etc/network/interfaces /etc/sysconfig/network
+            ;;
+        NetworkManager)
+            _add_if_file /etc/NetworkManager/NetworkManager.conf
+            ;;
+        systemd-resolved)
+            _add_if_file /etc/systemd/resolved.conf /etc/resolv.conf
+            ;;
+        pveproxy|pvedaemon|corosync|pve-cluster)
+            _add_if_file /etc/default/pveproxy /etc/pve/corosync.conf /etc/corosync/corosync.conf /etc/hosts
+            ;;
+    esac
+
+    # 2) 동적 탐지: systemd 유닛 속성 / init.d 스크립트에서 설정 경로 추출
+    if [ "$_DM_INIT" = "systemd" ]; then
+        local _frag="" _drop="" _envf="" _exec="" _tok="" _prev=""
+        _frag=$(systemctl show -p FragmentPath --value "${svc}.service" 2>/dev/null)
+        _drop=$(systemctl show -p DropInPaths --value "${svc}.service" 2>/dev/null)
+        _envf=$(systemctl show -p EnvironmentFiles --value "${svc}.service" 2>/dev/null)
+        _exec=$(systemctl show -p ExecStart --value "${svc}.service" 2>/dev/null)
+
+        # ExecStart 안의 -c /path, -f /path, --config=/path 추출
+        for _tok in $_exec; do
+            case "$_tok" in
+                --config=*|--conf=*|--config-file=*|--defaults-file=*)
+                    c="${_tok#*=}"
+                    c="${c%;}"
+                    _add_if_file "$c"
+                    ;;
+                /*)
+                    case "$_prev" in
+                        -c|-f|-C|--config|--conf) _add_if_file "${_tok%;}" ;;
+                    esac
+                    ;;
+            esac
+            _prev="$_tok"
+        done
+
+        # EnvironmentFiles (예: /etc/sysconfig/xxx (ignore_errors=yes))
+        for _tok in $_envf; do
+            case "$_tok" in
+                -*) _tok="${_tok#-}" ;;
+            esac
+            case "$_tok" in
+                /*) _add_if_file "$_tok" ;;
+            esac
+        done
+
+        # DropIn 오버라이드 & FragmentPath(유닛 파일 자체)
+        for _tok in $_drop; do _add_if_file "$_tok"; done
+        [ -n "$_frag" ] && _add_if_file "$_frag"
+    else
+        local _initf=""
+        [ -f "/etc/rc.d/init.d/$svc" ] && _initf="/etc/rc.d/init.d/$svc"
+        [ -z "$_initf" ] && [ -f "/etc/init.d/$svc" ] && _initf="/etc/init.d/$svc"
+        if [ -n "$_initf" ]; then
+            local _found
+            _found=$(grep -Eo '/etc/[A-Za-z0-9._/-]+\.(conf|cfg|cnf|ini|cf|yaml|yml)' "$_initf" 2>/dev/null | head -n 6)
+            for c in $_found; do _add_if_file "$c"; done
+            _add_if_file "/etc/sysconfig/$svc" "/etc/default/$svc" "$_initf"
+        fi
+    fi
+
+    # 3) 범용 경로 폴백
+    _add_if_file "/etc/${svc}/${svc}.conf" "/etc/${svc}.conf" "/etc/sysconfig/${svc}" "/etc/default/${svc}"
+
+    # 중복 제거(순서 유지)
+    printf '%s' "$raw" | awk 'NF && !seen[$0]++'
+}
+
+# 설정 변경 후 문법 사전 검증 (0=통과 또는 검사기 없음, 1=문법 오류)
+_dm_config_test() {
+    local svc="$1"
+    local _cmd=""
+    case "$svc" in
+        ssh|sshd|openssh-server) command -v sshd >/dev/null 2>&1 && _cmd="sshd -t" ;;
+        httpd)
+            if command -v httpd >/dev/null 2>&1; then _cmd="httpd -t"
+            elif command -v apachectl >/dev/null 2>&1; then _cmd="apachectl -t"
+            fi ;;
+        apache2) command -v apache2ctl >/dev/null 2>&1 && _cmd="apache2ctl -t" ;;
+        nginx) command -v nginx >/dev/null 2>&1 && _cmd="nginx -t" ;;
+        named|bind9) command -v named-checkconf >/dev/null 2>&1 && _cmd="named-checkconf" ;;
+        postfix) command -v postfix >/dev/null 2>&1 && _cmd="postfix check" ;;
+        haproxy) command -v haproxy >/dev/null 2>&1 && [ -f /etc/haproxy/haproxy.cfg ] && _cmd="haproxy -c -f /etc/haproxy/haproxy.cfg" ;;
+        php*-fpm)
+            local _pf=""
+            _pf=$(command -v "$svc" 2>/dev/null || command -v php-fpm 2>/dev/null)
+            [ -n "$_pf" ] && _cmd="$_pf -t"
+            ;;
+    esac
+    [ -z "$_cmd" ] && return 0
+    printf '\033[1;36m[문법 사전 검증] %s ...\033[0m\n' "$_cmd"
+    if eval "$_cmd"; then
+        printf '\033[1;32m✔ 문법 검증 통과!\033[0m\n'
+        return 0
+    else
+        printf '\033[1;31m✖ 문법 오류가 감지되었습니다! 안전을 위해 재시작을 차단합니다.\033[0m\n'
+        return 1
+    fi
+}
+
+# 서비스 목록 로드 (초기 스냅샷 옵션: $1=1 이면 초기값도 저장)
+_dm_load_services() {
+    local save_init="${1:-0}"
+    _DM_NAMES=()
+    _DM_BOOT=()
+    _DM_RUN=()
+    _DM_DESC=()
+    _DM_RISK=()
+    if [ "$save_init" = "1" ]; then
+        _DM_INIT_BOOT=()
+        _DM_INIT_RUN=()
+    fi
+
+    local _tmp_list
+    _tmp_list=$(mktemp /tmp/go_dm.XXXXXX 2>/dev/null || echo "/tmp/go_dm_$$")
+
+    if [ "$_DM_INIT" = "systemd" ]; then
+        local _tmp_u
+        _tmp_u=$(mktemp /tmp/go_dmu.XXXXXX 2>/dev/null || echo "/tmp/go_dmu_$$")
+        systemctl list-units --type=service --all --no-legend --no-pager 2>/dev/null >"$_tmp_u"
+        systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null | awk -v uf="$_tmp_u" '
+            BEGIN {
+                while ((getline line < uf) > 0) {
+                    sub(/^[[:space:]●*]+/, "", line)
+                    n = split(line, a, /[[:space:]]+/)
+                    if (n >= 4) {
+                        nm = a[1]
+                        sub(/\.service$/, "", nm)
+                        run[nm] = a[3]
+                        # 설명 추출 (5번째 필드부터 끝까지)
+                        desc = ""
+                        for (i = 5; i <= n; i++) desc = desc (i > 5 ? " " : "") a[i]
+                        sdesc[nm] = desc
+                    }
+                }
+                close(uf)
+            }
+            {
+                nm = $1
+                if (nm == "" || index(nm, "@.service") > 0) next
+                sub(/\.service$/, "", nm)
+                st = $2
+                if (st != "enabled" && st != "disabled" && st != "static" && st != "masked" && st != "indirect" && st != "enabled-runtime") next
+                r = (nm in run) ? run[nm] : "inactive"
+                d = (nm in sdesc) ? sdesc[nm] : ""
+                if (!(nm in seen)) {
+                    seen[nm] = 1
+                    printf "%s\t%s\t%s\t%s\n", nm, st, r, d
+                }
+            }
+        ' | sort -t$'\t' -k1,1 >"$_tmp_list"
+        rm -f "$_tmp_u"
+    elif [ "$_DM_INIT" = "sysv_rh" ]; then
+        chkconfig --list 2>/dev/null | awk -v rl="$_DM_RUNLEVEL" '
+            /^[A-Za-z0-9._-]+/ && index($0, rl":") > 0 {
+                nm = $1
+                st = "disabled"
+                for (i = 2; i <= NF; i++) {
+                    if ($i == rl":on") { st = "enabled"; break }
+                }
+                printf "%s\t%s\t%s\t\n", nm, st, "unknown"
+            }
+        ' | sort -t$'\t' -k1,1 >"$_tmp_list"
+    elif [ "$_DM_INIT" = "sysv_deb" ]; then
+        local _f _nm _st
+        for _f in /etc/init.d/*; do
+            [ -f "$_f" ] && [ -x "$_f" ] || continue
+            _nm="${_f##*/}"
+            case "$_nm" in
+                README|skeleton|rc|rcS|functions|*.dpkg-*|*.sh|halt|reboot|single|killprocs|sendsigs|umount*) continue ;;
+            esac
+            if ls /etc/rc"${_DM_RUNLEVEL}".d/S*"${_nm}" >/dev/null 2>&1; then
+                _st="enabled"
+            else
+                _st="disabled"
+            fi
+            printf '%s\t%s\tunknown\t\n' "$_nm" "$_st"
+        done | sort -t$'\t' -k1,1 >"$_tmp_list"
+    fi
+
+    local _nm _bt _rn _ds _bd _idx=0
+    while IFS=$'\t' read -r _nm _bt _rn _ds; do
+        [ -z "$_nm" ] && continue
+        # SysVinit 초고속 실행상태 추정 (pid / lock)
+        if [ "$_rn" = "unknown" ]; then
+            if [ -f "/var/lock/subsys/$_nm" ] || ls /var/run/"$_nm"*.pid /run/"$_nm"*.pid >/dev/null 2>&1; then
+                _rn="active"
+            else
+                _rn="inactive"
+            fi
+        fi
+        _bd=$(_dm_builtin_desc "$_nm")
+        [ -n "$_bd" ] && _ds="$_bd"
+        _dm_risk_info "$_nm"
+        _DM_NAMES[$_idx]="$_nm"
+        _DM_BOOT[$_idx]="$_bt"
+        _DM_RUN[$_idx]="$_rn"
+        _DM_DESC[$_idx]="$_ds"
+        _DM_RISK[$_idx]="$_DM_R_LVL"
+        if [ "$save_init" = "1" ]; then
+            _DM_INIT_BOOT[$_idx]="$_bt"
+            _DM_INIT_RUN[$_idx]="$_rn"
+        fi
+        _idx=$((_idx + 1))
+    done <"$_tmp_list"
+    rm -f "$_tmp_list"
+    _DM_TOTAL=$_idx
+}
+
+# 단일 서비스 상태 실시간 갱신 (배열 인덱스 $1)
+_dm_refresh_one() {
+    local idx="$1"
+    local svc="${_DM_NAMES[$idx]}"
+    if [ "$_DM_INIT" = "systemd" ]; then
+        local _bt _rn
+        _bt=$(systemctl is-enabled "${svc}.service" 2>/dev/null | head -n1)
+        [ -z "$_bt" ] && _bt="static"
+        _rn=$(systemctl is-active "${svc}.service" 2>/dev/null | head -n1)
+        [ -z "$_rn" ] && _rn="inactive"
+        _DM_BOOT[$idx]="$_bt"
+        _DM_RUN[$idx]="$_rn"
+    elif [ "$_DM_INIT" = "sysv_rh" ]; then
+        if chkconfig --list "$svc" 2>/dev/null | grep -q "${_DM_RUNLEVEL}:on"; then
+            _DM_BOOT[$idx]="enabled"
+        else
+            _DM_BOOT[$idx]="disabled"
+        fi
+        if service "$svc" status >/dev/null 2>&1; then
+            _DM_RUN[$idx]="active"
+        else
+            _DM_RUN[$idx]="inactive"
+        fi
+    elif [ "$_DM_INIT" = "sysv_deb" ]; then
+        if ls /etc/rc"${_DM_RUNLEVEL}".d/S*"${svc}" >/dev/null 2>&1; then
+            _DM_BOOT[$idx]="enabled"
+        else
+            _DM_BOOT[$idx]="disabled"
+        fi
+        if service "$svc" status >/dev/null 2>&1; then
+            _DM_RUN[$idx]="active"
+        else
+            _DM_RUN[$idx]="inactive"
+        fi
+    fi
+}
+
+# 실제 데몬 액션 실행 (enable|disable|start|stop|restart)
+_dm_exec_action() {
+    local svc="$1" act="$2"
+    if [ "$_DM_INIT" = "systemd" ]; then
+        systemctl "$act" "${svc}.service" 2>&1
+        return $?
+    elif [ "$_DM_INIT" = "sysv_rh" ]; then
+        case "$act" in
+            enable)  chkconfig "$svc" on 2>&1 ;;
+            disable) chkconfig "$svc" off 2>&1 ;;
+            start|stop|restart) service "$svc" "$act" 2>&1 ;;
+        esac
+        return $?
+    elif [ "$_DM_INIT" = "sysv_deb" ]; then
+        case "$act" in
+            enable)  update-rc.d "$svc" enable 2>&1 || update-rc.d "$svc" defaults 2>&1 ;;
+            disable) update-rc.d "$svc" disable 2>&1 ;;
+            start|stop|restart) service "$svc" "$act" 2>&1 || "/etc/init.d/$svc" "$act" 2>&1 ;;
+        esac
+        return $?
+    fi
+    return 1
+}
+
+# 안전 가드 확인 (CRIT = Proxmox 파쇄식 명령어 재입력, WARN = y/N)
+# 반환: 0=허용, 1=취소/차단
+_dm_guard_confirm() {
+    local svc="$1" act="$2"
+    # enable / start 는 안전한 방향 -> 즉시 허용
+    case "$act" in
+        enable|start) return 0 ;;
+    esac
+
+    _dm_risk_info "$svc"
+    if [ "$_DM_R_LVL" = "OK" ]; then
+        return 0
+    fi
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n'
+    if [ "$_DM_R_LVL" = "CRIT" ]; then
+        # restart 의 경우 SSH/네트워크도 끊김 위험 경고 + 문법검증 후 확인
+        local _phrase="${act} ${svc}"
+        printf '\033[1;41;37m ⛔ [치명적 데몬 보호] %s (%s) \033[0m\n' "$svc" "$act"
+        printf '\033[1;31m  ⚠ 경고: %s\033[0m\n' "$_DM_R_MSG"
+        printf '\033[1;33m  ▶ 정말 실행하려면 아래 문구를 정확히 입력하세요 (취소: Enter):\033[0m\n'
+        printf '    확인 문구: \033[1;37m%s\033[0m\n' "$_phrase"
+        printf '    입력 >>> '
+        local _typed=""
+        IFS= read -r _typed </dev/tty
+        if [ "$_typed" = "$_phrase" ]; then
+            return 0
+        fi
+        printf '\033[1;32m  🛡 취소되었습니다. (%s 보호됨)\033[0m\n' "$svc"
+        sleep 1
+        return 1
+    elif [ "$_DM_R_LVL" = "WARN" ]; then
+        printf '\033[1;33m ⚠ [주의 데몬] %s -> %s\033[0m\n' "$svc" "$act"
+        printf '   %s\n' "$_DM_R_MSG"
+        printf '   계속 진행할까요? [y/N]: '
+        local _ans=""
+        IFS= read -r _ans </dev/tty
+        case "$_ans" in
+            y|Y|yes|YES) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+# 위험 데몬용 Dead-Man's Switch (윈도우 모니터 확인창 방식 자동 원복 타이머)
+# - SSH/네트워크/방화벽/Proxmox 등 원격 끊김 가능 작업 시 백그라운드 워치독(SIGHUP 면역) 가동
+# - 20초 안에 [y] 확정하지 않거나 SSH 세션이 끊기면 자동으로 직전 상태(및 설정 파일)로 원복!
+# 인자: $1=svc  $2=act(disable|stop|restart)  $3=orig_cfg(옵션)  $4=bak_cfg(옵션)
+_dm_need_deadman() {
+    local svc="$1" act="$2"
+    case "$act" in
+        disable|stop|restart) ;;
+        *) return 1 ;;
+    esac
+    _dm_risk_info "$svc"
+    [ "$_DM_R_LVL" = "CRIT" ] && return 0
+    case "$svc" in
+        firewalld|ufw|iptables|ip6tables|nftables) return 0 ;;
+    esac
+    return 1
+}
+
+_dm_deadman_run() {
+    local svc="$1" act="$2" orig_cfg="${3:-}" bak_cfg="${4:-}"
+    local _flag="/tmp/go_dm_confirm_$$"
+    local _wait_sec=20
+    local _wd_sec=25
+
+    # 원복 명령 조립 (init 시스템별)
+    local _rev_cmd=""
+    if [ -n "$orig_cfg" ] && [ -n "$bak_cfg" ] && [ -f "$bak_cfg" ]; then
+        _rev_cmd="cp -f '$bak_cfg' '$orig_cfg' 2>/dev/null; "
+    fi
+    if [ "$_DM_INIT" = "systemd" ]; then
+        case "$act" in
+            disable) _rev_cmd="${_rev_cmd}systemctl enable '${svc}.service' >/dev/null 2>&1" ;;
+            stop)    _rev_cmd="${_rev_cmd}systemctl start '${svc}.service' >/dev/null 2>&1" ;;
+            restart) _rev_cmd="${_rev_cmd}systemctl restart '${svc}.service' >/dev/null 2>&1" ;;
+        esac
+    elif [ "$_DM_INIT" = "sysv_rh" ]; then
+        case "$act" in
+            disable) _rev_cmd="${_rev_cmd}chkconfig '${svc}' on >/dev/null 2>&1" ;;
+            stop)    _rev_cmd="${_rev_cmd}service '${svc}' start >/dev/null 2>&1" ;;
+            restart) _rev_cmd="${_rev_cmd}service '${svc}' restart >/dev/null 2>&1" ;;
+        esac
+    elif [ "$_DM_INIT" = "sysv_deb" ]; then
+        case "$act" in
+            disable) _rev_cmd="${_rev_cmd}update-rc.d '${svc}' enable >/dev/null 2>&1" ;;
+            stop)    _rev_cmd="${_rev_cmd}service '${svc}' start >/dev/null 2>&1 || '/etc/init.d/${svc}' start >/dev/null 2>&1" ;;
+            restart) _rev_cmd="${_rev_cmd}service '${svc}' restart >/dev/null 2>&1 || '/etc/init.d/${svc}' restart >/dev/null 2>&1" ;;
+        esac
+    fi
+
+    touch "$_flag"
+    # SIGHUP 면역 독립 백그라운드 워치독: SSH 세션이 끊겨도 _wd_sec 후 자동 원복!
+    (
+        trap '' HUP INT TERM
+        sleep "$_wd_sec"
+        if [ -f "$_flag" ]; then
+            eval "$_rev_cmd"
+            rm -f "$_flag"
+        fi
+        [ -n "$bak_cfg" ] && rm -f "$bak_cfg" 2>/dev/null
+    ) </dev/null >/dev/null 2>&1 &
+    local _wd_pid=$!
+
+    # 실제 액션 실행
+    local _out _rc
+    _out=$(_dm_exec_action "$svc" "$act")
+    _rc=$?
+    if [ $_rc -ne 0 ]; then
+        rm -f "$_flag"
+        kill "$_wd_pid" 2>/dev/null
+        [ -n "$bak_cfg" ] && rm -f "$bak_cfg" 2>/dev/null
+        _DM_MSG="✖ ${svc} ${act} 실패: $(printf '%s' "$_out" | head -n1)"
+        return $_rc
+    fi
+
+    # 카운트다운 확인 (윈도우 모니터 해상도 확인창 스타일)
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n\033[1;43;30m ⏱ [자동 원복 보호 작동] %s (%s) 적용됨 \033[0m\n' "$svc" "$act"
+    printf '   세션이 정상이면 \033[1;32m[y]\033[0m 를 눌러 확정하세요. (무응답/끊김/[n] 시 자동 원복)\n'
+
+    local _left=$_wait_sec _ans="" _confirmed=0
+    while [ "$_left" -gt 0 ]; do
+        printf '\r   남은 시간: \033[1;33m%2d초\033[0m — 유지(확정)할까요? [y=확정 / n=즉시원복] : ' "$_left"
+        _ans=""
+        if IFS= read -rsn1 -t 1 _ans </dev/tty 2>/dev/null; then
+            case "$_ans" in
+                y|Y)
+                    _confirmed=1
+                    break
+                    ;;
+                n|N|$'\033')
+                    _confirmed=2
+                    break
+                    ;;
+            esac
+        fi
+        _left=$((_left - 1))
+    done
+    printf '\n'
+
+    if [ "$_confirmed" -eq 1 ]; then
+        rm -f "$_flag"
+        kill "$_wd_pid" 2>/dev/null
+        [ -n "$bak_cfg" ] && rm -f "$bak_cfg" 2>/dev/null
+        _DM_MSG="✔ ${svc} (${act}) 변경 확정 완료! (자동 원복 타이머 해제)"
+        return 0
+    else
+        # 시간 초과 또는 n 입력 -> 즉시 원복 수행
+        rm -f "$_flag"
+        kill "$_wd_pid" 2>/dev/null
+        eval "$_rev_cmd"
+        [ -n "$bak_cfg" ] && rm -f "$bak_cfg" 2>/dev/null
+        if [ "$_confirmed" -eq 2 ]; then
+            _DM_MSG="🛡 사용자 취소 — ${svc} 이전 상태로 즉시 원복 완료!"
+        else
+            _DM_MSG="⏱ 확인 시간 초과 — ${svc} 이전 상태로 자동 원복 완료!"
+        fi
+        return 1
+    fi
+}
+
+# 변경된 데몬 수 계산
+_dm_count_changed() {
+    local i=0 c=0
+    while [ "$i" -lt "$_DM_TOTAL" ]; do
+        if [ "${_DM_BOOT[$i]}" != "${_DM_INIT_BOOT[$i]}" ] || [ "${_DM_RUN[$i]}" != "${_DM_INIT_RUN[$i]}" ]; then
+            c=$((c + 1))
+        fi
+        i=$((i + 1))
+    done
+    echo "$c"
+}
+
+# 개별 원복 (배열 인덱스 $1)
+_dm_undo_one() {
+    local idx="$1"
+    local svc="${_DM_NAMES[$idx]}"
+    local ib="${_DM_INIT_BOOT[$idx]}" ir="${_DM_INIT_RUN[$idx]}"
+    local cb="${_DM_BOOT[$idx]}" cr="${_DM_RUN[$idx]}"
+    local did=0
+
+    if [ "$cb" != "$ib" ]; then
+        if [ "$ib" = "enabled" ]; then
+            _dm_exec_action "$svc" enable >/dev/null
+            did=1
+        elif [ "$ib" = "disabled" ]; then
+            _dm_exec_action "$svc" disable >/dev/null
+            did=1
+        fi
+    fi
+    if [ "$cr" != "$ir" ]; then
+        if [ "$ir" = "active" ]; then
+            _dm_exec_action "$svc" start >/dev/null
+            did=1
+        elif [ "$ir" = "inactive" ]; then
+            _dm_exec_action "$svc" stop >/dev/null
+            did=1
+        fi
+    fi
+    _dm_refresh_one "$idx"
+    return $did
+}
+
+# 전체 원복 (진입 시점 스냅샷으로 일괄 복원)
+_dm_undo_all() {
+    local chg
+    chg=$(_dm_count_changed)
+    if [ "$chg" -eq 0 ]; then
+        _DM_MSG="변경된 데몬이 없습니다."
+        return 0
+    fi
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    printf '\n\033[1;33m[전체 원복] 진입 시점 초기 상태로 되돌릴 데몬 (%s건):\033[0m\n' "$chg"
+    local i=0
+    while [ "$i" -lt "$_DM_TOTAL" ]; do
+        if [ "${_DM_BOOT[$i]}" != "${_DM_INIT_BOOT[$i]}" ] || [ "${_DM_RUN[$i]}" != "${_DM_INIT_RUN[$i]}" ]; then
+            printf '  • %-22s boot: %s -> %s | run: %s -> %s\n' \
+                "${_DM_NAMES[$i]}" "${_DM_BOOT[$i]}" "${_DM_INIT_BOOT[$i]}" "${_DM_RUN[$i]}" "${_DM_INIT_RUN[$i]}"
+        fi
+        i=$((i + 1))
+    done
+    printf '\n위 %s건을 모두 초기 상태로 원복할까요? [y/N]: ' "$chg"
+    local _ans=""
+    IFS= read -r _ans </dev/tty
+    case "$_ans" in
+        y|Y|yes|YES)
+            i=0
+            while [ "$i" -lt "$_DM_TOTAL" ]; do
+                if [ "${_DM_BOOT[$i]}" != "${_DM_INIT_BOOT[$i]}" ] || [ "${_DM_RUN[$i]}" != "${_DM_INIT_RUN[$i]}" ]; then
+                    _dm_undo_one "$i"
+                fi
+                i=$((i + 1))
+            done
+            _DM_MSG="✔ ${chg}건 모두 진입 시점 초기 상태로 원복 완료!"
+            return 0
+            ;;
+        *)
+            _DM_MSG="전체 원복을 취소했습니다."
+            return 1
+            ;;
+    esac
+}
+
+# 필터링된 인덱스 목록 구성
+_dm_build_view() {
+    _DM_VIEW=()
+    local i=0 v=0 nm bt rn
+    local q_low
+    q_low=$(printf '%s' "$_DM_SEARCH" | tr 'A-Z' 'a-z')
+    while [ "$i" -lt "$_DM_TOTAL" ]; do
+        nm="${_DM_NAMES[$i]}"
+        bt="${_DM_BOOT[$i]}"
+        rn="${_DM_RUN[$i]}"
+        case "$_DM_FILTER" in
+            enabled)  [ "$bt" != "enabled" ] && { i=$((i + 1)); continue; } ;;
+            running)  [ "$rn" != "active" ] && { i=$((i + 1)); continue; } ;;
+            major)    _dm_is_major "$nm" || { i=$((i + 1)); continue; } ;;
+            changed)
+                if [ "$bt" = "${_DM_INIT_BOOT[$i]}" ] && [ "$rn" = "${_DM_INIT_RUN[$i]}" ]; then
+                    i=$((i + 1)); continue
+                fi ;;
+        esac
+        if [ -n "$q_low" ]; then
+            local nm_low ds_low
+            nm_low=$(printf '%s' "$nm" | tr 'A-Z' 'a-z')
+            ds_low=$(printf '%s' "${_DM_DESC[$i]}" | tr 'A-Z' 'a-z')
+            case "$nm_low $ds_low" in
+                *"$q_low"*) ;;
+                *) i=$((i + 1)); continue ;;
+            esac
+        fi
+        _DM_VIEW[$v]="$i"
+        v=$((v + 1))
+        i=$((i + 1))
+    done
+    _DM_VCNT=$v
+    [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1))
+    [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0
+    [ "$_DM_TOP" -gt "$_DM_CUR" ] && _DM_TOP=$_DM_CUR
+}
+
+# 실효 환경 파일 선택 후 vi2 편집 -> 수정 감지 시 문법검사 후 재시작 제안
+_dm_edit_config() {
+    local idx="$1"
+    local svc="${_DM_NAMES[$idx]}"
+    local cfg_list
+    cfg_list=$(_dm_find_configs "$svc")
+    if [ -z "$cfg_list" ]; then
+        _DM_MSG="⚠ '${svc}' 의 실효 설정 파일을 찾지 못했습니다."
+        return 1
+    fi
+
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+
+    local _arr=() _n=0 _line=""
+    while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        _arr[$_n]="$_line"
+        _n=$((_n + 1))
+    done <<EOF
+$cfg_list
+EOF
+
+    local target=""
+    if [ "$_n" -eq 1 ]; then
+        target="${_arr[0]}"
+    else
+        printf '\033[2J\033[H'
+        printf '\033[1;36m* [%s] 실효 환경 파일 선택 (vi2 로 백업 후 편집)\033[0m\n' "$svc"
+        printf '────────────────────────────────────────────────────────────────────\n'
+        local k=0
+        while [ "$k" -lt "$_n" ]; do
+            printf '  \033[1;33m%2d.\033[0m %s\n' "$((k + 1))" "${_arr[$k]}"
+            k=$((k + 1))
+        done
+        printf '  \033[0;37m 0.\033[0m 취소\n'
+        printf '────────────────────────────────────────────────────────────────────\n'
+        printf '편집할 파일 번호 [1-%s, 0=취소] (기본 1): ' "$_n"
+        local _sel=""
+        IFS= read -r _sel </dev/tty
+        [ -z "$_sel" ] && _sel="1"
+        if [ "$_sel" = "0" ] || [ "$_sel" = "q" ]; then
+            _DM_MSG="편집 취소"
+            return 0
+        fi
+        case "$_sel" in
+            [0-9]*)
+                if [ "$_sel" -ge 1 ] && [ "$_sel" -le "$_n" ]; then
+                    target="${_arr[$((_sel - 1))]}"
+                else
+                    _DM_MSG="잘못된 번호입니다."
+                    return 1
+                fi
+                ;;
+            *) _DM_MSG="편집 취소"; return 0 ;;
+        esac
+    fi
+
+    local before_ck after_ck _tmp_bak=""
+    before_ck=$(cksum "$target" 2>/dev/null)
+    _tmp_bak=$(mktemp /tmp/go_dm_bak.XXXXXX 2>/dev/null || echo "/tmp/go_dm_bak_$$")
+    cp -a "$target" "$_tmp_bak" 2>/dev/null
+    vi2 "$target"
+    after_ck=$(cksum "$target" 2>/dev/null)
+
+    if [ "$before_ck" != "$after_ck" ]; then
+        printf '\n\033[1;33m📝 [%s] 설정 파일이 변경되었습니다: %s\033[0m\n' "$svc" "$target"
+        if ! _dm_config_test "$svc"; then
+            printf '다시 vi2로 수정할까요? [Y/n]: '
+            local _re=""
+            IFS= read -r _re </dev/tty
+            case "$_re" in
+                n|N) rm -f "$_tmp_bak" 2>/dev/null; _DM_MSG="⚠ 문법 오류 상태로 저장됨 (재시작 안 함): $target" ;;
+                *)   vi2 "$target"; rm -f "$_tmp_bak" 2>/dev/null; _DM_MSG="재편집 완료: $target" ;;
+            esac
+            return 0
+        fi
+        printf '변경 사항을 적용하기 위해 [%s] 데몬을 재시작(restart) 할까요? [y/N]: ' "$svc"
+        local _ans=""
+        IFS= read -r _ans </dev/tty
+        case "$_ans" in
+            y|Y|yes|YES)
+                if [ "$_DM_INIT" = "systemd" ]; then
+                    case "$target" in
+                        /etc/systemd/*|/lib/systemd/*|/usr/lib/systemd/*)
+                            systemctl daemon-reload 2>/dev/null ;;
+                    esac
+                fi
+                if _dm_need_deadman "$svc" restart; then
+                    _dm_deadman_run "$svc" restart "$target" "$_tmp_bak"
+                    _dm_refresh_one "$idx"
+                else
+                    rm -f "$_tmp_bak" 2>/dev/null
+                    local _out
+                    _out=$(_dm_exec_action "$svc" restart)
+                    local _rc=$?
+                    _dm_refresh_one "$idx"
+                    if [ $_rc -eq 0 ]; then
+                        _DM_MSG="✔ ${svc} 설정 반영 및 재시작 완료!"
+                    else
+                        _DM_MSG="✖ ${svc} 재시작 실패: $(printf '%s' "$_out" | head -n1)"
+                    fi
+                fi
+                ;;
+            *) rm -f "$_tmp_bak" 2>/dev/null; _DM_MSG="✔ 설정 저장 완료 (재시작 안 함): $target" ;;
+        esac
+    else
+        rm -f "$_tmp_bak" 2>/dev/null
+        _DM_MSG="변경 없음: $target"
+    fi
+}
+
+# 상태/로그 상세 보기 (i 키)
+_dm_show_status() {
+    local idx="$1"
+    local svc="${_DM_NAMES[$idx]}"
+    tput cnorm 2>/dev/null
+    stty echo 2>/dev/null
+    if [ "$_DM_INIT" = "systemd" ]; then
+        {
+            printf '=== systemctl status %s.service ===\n' "$svc"
+            systemctl status --no-pager -l "${svc}.service" 2>&1
+            printf '\n=== 최근 저널 로그 (journalctl -n 30) ===\n'
+            journalctl -u "${svc}.service" -n 30 --no-pager 2>&1
+        } | less -RX
+    else
+        {
+            printf '=== service %s status ===\n' "$svc"
+            service "$svc" status 2>&1 || "/etc/init.d/$svc" status 2>&1
+        } | less -RX
+    fi
+    _dm_refresh_one "$idx"
+}
+
+# TUI 메인 화면 렌더링
+_dm_render() {
+    local _TS_LINES="" _TS_COLS=""
+    _get_term_size
+    local rows=$_TS_LINES cols=$_TS_COLS
+    local list_h=$((rows - 10))
+    [ "$list_h" -lt 5 ] && list_h=5
+
+    # 뷰포트 스크롤 보정
+    if [ "$_DM_CUR" -lt "$_DM_TOP" ]; then
+        _DM_TOP=$_DM_CUR
+    elif [ "$_DM_CUR" -ge $((_DM_TOP + list_h)) ]; then
+        _DM_TOP=$((_DM_CUR - list_h + 1))
+    fi
+
+    local chg_cnt
+    chg_cnt=$(_dm_count_changed)
+    local flabel="전체"
+    case "$_DM_FILTER" in
+        enabled) flabel="부팅활성" ;;
+        running) flabel="실행중" ;;
+        major)   flabel="주요서버" ;;
+        changed) flabel="변경됨" ;;
+    esac
+
+    local hline
+    hline=$(printf '%*s' "$((cols > 110 ? 110 : cols - 1))" '' | tr ' ' '-')
+
+    printf '\033[H\033[J'
+    printf '\033[1;36m* 통합 서버 데몬 관리 [dm]\033[0m  \033[0;37mOS: %s (%s)\033[0m  필터:\033[1;33m%s\033[0m (%d/%d)' \
+        "$_DM_OS" "$_DM_INIT" "$flabel" "$_DM_VCNT" "$_DM_TOTAL"
+    [ -n "$_DM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_DM_SEARCH"
+    [ "$chg_cnt" -gt 0 ] && printf '  \033[1;33m[변경:%d건 u/U원복]\033[0m' "$chg_cnt"
+    printf '\n\033[0;34m%s\033[0m\n' "$hline"
+
+    if [ "$_DM_VCNT" -eq 0 ]; then
+        printf '\n  (조건에 맞는 데몬이 없습니다. / 로 검색어를 지우거나 f 로 필터를 바꾸세요)\n'
+    else
+        local r=0 vidx idx nm bt rn ds rk mod_mk b_tag r_col r_sym rk_tag
+        while [ "$r" -lt "$list_h" ]; do
+            vidx=$((_DM_TOP + r))
+            [ "$vidx" -ge "$_DM_VCNT" ] && break
+            idx="${_DM_VIEW[$vidx]}"
+            nm="${_DM_NAMES[$idx]}"
+            bt="${_DM_BOOT[$idx]}"
+            rn="${_DM_RUN[$idx]}"
+            ds="${_DM_DESC[$idx]}"
+            rk="${_DM_RISK[$idx]}"
+
+            # 부팅 자동실행 체크박스
+            case "$bt" in
+                enabled|enabled-runtime) b_tag=$'\033[1;32m[v]\033[0m' ;;
+                disabled)                b_tag=$'\033[0;37m[ ]\033[0m' ;;
+                masked)                  b_tag=$'\033[1;31m[M]\033[0m' ;;
+                *)                       b_tag=$'\033[0;36m[S]\033[0m' ;;
+            esac
+
+            # 현재 실행 상태
+            case "$rn" in
+                active)   r_col=$'\033[1;32m'; r_sym="●" ;;
+                failed)   r_col=$'\033[1;31m'; r_sym="✖" ;;
+                *)        r_col=$'\033[0;37m'; r_sym="○" ;;
+            esac
+
+            # 위험 등급 마크
+            case "$rk" in
+                CRIT) rk_tag=$'\033[1;31m[잠금]\033[0m' ;;
+                WARN) rk_tag=$'\033[1;33m[주의]\033[0m' ;;
+                *)    rk_tag="      " ;;
+            esac
+
+            # 진입 시점 대비 변경 여부
+            if [ "$bt" != "${_DM_INIT_BOOT[$idx]}" ] || [ "$rn" != "${_DM_INIT_RUN[$idx]}" ]; then
+                mod_mk=$'\033[1;33m*\033[0m'
+            else
+                mod_mk=" "
+            fi
+
+            # 설명 길이 자르기
+            local max_d=$((cols - 54))
+            [ "$max_d" -lt 16 ] && max_d=16
+            [ "${#ds}" -gt "$max_d" ] && ds="${ds:0:$((max_d - 2))}.."
+
+            if [ "$vidx" -eq "$_DM_CUR" ]; then
+                printf '\033[1;33m▶\033[0m%s %s %s%s\033[0m \033[7m %-24.24s \033[0m %-8.8s %s %s\n' \
+                    "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+            else
+                printf ' %s %s %s%s\033[0m  %-24.24s  %-8.8s %s %s\n' \
+                    "$mod_mk" "$b_tag" "$r_col" "$r_sym" "$nm" "$rn" "$rk_tag" "$ds"
+            fi
+            r=$((r + 1))
+        done
+    fi
+
+    # 하단 상세 카드 (커서 항목의 역할 + 실효 설정 파일 미리보기)
+    printf '\033[0;34m%s\033[0m\n' "$hline"
+    if [ "$_DM_VCNT" -gt 0 ]; then
+        local cidx="${_DM_VIEW[$_DM_CUR]}"
+        local cnm="${_DM_NAMES[$cidx]}"
+        local cds="${_DM_DESC[$cidx]}"
+        if [ -z "$cds" ]; then
+            cds=$(_dm_fetch_sys_desc "$cnm")
+            [ -n "$cds" ] && _DM_DESC[$cidx]="$cds"
+        fi
+        [ -z "$cds" ] && cds="(설명 없음)"
+        _dm_risk_info "$cnm"
+        printf '\033[1;36m🔍 %s\033[0m — %s\n' "$cnm" "$cds"
+        printf '   • 상태: 부팅=\033[1;37m%s\033[0m (초기:%s) | 실행=\033[1;37m%s\033[0m (초기:%s)' \
+            "${_DM_BOOT[$cidx]}" "${_DM_INIT_BOOT[$cidx]}" "${_DM_RUN[$cidx]}" "${_DM_INIT_RUN[$cidx]}"
+        [ "$_DM_R_LVL" = "CRIT" ] && printf '  \033[1;31m[🔒 원격/시스템 보호됨]\033[0m'
+        [ "$_DM_R_LVL" = "WARN" ] && printf '  \033[1;33m[⚠ 주요서비스 주의]\033[0m'
+        printf '\n'
+        local _first_cfg
+        _first_cfg=$(_dm_find_configs "$cnm" | head -n 2 | tr '\n' ' ')
+        [ -z "$_first_cfg" ] && _first_cfg="(탐지된 설정 파일 없음)"
+        printf '   • 설정: \033[0;32m%s\033[0m\n' "$_first_cfg"
+    else
+        printf '\n\n\n'
+    fi
+    printf '\033[0;34m%s\033[0m\n' "$hline"
+    if [ -n "$_DM_MSG" ]; then
+        printf '\033[1;33m %s\033[0m\n' "$_DM_MSG"
+    else
+        printf ' \033[0;37m[↑↓/PgUpDn]이동 [Space]활성토글 [e/Enter]설정vi2 [s]시작 [x]중지 [r]재시작 [i]로그 [/]검색 [f]필터 [u/U]원복 [q]종료\033[0m\n'
+    fi
+}
+
+# 메인 진입 함수: dm [초기검색어]
+dm() {
+    _dm_detect_env
+    if [ "$_DM_INIT" = "unknown" ]; then
+        echo "❌ 지원하는 init 시스템(systemd / chkconfig / init.d)을 찾지 못했습니다."
+        return 1
+    fi
+
+    _DM_SEARCH="${1:-}"
+    _DM_FILTER="all"
+    _DM_CUR=0
+    _DM_TOP=0
+    _DM_MSG=""
+
+    printf '\033[1;36m[dm] %s (%s) 서비스 목록 및 초기 스냅샷 로딩 중...\033[0m\n' "$_DM_OS" "$_DM_INIT"
+    _dm_load_services 1
+    _dm_build_view
+
+    local _esc_t=1
+    [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && _esc_t=0.25
+
+    local _old_trap
+    _old_trap=$(trap -p INT)
+    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+
+    while :; do
+        tput civis 2>/dev/null
+        _dm_render
+        _DM_MSG=""
+
+        local _k="" _x="" _x2=""
+        IFS= read -rsn1 _k </dev/tty 2>/dev/null || break
+
+        if [ "$_k" = $'\033' ]; then
+            IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+            if [ -z "$_x" ] || [ "$_x" = $'\033' ]; then
+                _k="q"
+            elif [ "$_x" = "[" ] || [ "$_x" = "O" ]; then
+                IFS= read -rsn1 -t "$_esc_t" _x </dev/tty 2>/dev/null
+                case "$_x" in
+                    A) [ "$_DM_CUR" -gt 0 ] && _DM_CUR=$((_DM_CUR - 1)); continue ;;
+                    B) [ "$_DM_CUR" -lt $((_DM_VCNT - 1)) ] && _DM_CUR=$((_DM_CUR + 1)); continue ;;
+                    5) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       _DM_CUR=$((_DM_CUR - 10)); [ "$_DM_CUR" -lt 0 ] && _DM_CUR=0; continue ;;
+                    6) IFS= read -rsn1 -t "$_esc_t" _x2 </dev/tty 2>/dev/null
+                       _DM_CUR=$((_DM_CUR + 10)); [ "$_DM_CUR" -ge "$_DM_VCNT" ] && _DM_CUR=$((_DM_VCNT - 1)); continue ;;
+                esac
+                continue
+            else
+                continue
+            fi
+        fi
+
+        case "$_k" in
+            q|Q)
+                local _chg
+                _chg=$(_dm_count_changed)
+                if [ "$_chg" -gt 0 ]; then
+                    tput cnorm 2>/dev/null
+                    stty echo 2>/dev/null
+                    printf '\n\033[1;33m⚠ 진입 시점 대비 변경된 데몬이 %d건 있습니다.\033[0m\n' "$_chg"
+                    printf '  [Enter] 그대로 종료  |  [u] 전체 원복 후 종료  |  [c] 돌아가기 : '
+                    local _qans=""
+                    IFS= read -r _qans </dev/tty
+                    case "$_qans" in
+                        u|U) _dm_undo_all && break ;;
+                        c|C) continue ;;
+                        *)   break ;;
+                    esac
+                else
+                    break
+                fi
+                ;;
+            k) [ "$_DM_CUR" -gt 0 ] && _DM_CUR=$((_DM_CUR - 1)) ;;
+            j) [ "$_DM_CUR" -lt $((_DM_VCNT - 1)) ] && _DM_CUR=$((_DM_CUR + 1)) ;;
+            " ")
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                local _idx="${_DM_VIEW[$_DM_CUR]}"
+                local _svc="${_DM_NAMES[$_idx]}"
+                local _bt="${_DM_BOOT[$_idx]}"
+                local _act=""
+                if [ "$_bt" = "enabled" ] || [ "$_bt" = "enabled-runtime" ]; then
+                    _act="disable"
+                elif [ "$_bt" = "disabled" ]; then
+                    _act="enable"
+                else
+                    _DM_MSG="ℹ '${_svc}' 는 '${_bt}' 상태라 부팅 토글 대상이 아닙니다."
+                    continue
+                fi
+                if _dm_guard_confirm "$_svc" "$_act"; then
+                    if _dm_need_deadman "$_svc" "$_act"; then
+                        _dm_deadman_run "$_svc" "$_act"
+                        _dm_refresh_one "$_idx"
+                    else
+                        local _out
+                        _out=$(_dm_exec_action "$_svc" "$_act")
+                        local _rc=$?
+                        _dm_refresh_one "$_idx"
+                        if [ $_rc -eq 0 ]; then
+                            _DM_MSG="✔ ${_svc} -> ${_act} 완료 (현재: ${_DM_BOOT[$_idx]})"
+                        else
+                            _DM_MSG="✖ ${_svc} ${_act} 실패: $(printf '%s' "$_out" | head -n1)"
+                        fi
+                    fi
+                fi
+                ;;
+            ""|e|E)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                _dm_edit_config "${_DM_VIEW[$_DM_CUR]}"
+                ;;
+            s|S)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                local _idx="${_DM_VIEW[$_DM_CUR]}" _svc="${_DM_NAMES[$_idx]}" _out
+                _out=$(_dm_exec_action "$_svc" start)
+                local _rc=$?
+                _dm_refresh_one "$_idx"
+                [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 시작(start) 완료" || _DM_MSG="✖ ${_svc} 시작 실패: $(printf '%s' "$_out" | head -n1)"
+                ;;
+            x|X)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                local _idx="${_DM_VIEW[$_DM_CUR]}" _svc="${_DM_NAMES[$_idx]}"
+                if _dm_guard_confirm "$_svc" stop; then
+                    if _dm_need_deadman "$_svc" stop; then
+                        _dm_deadman_run "$_svc" stop
+                        _dm_refresh_one "$_idx"
+                    else
+                        local _out
+                        _out=$(_dm_exec_action "$_svc" stop)
+                        local _rc=$?
+                        _dm_refresh_one "$_idx"
+                        [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 중지(stop) 완료" || _DM_MSG="✖ ${_svc} 중지 실패: $(printf '%s' "$_out" | head -n1)"
+                    fi
+                fi
+                ;;
+            r|R)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                local _idx="${_DM_VIEW[$_DM_CUR]}" _svc="${_DM_NAMES[$_idx]}"
+                # 재시작 전 설정 문법 자동 검증 (오타 시 차단)
+                tput cnorm 2>/dev/null
+                stty echo 2>/dev/null
+                if ! _dm_config_test "$_svc"; then
+                    printf '아무 키나 누르면 돌아갑니다...'
+                    IFS= read -rsn1 _ </dev/tty 2>/dev/null
+                    _DM_MSG="✖ ${_svc} 문법 오류로 재시작 차단됨"
+                    continue
+                fi
+                if _dm_guard_confirm "$_svc" restart; then
+                    if _dm_need_deadman "$_svc" restart; then
+                        _dm_deadman_run "$_svc" restart
+                        _dm_refresh_one "$_idx"
+                    else
+                        local _out
+                        _out=$(_dm_exec_action "$_svc" restart)
+                        local _rc=$?
+                        _dm_refresh_one "$_idx"
+                        [ $_rc -eq 0 ] && _DM_MSG="✔ ${_svc} 재시작(restart) 완료" || _DM_MSG="✖ ${_svc} 재시작 실패: $(printf '%s' "$_out" | head -n1)"
+                    fi
+                fi
+                ;;
+            i|I|l|L)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                _dm_show_status "${_DM_VIEW[$_DM_CUR]}"
+                ;;
+            /)
+                tput cnorm 2>/dev/null
+                stty echo 2>/dev/null
+                printf '\n검색 키워드 (빈 값=초기화): '
+                IFS= read -r _DM_SEARCH </dev/tty
+                _DM_CUR=0; _DM_TOP=0
+                _dm_build_view
+                ;;
+            f|F)
+                case "$_DM_FILTER" in
+                    all)     _DM_FILTER="major" ;;
+                    major)   _DM_FILTER="enabled" ;;
+                    enabled) _DM_FILTER="running" ;;
+                    running) _DM_FILTER="changed" ;;
+                    *)       _DM_FILTER="all" ;;
+                esac
+                _DM_CUR=0; _DM_TOP=0
+                _dm_build_view
+                ;;
+            u)
+                [ "$_DM_VCNT" -eq 0 ] && continue
+                local _idx="${_DM_VIEW[$_DM_CUR]}" _svc="${_DM_NAMES[$_idx]}"
+                if [ "${_DM_BOOT[$_idx]}" = "${_DM_INIT_BOOT[$_idx]}" ] && [ "${_DM_RUN[$_idx]}" = "${_DM_INIT_RUN[$_idx]}" ]; then
+                    _DM_MSG="ℹ '${_svc}' 는 초기 상태와 동일합니다."
+                else
+                    _dm_undo_one "$_idx"
+                    _DM_MSG="✔ '${_svc}' 진입 시점 초기 상태로 원복 완료!"
+                fi
+                ;;
+            U)
+                _dm_undo_all
+                ;;
+        esac
+    done
+
+    tput cnorm 2>/dev/null
+    stty sane 2>/dev/null
+    [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+    printf '\n'
+}
 
 # euc-kr -> utf-8 file encoding
 utt() { if ! file -i "$1" | grep -qi utf-8; then
