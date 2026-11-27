@@ -14696,44 +14696,42 @@ _um_render_row() {
 
     local sh_short="${shl##*/}"
     local hom_disp="$hom"
-    [ ${#hom_disp} -gt 22 ] && hom_disp="${hom_disp:0:20}.."
+    [ ${#hom_disp} -gt 20 ] && hom_disp="${hom_disp:0:18}.."
+
+    local memo_disp="$gec"
+    [ "$su" = "1" ] && memo_disp="${memo_disp:+[S] }${memo_disp:-[SUDO]}"
+    [ -z "$memo_disp" ] && memo_disp="-"
+    [ ${#memo_disp} -gt 10 ] && memo_disp="${memo_disp:0:8}.."
 
     local dom_disp="${dom:--}"
-    [ ${#dom_disp} -gt 26 ] && dom_disp="${dom_disp:0:24}.."
+    [ ${#dom_disp} -gt 24 ] && dom_disp="${dom_disp:0:22}.."
 
-    local info_disp=""
-    [ "$su" = "1" ] && info_disp="[SUDO] "
-    if [ -n "$eml" ]; then
-        info_disp="${info_disp}${eml}"
-    elif [ -n "$gec" ]; then
-        info_disp="${info_disp}${gec}"
-    fi
-    [ -z "$info_disp" ] && info_disp="-"
-    [ ${#info_disp} -gt 28 ] && info_disp="${info_disp:0:26}.."
+    local eml_disp="${eml:--}"
+    [ ${#eml_disp} -gt 26 ] && eml_disp="${eml_disp:0:24}.."
 
-    if [ "$_UM_COLS" -ge 118 ]; then
+    if [ "$_UM_COLS" -ge 124 ]; then
         if [ "$is_cur" -eq 1 ]; then
-            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-7.7s %-22.22s %-26.26s %-28.28s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp" "$dom_disp" "$info_disp"
+            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-6.6s %-10.10s %-20.20s %-24.24s %-26.26s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$memo_disp" "$hom_disp" "$dom_disp" "$eml_disp"
         else
-            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-22.22s\033[0m \033[1;33m%-26.26s\033[0m \033[0;37m%-28.28s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp" "$dom_disp" "$info_disp"
+            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-6.6s\033[0m \033[0;35m%-10.10s\033[0m \033[0;36m%-20.20s\033[0m \033[1;33m%-24.24s\033[0m \033[0;37m%-26.26s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$memo_disp" "$hom_disp" "$dom_disp" "$eml_disp"
         fi
-    elif [ "$_UM_COLS" -ge 92 ]; then
+    elif [ "$_UM_COLS" -ge 98 ]; then
         if [ "$is_cur" -eq 1 ]; then
-            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-7.7s %-20.20s %-24.24s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp" "$dom_disp"
+            printf '\033[1;37;44m %s %-15.15s %-7s %5s %-4s %-2s %-6.6s %-10.10s %-20.20s %-24.24s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$memo_disp" "$hom_disp" "$dom_disp"
         else
-            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-20.20s\033[0m \033[1;33m%-24.24s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp" "$dom_disp"
+            printf ' %s \033[1;37m%-15.15s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-6.6s\033[0m \033[0;35m%-10.10s\033[0m \033[0;36m%-20.20s\033[0m \033[1;33m%-24.24s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$memo_disp" "$hom_disp" "$dom_disp"
         fi
     else
         if [ "$is_cur" -eq 1 ]; then
-            printf '\033[1;37;44m %s %-14.14s %-7s %5s %-4s %-2s %-7.7s %-20.20s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$hom_disp"
+            printf '\033[1;37;44m %s %-14.14s %-7s %5s %-4s %-2s %-6.6s %-10.10s %-18.18s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_txt" "$uid" "$htag" "$db" "$sh_short" "$memo_disp" "$hom_disp"
         else
-            printf ' %s \033[1;37m%-14.14s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-7.7s\033[0m \033[0;36m%-20.20s\033[0m\033[K\n' \
-                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$hom_disp"
+            printf ' %s \033[1;37m%-14.14s\033[0m %b%-7s\033[0m \033[0;37m%5s\033[0m %b%-4s\033[0m %b%-2s\033[0m \033[0;37m%-6.6s\033[0m \033[0;35m%-10.10s\033[0m \033[0;36m%-18.18s\033[0m\033[K\n' \
+                "$cur_mark" "$nm" "$st_col" "$st_txt" "$uid" "$hcol" "$htag" "$dbcol" "$db" "$sh_short" "$memo_disp" "$hom_disp"
         fi
     fi
 }
@@ -14808,15 +14806,15 @@ _um_render_full_body() {
         "$hbadge" "$_UM_OS" "$flabel" "$_UM_VCNT" "$_UM_TOTAL" "$cur_pg" "$tot_pg"
     [ -n "$_UM_SEARCH" ] && printf '  검색:\033[1;35m/%s\033[0m' "$_UM_SEARCH"
     printf '\033[K\n'
-    if [ "$_UM_COLS" -ge 118 ]; then
-        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-7s %-22s %-26s %-28s\033[0m\033[K\n' \
-            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR" "DOMAIN" "EMAIL / INFO"
-    elif [ "$_UM_COLS" -ge 92 ]; then
-        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-7s %-20s %-24s\033[0m\033[K\n' \
-            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR" "DOMAIN"
+    if [ "$_UM_COLS" -ge 124 ]; then
+        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-6s %-10s %-20s %-24s %-26s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "MEMO" "HOME_DIR" "DOMAIN" "EMAIL"
+    elif [ "$_UM_COLS" -ge 98 ]; then
+        printf '\033[0;36m   %-15s %-7s %5s %-4s %-2s %-6s %-10s %-20s %-24s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "MEMO" "HOME_DIR" "DOMAIN"
     else
-        printf '\033[0;36m   %-14s %-7s %5s %-4s %-2s %-7s %-20s\033[0m\033[K\n' \
-            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "HOME_DIR"
+        printf '\033[0;36m   %-14s %-7s %5s %-4s %-2s %-6s %-10s %-18s\033[0m\033[K\n' \
+            "ACCOUNT" "STATE" "UID" "HOME" "DB" "SHELL" "MEMO" "HOME_DIR"
     fi
     printf '\033[0;34m%s\033[0m\033[K\n' "$_UM_HLINE"
 
