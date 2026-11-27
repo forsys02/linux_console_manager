@@ -10664,7 +10664,7 @@ _dm_load_services() {
         ' | sort -t$'\t' -k1,1 >"$_tmp_list"
         rm -f "$_tmp_u"
     elif [ "$_DM_INIT" = "sysv_rh" ]; then
-        chkconfig --list 2>/dev/null | awk -v rl="$_DM_RUNLEVEL" '
+        LC_ALL=C chkconfig --list 2>/dev/null | awk -v rl="$_DM_RUNLEVEL" '
             /^[A-Za-z0-9._-]+/ && index($0, rl":") > 0 {
                 nm = $1
                 st = "disabled"
@@ -10733,7 +10733,7 @@ _dm_refresh_one() {
         _DM_BOOT[$idx]="$_bt"
         _DM_RUN[$idx]="$_rn"
     elif [ "$_DM_INIT" = "sysv_rh" ]; then
-        if chkconfig --list "$svc" 2>/dev/null | grep -q "${_DM_RUNLEVEL}:on"; then
+        if LC_ALL=C chkconfig --list "$svc" 2>/dev/null | grep -q "${_DM_RUNLEVEL}:on"; then
             _DM_BOOT[$idx]="enabled"
         else
             _DM_BOOT[$idx]="disabled"
