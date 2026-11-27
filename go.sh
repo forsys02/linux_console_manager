@@ -2615,17 +2615,33 @@ menufunc() {
                     chosen_command=""
                     sel_desc="" # [#h] 이 선택에 붙은 설명. 매 회차 초기화 (이전값 잔류 방지)
                     num_commands=${#chosen_commands[@]} # 줄길이 체크
+                    # [#h/#he 제외 1줄 판정] #h/#he 메타 설명만 붙은 1줄 메뉴도 즉시 실행되도록 실제 명령줄 수를 센다.
+                    #   (일반 # 주석은 [logg] 등 텍스트 표시용 메뉴 보존을 위해 기존처럼 카운트에 포함한다.)
+                    local _non_meta_cnt=0 _first_non_meta_idx=0 _nm_i=0 _nm_tc=""
+                    while [ "$_nm_i" -lt "$num_commands" ]; do
+                        _nm_tc="${chosen_commands[$_nm_i]}"
+                        _nm_tc="${_nm_tc#"${_nm_tc%%[![:space:]]*}"}"
+                        case "$_nm_tc" in
+                            "#h "*|"#he "*|"#h"|"#he") ;;
+                            *)
+                                [ "$_non_meta_cnt" -eq 0 ] && _first_non_meta_idx="$_nm_i"
+                                _non_meta_cnt=$((_non_meta_cnt + 1))
+                                ;;
+                        esac
+                        _nm_i=$((_nm_i + 1))
+                    done
 
                     # 명령줄이 1줄이면 바로 실행 1줄 이상이면 리스트 출력
                     # 1줄은 분기메뉴일때 relay 시켜 또다른 메뉴를 불러오는 효과 %%% %% 를 뺀 나머지가 {...} 한줄만 남을때
                     # readxx $LINENO chosen_command_sub $chosen_command_sub
                     # 한줄짜리
-                    if [ $num_commands -eq 1 ]; then
+                    if [ "$num_commands" -eq 1 ] || [ "$_non_meta_cnt" -eq 1 ]; then
                         scut=$(echo "$title_of_menu" | awk -F'[][]' '{print $2}') # && echo "scut -> $scut" && #readxx
                         updatescut
                         # relay
-                        chosen_command=${chosen_commands[0]}
-                    elif [ $num_commands -gt 1 ]; then
+                        chosen_command=${chosen_commands[$_first_non_meta_idx]}
+                        sel_desc="${chosen_desc[$_first_non_meta_idx]-}"
+                    elif [ "$num_commands" -gt 1 ]; then
 
                         # go.env 환경파일에서 가져온 명령문 출력 // CMDs // command list print func
                         ####################### choice_list #######################
@@ -3631,7 +3647,7 @@ menufunc() {
                         # 한줄짜리 한줄만 하나만
                         # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
                         #[ $num_commands -eq 1 ] && break
-                        if [ "$num_commands" -eq 1 ]; then
+                        if [ "$num_commands" -eq 1 ] || [ "${_non_meta_cnt:-0}" -eq 1 ]; then
                             # 이전에는 ooldscut(파일순서 기준 최근 메뉴) 를 보고 이동해서
                             # 실제 경로와 다른곳으로 튀거나 아무 이동도 안 하는 경우가 있었음
                             # 이력 스택의 바로 위 화면으로 정확히 복귀
