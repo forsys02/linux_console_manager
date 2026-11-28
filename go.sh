@@ -16716,46 +16716,638 @@ Containers:
 }
 
 # ==============================================================================
-# GitHub Compose 자동 배포: dkgit (Popular Self-Hosted Apps 1-Click Deploy)
-# - 공식 GitHub 레포에서 compose.yml/docker-compose.yml 을 제공하는 16개 인기 앱 + Custom URL
-# - git clone --depth 1 -> compose 자동탐지 -> .env 자동복사 -> 포트충돌 체크 -> compose up -d
+# GitHub & 내장 템플릿 Compose 자동 배포: dkgit (Popular Self-Hosted Apps 1-Click Deploy)
+# - [g] GitHub Compose 탭: 공식 GitHub 레포 16개 인기 앱 + Custom URL
+# - [t] 내장 템플릿 탭: 검증 완료된 15개 내장 Docker Compose 원클릭(Jellyfin/NPM/Portainer 등)
+# - 타 경로 중복 실행 자동 감지 (docker ps -a 스캔 → [타경로실행] 배지 + 중복 설치 차단)
 # - 기본 설치 경로 /opt/docker-apps/<app> (dkms 스캔 경로에 자동 포함)
 # ==============================================================================
+_dkgit_gen_builtin() {
+    local _app="$1" _dir="$2" _pubip="$3"
+    mkdir -p "$_dir" || return 1
+    local _cf="${_dir}/docker-compose.yml"
+
+    case "$_app" in
+        jellyfin)
+            mkdir -p "${_dir}/config" "${_dir}/cache" "${_dir}/media/movies" "${_dir}/media/tvshows"
+            chown -R 1000:1000 "${_dir}/config" "${_dir}/cache" "${_dir}/media" 2>/dev/null || true
+            local _dri_block=""
+            if [ -d /dev/dri ]; then
+                local _use_gpu=""
+                read -p "하드웨어 트랜스코딩(/dev/dri GPU)을 연결할까요? [Y/n]: " _use_gpu </dev/tty
+                if ! printf '%s' "$_use_gpu" | grep -qE '^[Nn]$'; then
+                    _dri_block=$'    devices:\n      - /dev/dri:/dev/dri'
+                fi
+            fi
+            cat > "$_cf" <<EOF
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: "1000:1000"
+    environment:
+      - TZ=Asia/Seoul
+    ports:
+      - "8096:8096"
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - ./media:/media:rw
+${_dri_block}
+    restart: unless-stopped
+EOF
+            ;;
+        media-center)
+            mkdir -p "${_dir}/movies" "${_dir}/tvshows" "${_dir}/music" \
+                     "${_dir}/jellyfin_config" "${_dir}/jellyfin_cache" \
+                     "${_dir}/navidrome_data" "${_dir}/filebrowser"
+            [ -f "${_dir}/filebrowser/database.db" ] || touch "${_dir}/filebrowser/database.db"
+            chmod 660 "${_dir}/filebrowser/database.db" 2>/dev/null || true
+            chown -R 1000:1000 "$_dir" 2>/dev/null || true
+            cat > "$_cf" <<'EOF'
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: media_jellyfin
+    user: "1000:1000"
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./jellyfin_config:/config
+      - ./jellyfin_cache:/cache
+      - ./movies:/media/movies:rw
+      - ./tvshows:/media/tvshows:rw
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+    networks:
+      - media_network
+
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: music_navidrome
+    user: "1000:1000"
+    ports:
+      - "4533:4533"
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./navidrome_data:/data
+      - ./music:/music:rw
+    restart: unless-stopped
+    networks:
+      - media_network
+
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: file_browser
+    user: "1000:1000"
+    ports:
+      - "8082:80"
+    volumes:
+      - ./filebrowser/database.db:/database.db
+      - ./movies:/srv/movies:rw
+      - ./tvshows:/srv/tvshows:rw
+      - ./music:/srv/music:rw
+    environment:
+      - TZ=Asia/Seoul
+    restart: unless-stopped
+    networks:
+      - media_network
+
+networks:
+  media_network:
+    driver: bridge
+EOF
+            ;;
+        portainer)
+            mkdir -p "${_dir}/data"
+            cat > "$_cf" <<'EOF'
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    restart: unless-stopped
+EOF
+            ;;
+        npm)
+            mkdir -p "${_dir}/data" "${_dir}/letsencrypt"
+            cat > "$_cf" <<'EOF'
+services:
+  app:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+EOF
+            ;;
+        wg-easy)
+            mkdir -p "${_dir}/data"
+            local _wg_host="" _wg_pw=""
+            read -p "WG_HOST 공인 IP 또는 도메인 [${_pubip}]: " _wg_host </dev/tty
+            [ -z "$_wg_host" ] && _wg_host="$_pubip"
+            read -p "웹 관리 UI 비밀번호 (Enter=자동생성): " _wg_pw </dev/tty
+            if [ -z "$_wg_pw" ]; then
+                _wg_pw="$(head -c 16 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 12)"
+                [ -z "$_wg_pw" ] && _wg_pw="wg$(date +%s)"
+                _dk_p '\033[1;33m  → 자동 생성된 wg-easy 비밀번호: %s\033[0m\n' "$_wg_pw"
+            fi
+            cat > "$_cf" <<EOF
+services:
+  wg-easy:
+    image: weejewel/wg-easy:latest
+    container_name: wg-easy
+    environment:
+      - WG_HOST=${_wg_host}
+      - PASSWORD=${_wg_pw}
+      - WG_PORT=51820
+      - WG_DEFAULT_ADDRESS=10.8.0.x
+      - WG_DEFAULT_DNS=1.1.1.1,168.126.63.1
+      - WG_MTU=1420
+    volumes:
+      - ./data:/etc/wireguard
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+EOF
+            ;;
+        vaultwarden)
+            mkdir -p "${_dir}/vw-data"
+            cat > "$_cf" <<'EOF'
+services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    environment:
+      - TZ=Asia/Seoul
+      - SIGNUPS_ALLOWED=true
+    volumes:
+      - ./vw-data:/data
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+EOF
+            ;;
+        wordpress)
+            mkdir -p "${_dir}/db" "${_dir}/data"
+            cat > "$_cf" <<'EOF'
+services:
+  db:
+    image: mysql:8.0
+    volumes:
+      - ./db:/var/lib/mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=wppass
+      - MYSQL_DATABASE=wp
+      - MYSQL_USER=wp
+      - MYSQL_PASSWORD=wppass
+    networks:
+      - wordpress
+
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wppass
+      WORDPRESS_DB_NAME: wp
+    volumes:
+      - ./data:/var/www/html
+    networks:
+      - wordpress
+
+  phpmyadmin:
+    depends_on:
+      - db
+    image: phpmyadmin/phpmyadmin:latest
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+    ports:
+      - "3300:80"
+    networks:
+      - wordpress
+
+networks:
+  wordpress:
+    driver: bridge
+EOF
+            ;;
+        nextcloud)
+            mkdir -p "${_dir}/nextcloud" "${_dir}/data" "${_dir}/apps" "${_dir}/theme" "${_dir}/db"
+            cat > "$_cf" <<'EOF'
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    environment:
+      - MYSQL_ROOT_PASSWORD=ncrootpass
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=nextcloudpass
+    volumes:
+      - ./db:/var/lib/mysql
+
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    restart: unless-stopped
+    ports:
+      - "8585:80"
+    depends_on:
+      - db
+    volumes:
+      - ./nextcloud:/var/www/html
+      - ./data:/var/www/html/data
+      - ./apps:/var/www/html/custom_apps
+      - ./theme:/var/www/html/themes
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=nextcloudpass
+EOF
+            ;;
+        caddy)
+            mkdir -p "${_dir}/site" "${_dir}/data" "${_dir}/config"
+            if [ ! -f "${_dir}/Caddyfile" ]; then
+                cat > "${_dir}/Caddyfile" <<'EOF'
+:80 {
+    root * /usr/share/caddy
+    file_server
+}
+EOF
+            fi
+            if [ ! -f "${_dir}/site/index.html" ]; then
+                printf '<h1>Caddy is running!</h1>\n' > "${_dir}/site/index.html"
+            fi
+            cat > "$_cf" <<'EOF'
+services:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./site:/usr/share/caddy
+      - ./data:/data
+      - ./config:/config
+EOF
+            ;;
+        traefik)
+            cat > "$_cf" <<'EOF'
+services:
+  traefik:
+    image: traefik:v3.2
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+EOF
+            ;;
+        guacamole)
+            mkdir -p "${_dir}/init" "${_dir}/data" "${_dir}/drive" "${_dir}/record"
+            chmod +x "${_dir}/init" 2>/dev/null || true
+            if [ ! -s "${_dir}/init/initdb.sql" ]; then
+                _dk_p '\033[1;33m  → Guacamole DB 초기화 SQL(initdb.sql) 자동 생성 중...\033[0m\n'
+                if ! docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgres > "${_dir}/init/initdb.sql"; then
+                    _dk_p '\033[1;31m[실패] initdb.sql 생성 실패\033[0m\n'
+                    return 1
+                fi
+            fi
+            cat > "$_cf" <<'EOF'
+services:
+  guacd:
+    container_name: guacd_compose
+    image: guacamole/guacd:latest
+    restart: unless-stopped
+    volumes:
+      - ./drive:/drive:rw
+      - ./record:/record:rw
+    networks:
+      - guacnetwork
+
+  postgres:
+    container_name: postgres_guacamole
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data/guacamole
+      POSTGRES_DB: guacamole_db
+      POSTGRES_USER: guacamole_user
+      POSTGRES_PASSWORD: guacamole_pass_1234
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - ./data:/var/lib/postgresql/data
+    networks:
+      - guacnetwork
+
+  guacamole:
+    container_name: guacamole_compose
+    image: guacamole/guacamole:latest
+    restart: unless-stopped
+    depends_on:
+      - guacd
+      - postgres
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: guacamole_pass_1234
+    ports:
+      - "8080:8080"
+    networks:
+      - guacnetwork
+
+networks:
+  guacnetwork:
+    driver: bridge
+EOF
+            _dk_p '\033[1;36m  ℹ Guacamole 초기 접속: http://%s:8080/guacamole (guacadmin / guacadmin)\033[0m\n' "$_pubip"
+            ;;
+        semaphore)
+            local _sem_key
+            _sem_key="$(head -c 32 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -d '\n')"
+            [ -z "$_sem_key" ] && _sem_key="gs72mPntFATGJs9qK0pQ0rKtfidlexiMjYCH9gWKhTU="
+            cat > "$_cf" <<EOF
+services:
+  mysql:
+    restart: unless-stopped
+    image: mysql:8.0
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      MYSQL_DATABASE: semaphore
+      MYSQL_USER: semaphore
+      MYSQL_PASSWORD: semaphore
+
+  semaphore:
+    restart: unless-stopped
+    image: semaphoreui/semaphore:latest
+    ports:
+      - "3000:3000"
+    environment:
+      SEMAPHORE_DB_USER: semaphore
+      SEMAPHORE_DB_PASS: semaphore
+      SEMAPHORE_DB_HOST: mysql
+      SEMAPHORE_DB_PORT: 3306
+      SEMAPHORE_DB_DIALECT: mysql
+      SEMAPHORE_DB: semaphore
+      SEMAPHORE_PLAYBOOK_PATH: /tmp/semaphore/
+      SEMAPHORE_ADMIN_PASSWORD: changeme
+      SEMAPHORE_ADMIN_NAME: admin
+      SEMAPHORE_ADMIN_EMAIL: admin@localhost
+      SEMAPHORE_ADMIN: admin
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${_sem_key}
+    depends_on:
+      - mysql
+EOF
+            ;;
+        haos)
+            mkdir -p "${_dir}/config"
+            cat > "$_cf" <<'EOF'
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+EOF
+            ;;
+        nagios)
+            mkdir -p "${_dir}/nagios/etc" "${_dir}/nagios/var" "${_dir}/custom-plugins" "${_dir}/nagiosgraph/var" "${_dir}/nagiosgraph/etc"
+            cat > "$_cf" <<'EOF'
+services:
+  nagios4:
+    image: jasonrivers/nagios:latest
+    container_name: nagios4
+    restart: unless-stopped
+    volumes:
+      - ./nagios/etc:/opt/nagios/etc
+      - ./nagios/var:/opt/nagios/var
+      - ./custom-plugins:/opt/Custom-Nagios-Plugins
+      - ./nagiosgraph/var:/opt/nagiosgraph/var
+      - ./nagiosgraph/etc:/opt/nagiosgraph/etc
+    ports:
+      - "3080:80"
+EOF
+            ;;
+        lamp)
+            mkdir -p "${_dir}/www" "${_dir}/db_data"
+            cat > "${_dir}/Dockerfile.php" <<'EOF'
+FROM php:8-apache
+RUN docker-php-ext-install mysqli pdo pdo_mysql && a2enmod rewrite
+EOF
+            if [ ! -f "${_dir}/www/index.php" ]; then
+                template_copy dk_lamp_index.php "${_dir}/www/index.php" >/dev/null 2>&1 || printf '<?php phpinfo(); ?>\n' > "${_dir}/www/index.php"
+            fi
+            cat > "$_cf" <<'EOF'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.php
+    container_name: lamp_php_apache_app
+    ports:
+      - "8080:80"
+    volumes:
+      - ./www:/var/www/html
+    networks:
+      - lamp_network
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    container_name: lamp_mysql_db
+    environment:
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: myuser
+      MYSQL_PASSWORD: mypassword
+      MYSQL_ROOT_PASSWORD: myrootpassword
+    volumes:
+      - ./db_data:/var/lib/mysql
+    networks:
+      - lamp_network
+    restart: unless-stopped
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: lamp_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: myrootpassword
+    networks:
+      - lamp_network
+    depends_on:
+      - db
+
+networks:
+  lamp_network:
+    driver: bridge
+EOF
+            ;;
+        *)
+            _dk_p '\033[1;31m[오류] 알 수 없는 내장 템플릿: %s\033[0m\n' "$_app"
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+_dkgit_manage_dir() {
+    local _nm="$1" _dir="$2" _cf="$3" _allow_delete="${4:-1}"
+    local _ecfile=""
+    if [ -n "$_cf" ] && [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
+        _ecfile="${_dir}/${_cf}"
+    else
+        _ecfile="$(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | head -n 1)"
+    fi
+    local _ecdir="${_dir}"
+    [ -n "$_ecfile" ] && _ecdir="$(dirname "$_ecfile")"
+
+    _dk_p '\n\033[1;33m[기존 설치 앱 관리: %s]\033[0m\n' "$_dir"
+    if [ -d "${_dir}/.git" ]; then
+        _dk_p '  1) 업데이트 & 재기동 (git pull + compose pull/up -d)\n'
+    else
+        _dk_p '  1) 이미지 업데이트 & 재기동 (compose pull + up -d)\n'
+    fi
+    _dk_p '  2) 재시작 (compose restart)\n'
+    _dk_p '  3) 로그 보기 (compose logs --tail 80)\n'
+    _dk_p '  4) 중지 (compose down)\n'
+    _dk_p '  5) compose / .env 편집 (vi)\n'
+    [ "$_allow_delete" = "1" ] && _dk_p '  6) 완전 삭제 (compose down + 폴더 삭제)\n'
+    _dk_p '  0) 취소\n'
+
+    local _act=""
+    read -p ">>> 작업 선택 [1]: " _act </dev/tty
+    [ -z "$_act" ] && _act="1"
+    case "$_act" in
+        1)
+            [ -d "${_dir}/.git" ] && ( cd "$_dir" && git pull --ff-only 2>/dev/null || true )
+            if [ -n "$_ecfile" ]; then
+                _dk_compose_run "$_ecdir" -f "$_ecfile" pull && _dk_compose_run "$_ecdir" -f "$_ecfile" up -d && _dk_compose_run "$_ecdir" -f "$_ecfile" ps
+            fi
+            ;;
+        2) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" restart && _dk_compose_run "$_ecdir" -f "$_ecfile" ps ;;
+        3) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" logs --tail=80 ;;
+        4) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down ;;
+        5)
+            [ -f "${_ecdir}/.env" ] && ${EDITOR:-vi} "${_ecdir}/.env"
+            [ -n "$_ecfile" ] && ${EDITOR:-vi} "$_ecfile"
+            ;;
+        6)
+            if [ "$_allow_delete" = "1" ]; then
+                local _del=""
+                read -p "정말 ${_nm} 을(를) 중지하고 ${_dir} 를 삭제할까요? [y/N]: " _del </dev/tty
+                if printf '%s' "$_del" | grep -qE '^[Yy]$'; then
+                    [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down
+                    rm -rf "$_dir" && _dk_p '\033[1;32m✔ 삭제 완료: %s\033[0m\n' "$_dir"
+                fi
+            fi
+            ;;
+        *) return 0 ;;
+    esac
+    read -p $'\n[Enter] 메뉴로 돌아가기...' _ </dev/tty
+    return 0
+}
+
 dkgit() {
     local IFS=$' \t\n'
     _dk_detect_env || return 1
-    if ! command -v git >/dev/null 2>&1; then
-        _dk_p '\033[1;33m[안내] git 이 설치되어 있지 않습니다.\033[0m\n'
-        local _gi=""
-        read -p "지금 git 을 설치할까요? [Y/n]: " _gi </dev/tty
-        if ! printf '%s' "$_gi" | grep -qE '^[Nn]$'; then
-            yyay git || { _dk_p '\033[1;31m[실패] git 설치 실패\033[0m\n'; return 1; }
-        else
-            return 1
-        fi
-    fi
 
     local _base="${DKGIT_BASE:-/opt/docker-apps}"
     mkdir -p "$_base" 2>/dev/null || { _dk_p '\033[1;31m[오류] 디렉터리 생성 실패: %s\033[0m\n' "$_base"; return 1; }
 
-    # 카탈로그: "이름|owner/repo|compose상대경로|기본포트|카테고리|설명"
+    local _mode="git"
+    case "${1:-}" in
+        -t|--template|template|builtin) _mode="builtin" ;;
+    esac
+
+    # GitHub 카탈로그: "이름|owner/repo|compose상대경로|기본포트|카테고리|설명|중복감지정규식"
     local -a _DKGIT_CAT=(
-        "uptime-kuma|louislam/uptime-kuma|compose.yaml|3001|모니터링|실시간 서버·웹 업타임 모니터링"
-        "dockge|louislam/dockge|compose.yaml|5001|관리|웹 UI Docker Compose 스택 관리자"
-        "dozzle|amir20/dozzle|docker-compose.yml|8080|모니터링|실시간 Docker 로그 웹 뷰어"
-        "umami|umami-software/umami|docker-compose.yml|3000|분석|프라이버시 친화 웹 방문자 통계"
-        "open-webui|open-webui/open-webui|docker-compose.yaml|3000|AI|Ollama/OpenAI ChatGPT 스타일 웹 UI"
-        "n8n|n8n-io/n8n-hosting|docker-compose/withPostgres/docker-compose.yml|5678|자동화|노코드 워크플로우 자동화"
-        "dify|langgenius/dify|docker/docker-compose.yaml|80|AI|LLM 앱·에이전트 빌더 플랫폼"
-        "flowise|FlowiseAI/Flowise|docker/docker-compose.yml|3000|AI|드래그앤드롭 LLM 플로우 빌더"
-        "immich|immich-app/immich|docker/docker-compose.yml|2283|사진|구글 포토 대체 AI 사진 백업"
-        "paperless-ngx|paperless-ngx/paperless-ngx|docker/compose/docker-compose.sqlite.yml|8000|문서|PDF·문서 OCR 아카이빙"
-        "stirling-pdf|Stirling-Tools/Stirling-PDF|exampleYmlFiles/docker-compose-latest.yml|8080|문서|PDF 병합·분할·변환 만능 웹툴"
-        "memos|usememos/memos|scripts/compose.yaml|5230|메모|초경량 개인 메모·트윗 스타일 노트"
-        "nocodb|nocodb/nocodb|docker-compose/2_pg/docker-compose.yml|8080|DB|오픈소스 Airtable (노코드 DB)"
-        "karakeep|karakeep-app/karakeep|docker/docker-compose.yml|3000|북마크|AI 태그 북마크·읽기목록 아카이브"
-        "actual|actualbudget/actual|docker-compose.yml|5006|가계부|개인 가계부·예산 관리 웹앱"
-        "linkwarden|linkwarden/linkwarden|docker-compose.yml|3000|북마크|웹페이지 영구 보관 북마크 매니저"
+        "uptime-kuma|louislam/uptime-kuma|compose.yaml|3001|모니터링|실시간 서버·웹 업타임 모니터링|uptime-kuma"
+        "dockge|louislam/dockge|compose.yaml|5001|관리|웹 UI Docker Compose 스택 관리자|dockge"
+        "dozzle|amir20/dozzle|docker-compose.yml|8080|모니터링|실시간 Docker 로그 웹 뷰어|dozzle"
+        "umami|umami-software/umami|docker-compose.yml|3000|분석|프라이버시 친화 웹 방문자 통계|umami"
+        "open-webui|open-webui/open-webui|docker-compose.yaml|3000|AI|Ollama/OpenAI ChatGPT 스타일 웹 UI|open-webui"
+        "n8n|n8n-io/n8n-hosting|docker-compose/withPostgres/docker-compose.yml|5678|자동화|노코드 워크플로우 자동화|n8nio/n8n|n8n"
+        "dify|langgenius/dify|docker/docker-compose.yaml|80|AI|LLM 앱·에이전트 빌더 플랫폼|langgenius/dify"
+        "flowise|FlowiseAI/Flowise|docker/docker-compose.yml|3000|AI|드래그앤드롭 LLM 플로우 빌더|flowise"
+        "immich|immich-app/immich|docker/docker-compose.yml|2283|사진|구글 포토 대체 AI 사진 백업|immich-server|immich_server"
+        "paperless-ngx|paperless-ngx/paperless-ngx|docker/compose/docker-compose.sqlite.yml|8000|문서|PDF·문서 OCR 아카이빙|paperless-ngx"
+        "stirling-pdf|Stirling-Tools/Stirling-PDF|exampleYmlFiles/docker-compose-latest.yml|8080|문서|PDF 병합·분할·변환 만능 웹툴|stirling-pdf|stirlingpdf"
+        "memos|usememos/memos|scripts/compose.yaml|5230|메모|초경량 개인 메모·트윗 스타일 노트|neosmemo/memos|usememos/memos"
+        "nocodb|nocodb/nocodb|docker-compose/2_pg/docker-compose.yml|8080|DB|오픈소스 Airtable (노코드 DB)|nocodb"
+        "karakeep|karakeep-app/karakeep|docker/docker-compose.yml|3000|북마크|AI 태그 북마크·읽기목록 아카이브|karakeep|hoarder"
+        "actual|actualbudget/actual|docker-compose.yml|5006|가계부|개인 가계부·예산 관리 웹앱|actualbudget|actual-server"
+        "linkwarden|linkwarden/linkwarden|docker-compose.yml|3000|북마크|웹페이지 영구 보관 북마크 매니저|linkwarden"
+    )
+
+    # 내장 템플릿 카탈로그: "이름|BUILTIN|docker-compose.yml|기본포트|카테고리|설명|중복감지정규식"
+    local -a _DKGIT_BUILTIN=(
+        "jellyfin|BUILTIN|docker-compose.yml|8096|미디어|오픈소스 미디어 스트리밍 서버 (단독)|jellyfin"
+        "media-center|BUILTIN|docker-compose.yml|8096|미디어|Jellyfin+Navidrome+FileBrowser 3종|media_jellyfin|navidrome"
+        "portainer|BUILTIN|docker-compose.yml|9000|관리|Docker 웹 GUI 통합 관리자 (CE)|portainer"
+        "npm|BUILTIN|docker-compose.yml|81|프록시|Nginx Proxy Manager (SSL 리버스 프록시)|nginx-proxy-manager"
+        "wg-easy|BUILTIN|docker-compose.yml|51821|VPN|WireGuard VPN + 웹 관리 UI|wg-easy"
+        "vaultwarden|BUILTIN|docker-compose.yml|8080|보안|Bitwarden 호환 경량 비밀번호 관리자|vaultwarden"
+        "wordpress|BUILTIN|docker-compose.yml|8080|웹/CMS|WordPress + MySQL 8 + phpMyAdmin|wordpress"
+        "nextcloud|BUILTIN|docker-compose.yml|8585|클라우드|개인 클라우드 스토리지 + MariaDB|nextcloud"
+        "caddy|BUILTIN|docker-compose.yml|80|프록시|자동 HTTPS 경량 웹서버·리버스 프록시|caddy"
+        "traefik|BUILTIN|docker-compose.yml|8080|프록시|Docker 자동 연동 리버스 프록시 (v3)|traefik"
+        "guacamole|BUILTIN|docker-compose.yml|8080|원격|브라우저 기반 RDP/VNC/SSH 게이트웨이|guacamole"
+        "semaphore|BUILTIN|docker-compose.yml|3000|자동화|Ansible WebUI 자동화 서버 + MySQL|semaphoreui/semaphore|semaphore"
+        "haos|BUILTIN|docker-compose.yml|8123|IoT|Home Assistant 스마트홈 허브|home-assistant|homeassistant"
+        "nagios|BUILTIN|docker-compose.yml|3080|모니터링|Nagios 4 서버·네트워크 모니터링|nagios"
+        "lamp|BUILTIN|docker-compose.yml|8080|웹/개발|Apache + PHP 8 + MySQL 8 + phpMyAdmin|lamp_php_apache_app"
     )
 
     local _pubip="${publicip:-}"
@@ -16764,43 +17356,73 @@ dkgit() {
 
     while true; do
         clear
-        _dk_p '\033[1;36m◈ GitHub Compose 자동 배포 [dkgit]\033[0m  설치경로: \033[1;33m%s\033[0m  Compose: \033[1;32m%s\033[0m\n' "$_base" "$_DK_COMPOSE_BIN"
-        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
-        _dk_p '  번호만 고르면 git clone → .env 자동생성 → 포트충돌 체크 → compose up -d 원클릭!\n'
-        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+        # 전체 컨테이너 1회 스캔 캐시 (다른 폴더/단독 실행 중복 감지용)
+        local _ps_cache=""
+        _ps_cache="$(docker ps -a --format '{{.Names}}|{{.Image}}|{{.State}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Ports}}' 2>/dev/null)"
 
-        local _i=0 _row _rest _nm _rp _cf _pt _cg _ds _st
-        for _row in "${_DKGIT_CAT[@]}"; do
+        local -a _CUR_CAT=()
+        if [ "$_mode" = "builtin" ]; then
+            _CUR_CAT=("${_DKGIT_BUILTIN[@]}")
+            _dk_p '\033[1;35m◈ 내장 템플릿 원클릭 배포 [dkgit -t]\033[0m  설치경로: \033[1;33m%s\033[0m  Compose: \033[1;32m%s\033[0m\n' "$_base" "$_DK_COMPOSE_BIN"
+            _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+            _dk_p '  검증된 내장 Compose 템플릿 자동 생성 → 권한/사전파일 준비 → 포트체크 → compose up -d!\n'
+        else
+            _CUR_CAT=("${_DKGIT_CAT[@]}")
+            _dk_p '\033[1;36m◈ GitHub Compose 자동 배포 [dkgit]\033[0m  설치경로: \033[1;33m%s\033[0m  Compose: \033[1;32m%s\033[0m\n' "$_base" "$_DK_COMPOSE_BIN"
+            _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+            _dk_p '  번호만 고르면 git clone → .env 자동생성 → 포트충돌 체크 → compose up -d 원클릭!\n'
+        fi
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+
+        local _i=0 _row _rest _nm _rp _cf _pt _cg _ds _pat _st _ext_hit
+        for _row in "${_CUR_CAT[@]}"; do
             _i=$((_i + 1))
             _nm="${_row%%|*}"; _rest="${_row#*|}"
             _rp="${_rest%%|*}"; _rest="${_rest#*|}"
             _cf="${_rest%%|*}"; _rest="${_rest#*|}"
             _pt="${_rest%%|*}"; _rest="${_rest#*|}"
-            _cg="${_rest%%|*}"; _ds="${_rest#*|}"
+            _cg="${_rest%%|*}"; _rest="${_rest#*|}"
+            _ds="${_rest%%|*}"; _pat="${_rest#*|}"
+            [ "$_pat" = "$_ds" ] && _pat="$_nm"
+
             if [ -d "${_base}/${_nm}" ]; then
-                _st='\033[1;32m[설치됨]\033[0m'
+                _st='\033[1;32m[설치됨]  \033[0m'
             else
-                _st='        '
+                _ext_hit=""
+                if [ -n "$_ps_cache" ] && [ -n "$_pat" ]; then
+                    _ext_hit="$(printf '%s\n' "$_ps_cache" | awk -F'|' -v pat="(^|[|/_-])(${_pat})" 'tolower($1 "|" $2) ~ tolower(pat) {print; exit}')"
+                fi
+                if [ -n "$_ext_hit" ]; then
+                    _st='\033[1;33m[타경로실행]\033[0m'
+                else
+                    _st='          '
+                fi
             fi
-            _dk_p '  \033[1;37m%2d)\033[0m %-14s %b \033[0;36m[%-4s]\033[0m %-32s \033[0;90m:%-4s\033[0m\n' \
+            _dk_p '  \033[1;37m%2d)\033[0m %-14s %b \033[0;36m[%-4s]\033[0m %-34s \033[0;90m:%-4s\033[0m\n' \
                 "$_i" "$_nm" "$_st" "$_cg" "$_ds" "$_pt"
         done
 
-        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
-        _dk_p '  \033[1;33m[u]\033[0m Custom GitHub URL 직접 입력   \033[1;33m[l]\033[0m 설치된 앱 상태(ps)   \033[1;33m[q/0]\033[0m 돌아가기\n'
-        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+        if [ "$_mode" = "builtin" ]; then
+            _dk_p '  \033[1;36m[g]\033[0m GitHub 앱 전환(16종)  \033[1;33m[u]\033[0m Custom URL  \033[1;33m[l]\033[0m 실행 상태(ps)  \033[1;33m[q/0]\033[0m 돌아가기\n'
+        else
+            _dk_p '  \033[1;35m[t]\033[0m 내장 템플릿 전환(15종·Jellyfin등)  \033[1;33m[u]\033[0m Custom URL  \033[1;33m[l]\033[0m 상태(ps)  \033[1;33m[q/0]\033[0m 종료\n'
+        fi
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
 
         local _sel=""
-        read -p ">>> 선택 [1-${#_DKGIT_CAT[@]}, u, l, q] : " _sel </dev/tty
+        read -p ">>> 선택 [1-${#_CUR_CAT[@]}, t/g, u, l, q] : " _sel </dev/tty
         case "$_sel" in
             ""|0|q|Q|b|B) return 0 ;;
+            t|T) _mode="builtin"; continue ;;
+            g|G) _mode="git"; continue ;;
             l|L)
                 echo
                 _dk_p '\033[1;36m◈ 설치된 앱 폴더 (%s)\033[0m\n' "$_base"
                 ls -1 "$_base" 2>/dev/null | sed 's/^/  - /'
                 echo
-                _dk_p '\033[1;36m◈ 실행 중 Docker 컨테이너\033[0m\n'
-                docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+                _dk_p '\033[1;36m◈ 실행 중 Docker 컨테이너 (경로 포함)\033[0m\n'
+                docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Label "com.docker.compose.project.working_dir"}}\t{{.Ports}}' 2>/dev/null
                 read -p $'\n[Enter] 계속...' _ </dev/tty
                 continue
                 ;;
@@ -16814,128 +17436,160 @@ dkgit() {
                     *) _dk_p '\033[1;31m[오류] 올바른 GitHub URL 형식이 아닙니다.\033[0m\n'; sleep 1.5; continue ;;
                 esac
                 _cname="$(basename "${_url%.git}")"
-                _nm="$_cname"; _rp="$_url"; _cf="AUTO"; _pt="8080"; _ds="Custom GitHub Repo"
+                _nm="$_cname"; _rp="$_url"; _cf="AUTO"; _pt="8080"; _ds="Custom GitHub Repo"; _pat="$_cname"
                 ;;
             *)
-                if ! printf '%s' "$_sel" | grep -qE '^[0-9]+$' || [ "$_sel" -lt 1 ] || [ "$_sel" -gt "${#_DKGIT_CAT[@]}" ]; then
+                if ! printf '%s' "$_sel" | grep -qE '^[0-9]+$' || [ "$_sel" -lt 1 ] || [ "$_sel" -gt "${#_CUR_CAT[@]}" ]; then
                     _dk_p '\033[1;31m잘못된 선택입니다.\033[0m\n'; sleep 1; continue
                 fi
-                _row="${_DKGIT_CAT[$((_sel - 1))]}"
+                _row="${_CUR_CAT[$((_sel - 1))]}"
                 _nm="${_row%%|*}"; _rest="${_row#*|}"
                 _rp="${_rest%%|*}"; _rest="${_rest#*|}"
                 _cf="${_rest%%|*}"; _rest="${_rest#*|}"
                 _pt="${_rest%%|*}"; _rest="${_rest#*|}"
-                _cg="${_rest%%|*}"; _ds="${_rest#*|}"
-                _rp="https://github.com/${_rp}.git"
+                _cg="${_rest%%|*}"; _rest="${_rest#*|}"
+                _ds="${_rest%%|*}"; _pat="${_rest#*|}"
+                [ "$_pat" = "$_ds" ] && _pat="$_nm"
+                [ "$_rp" != "BUILTIN" ] && _rp="https://github.com/${_rp}.git"
                 ;;
         esac
 
         local _dir="${_base}/${_nm}"
         echo
         _dk_p '\033[1;36m▶ 대상: %s (%s)\033[0m\n' "$_nm" "$_ds"
-        _dk_p '  레포: %s\n  경로: %s\n' "$_rp" "$_dir"
-
-        # 이미 설치된 폴더가 있으면 관리 메뉴 제공
-        if [ -d "$_dir" ]; then
-            local _ecfile=""
-            if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
-                _ecfile="${_dir}/${_cf}"
-            else
-                _ecfile="$(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | head -n 1)"
-            fi
-            local _ecdir="${_dir}"
-            [ -n "$_ecfile" ] && _ecdir="$(dirname "$_ecfile")"
-            _dk_p '\n\033[1;33m[이미 설치된 앱입니다]\033[0m\n'
-            _dk_p '  1) 업데이트 & 재기동 (git pull + compose up -d)\n'
-            _dk_p '  2) 재시작 (compose restart)\n'
-            _dk_p '  3) 로그 보기 (compose logs --tail 60)\n'
-            _dk_p '  4) 중지 (compose down)\n'
-            _dk_p '  5) compose / .env 편집 (vi)\n'
-            _dk_p '  6) 완전 삭제 (compose down + 폴더 삭제)\n'
-            _dk_p '  0) 취소\n'
-            local _act=""
-            read -p ">>> 작업 선택 [1]: " _act </dev/tty
-            [ -z "$_act" ] && _act="1"
-            case "$_act" in
-                1)
-                    ( cd "$_dir" && git pull --ff-only 2>/dev/null || true )
-                    if [ -n "$_ecfile" ]; then
-                        _dk_compose_run "$_ecdir" -f "$_ecfile" pull && _dk_compose_run "$_ecdir" -f "$_ecfile" up -d && _dk_compose_run "$_ecdir" -f "$_ecfile" ps
-                    fi
-                    ;;
-                2) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" restart && _dk_compose_run "$_ecdir" -f "$_ecfile" ps ;;
-                3) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" logs --tail=80 ;;
-                4) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down ;;
-                5)
-                    [ -f "${_ecdir}/.env" ] && ${EDITOR:-vi} "${_ecdir}/.env"
-                    [ -n "$_ecfile" ] && ${EDITOR:-vi} "$_ecfile"
-                    ;;
-                6)
-                    local _del=""
-                    read -p "정말 ${_nm} 을(를) 중지하고 ${_dir} 를 삭제할까요? [y/N]: " _del </dev/tty
-                    if printf '%s' "$_del" | grep -qE '^[Yy]$'; then
-                        [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down
-                        rm -rf "$_dir" && _dk_p '\033[1;32m✔ 삭제 완료: %s\033[0m\n' "$_dir"
-                    fi
-                    ;;
-                *) continue ;;
-            esac
-            read -p $'\n[Enter] 메뉴로 돌아가기...' _ </dev/tty
-            continue
-        fi
-
-        # 1) git clone --depth 1
-        _dk_p '\n\033[1;33m[1/4] git clone --depth 1 진행 중...\033[0m\n'
-        if ! git clone --depth 1 "$_rp" "$_dir"; then
-            _dk_p '\033[1;31m[실패] git clone 실패: %s\033[0m\n' "$_rp"
-            rm -rf "$_dir" 2>/dev/null
-            read -p $'\n[Enter] 계속...' _ </dev/tty
-            continue
-        fi
-
-        # 2) compose 파일 탐지
-        local _cfile=""
-        if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
-            _cfile="${_dir}/${_cf}"
+        if [ "$_rp" = "BUILTIN" ]; then
+            _dk_p '  방식: 내장 템플릿 자동 생성\n  경로: %s\n' "$_dir"
         else
-            local -a _cands=()
-            local _f
-            while IFS= read -r _f; do
-                [ -n "$_f" ] && _cands[${#_cands[@]}]="$_f"
-            done < <(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
-            if [ ${#_cands[@]} -eq 0 ]; then
-                _dk_p '\033[1;31m[오류] 레포 안에 compose.yml / docker-compose.yml 파일이 없습니다.\033[0m\n'
+            _dk_p '  레포: %s\n  경로: %s\n' "$_rp" "$_dir"
+        fi
+
+        # 0) 이미 /opt/docker-apps/<app> 에 설치된 경우 관리 메뉴
+        if [ -d "$_dir" ]; then
+            _dkgit_manage_dir "$_nm" "$_dir" "$_cf" 1
+            continue
+        fi
+
+        # 0.5) 타 경로 / 단독 컨테이너 중복 실행 사전 차단
+        local _dup_line=""
+        if [ -n "$_ps_cache" ] && [ -n "$_pat" ]; then
+            _dup_line="$(printf '%s\n' "$_ps_cache" | awk -F'|' -v pat="(^|[|/_-])(${_pat})" 'tolower($1 "|" $2) ~ tolower(pat) {print; exit}')"
+        fi
+        if [ -n "$_dup_line" ]; then
+            local _d_cname _d_img _d_state _d_wdir _d_ports _d_rest
+            _d_cname="${_dup_line%%|*}"; _d_rest="${_dup_line#*|}"
+            _d_img="${_d_rest%%|*}"; _d_rest="${_d_rest#*|}"
+            _d_state="${_d_rest%%|*}"; _d_rest="${_d_rest#*|}"
+            _d_wdir="${_d_rest%%|*}"; _d_ports="${_d_rest#*|}"
+
+            _dk_p '\n\033[1;31m⚠ [중복 감지] %s 이(가) 이미 다른 위치에서 실행/존재 중입니다!\033[0m\n' "$_nm"
+            _dk_p '  • 컨테이너 : \033[1;33m%s\033[0m (%s)\n' "$_d_cname" "$_d_state"
+            _dk_p '  • 이미지   : %s\n' "$_d_img"
+            _dk_p '  • 실행경로 : \033[1;36m%s\033[0m\n' "${_d_wdir:-(단독 docker run 실행)}"
+            [ -n "$_d_ports" ] && _dk_p '  • 포트     : %s\n' "$_d_ports"
+            echo
+            if [ -n "$_d_wdir" ] && [ -d "$_d_wdir" ]; then
+                _dk_p '  1) 기존 실행 폴더(%s) 관리하기 (업데이트/재시작/로그/편집)\n' "$_d_wdir"
+                _dk_p '  2) 무시하고 %s 에 새로 설치 (포트/컨테이너명 충돌 주의)\n' "$_dir"
+                _dk_p '  0) 취소 (중복 설치 방지)\n'
+                local _dup_act=""
+                read -p ">>> 선택 [0]: " _dup_act </dev/tty
+                case "$_dup_act" in
+                    1) _dkgit_manage_dir "$_nm" "$_d_wdir" "AUTO" 0; continue ;;
+                    2) ;;
+                    *) continue ;;
+                esac
+            else
+                _dk_p '  1) 기존 컨테이너 로그 보기 (docker logs --tail 60 %s)\n' "$_d_cname"
+                _dk_p '  2) 무시하고 %s 에 새로 설치 (포트/컨테이너명 충돌 주의)\n' "$_dir"
+                _dk_p '  0) 취소 (중복 설치 방지)\n'
+                local _dup_act=""
+                read -p ">>> 선택 [0]: " _dup_act </dev/tty
+                case "$_dup_act" in
+                    1) docker logs --tail 60 "$_d_cname" 2>&1; read -p $'\n[Enter] 돌아가기...' _ </dev/tty; continue ;;
+                    2) ;;
+                    *) continue ;;
+                esac
+            fi
+        fi
+
+        local _cfile="" _cdir=""
+        if [ "$_rp" = "BUILTIN" ]; then
+            # 1) 내장 템플릿 생성 및 사전 폴더/권한/초기화 파일 자동 준비
+            _dk_p '\n\033[1;33m[1/3] 내장 템플릿(%s) 생성 및 사전 환경 구성 중...\033[0m\n' "$_nm"
+            if ! _dkgit_gen_builtin "$_nm" "$_dir" "$_pubip"; then
+                _dk_p '\033[1;31m[실패] 내장 템플릿 생성 실패\033[0m\n'
+                rm -rf "$_dir" 2>/dev/null
                 read -p $'\n[Enter] 계속...' _ </dev/tty
                 continue
-            elif [ ${#_cands[@]} -eq 1 ]; then
-                _cfile="${_cands[0]}"
-            else
-                _dk_p '\033[1;33m여러 개의 compose 파일이 발견되었습니다:\033[0m\n'
-                local _ci=0
-                for _f in "${_cands[@]}"; do
-                    _ci=$((_ci + 1))
-                    printf '  %2d) %s\n' "$_ci" "${_f#${_dir}/}"
-                done
-                local _csel=""
-                read -p "사용할 번호 [1]: " _csel </dev/tty
-                [ -z "$_csel" ] && _csel="1"
-                _cfile="${_cands[$((_csel - 1))]:-${_cands[0]}}"
             fi
-        fi
-
-        local _cdir="$(dirname "$_cfile")"
-        _dk_p '\033[1;32m[2/4] Compose 파일 확인: %s\033[0m\n' "${_cfile#${_dir}/}"
-
-        # 3) .env 자동 생성 (.env.example / example.env / .env.sample 탐지)
-        if [ ! -f "${_cdir}/.env" ]; then
-            local _ef
-            for _ef in "${_cdir}/.env.example" "${_cdir}/example.env" "${_cdir}/.env.sample" "${_dir}/.env.example" "${_dir}/example.env"; do
-                if [ -f "$_ef" ]; then
-                    cp -f "$_ef" "${_cdir}/.env"
-                    _dk_p '\033[1;32m[3/4] .env 자동 생성 완료 (원본: %s)\033[0m\n' "${_ef#${_dir}/}"
-                    break
+            _cfile="${_dir}/docker-compose.yml"
+            _cdir="$_dir"
+            _dk_p '\033[1;32m[2/3] Compose 파일 생성 완료: %s\033[0m\n' "$_cfile"
+        else
+            # GitHub 모드일 때만 git 설치 확인
+            if ! command -v git >/dev/null 2>&1; then
+                _dk_p '\033[1;33m[안내] git 이 설치되어 있지 않습니다.\033[0m\n'
+                local _gi=""
+                read -p "지금 git 을 설치할까요? [Y/n]: " _gi </dev/tty
+                if ! printf '%s' "$_gi" | grep -qE '^[Nn]$'; then
+                    yyay git || { _dk_p '\033[1;31m[실패] git 설치 실패\033[0m\n'; continue; }
+                else
+                    continue
                 fi
-            done
+            fi
+
+            # 1) git clone --depth 1
+            _dk_p '\n\033[1;33m[1/4] git clone --depth 1 진행 중...\033[0m\n'
+            if ! git clone --depth 1 "$_rp" "$_dir"; then
+                _dk_p '\033[1;31m[실패] git clone 실패: %s\033[0m\n' "$_rp"
+                rm -rf "$_dir" 2>/dev/null
+                read -p $'\n[Enter] 계속...' _ </dev/tty
+                continue
+            fi
+
+            # 2) compose 파일 탐지
+            if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
+                _cfile="${_dir}/${_cf}"
+            else
+                local -a _cands=()
+                local _f
+                while IFS= read -r _f; do
+                    [ -n "$_f" ] && _cands[${#_cands[@]}]="$_f"
+                done < <(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
+                if [ ${#_cands[@]} -eq 0 ]; then
+                    _dk_p '\033[1;31m[오류] 레포 안에 compose.yml / docker-compose.yml 파일이 없습니다.\033[0m\n'
+                    read -p $'\n[Enter] 계속...' _ </dev/tty
+                    continue
+                elif [ ${#_cands[@]} -eq 1 ]; then
+                    _cfile="${_cands[0]}"
+                else
+                    _dk_p '\033[1;33m여러 개의 compose 파일이 발견되었습니다:\033[0m\n'
+                    local _ci=0
+                    for _f in "${_cands[@]}"; do
+                        _ci=$((_ci + 1))
+                        printf '  %2d) %s\n' "$_ci" "${_f#${_dir}/}"
+                    done
+                    local _csel=""
+                    read -p "사용할 번호 [1]: " _csel </dev/tty
+                    [ -z "$_csel" ] && _csel="1"
+                    _cfile="${_cands[$((_csel - 1))]:-${_cands[0]}}"
+                fi
+            fi
+
+            _cdir="$(dirname "$_cfile")"
+            _dk_p '\033[1;32m[2/4] Compose 파일 확인: %s\033[0m\n' "${_cfile#${_dir}/}"
+
+            # 3) .env 자동 생성 (.env.example / example.env / .env.sample 탐지)
+            if [ ! -f "${_cdir}/.env" ]; then
+                local _ef
+                for _ef in "${_cdir}/.env.example" "${_cdir}/example.env" "${_cdir}/.env.sample" "${_dir}/.env.example" "${_dir}/example.env"; do
+                    if [ -f "$_ef" ]; then
+                        cp -f "$_ef" "${_cdir}/.env"
+                        _dk_p '\033[1;32m[3/4] .env 자동 생성 완료 (원본: %s)\033[0m\n' "${_ef#${_dir}/}"
+                        break
+                    fi
+                done
+            fi
         fi
 
         # 4) 포트 충돌 사전 체크 (ss / netstat) — go.sh 내부 ss() 함수 충돌 방지를 위해 type -P / command ss 사용
@@ -16950,12 +17604,16 @@ dkgit() {
         if [ -n "$_port_in_use" ]; then
             _dk_p '\033[1;31m[경고] 기본 포트 %s 이(가) 이미 사용 중입니다! (%s)\033[0m\n' "$_pt" "$_port_in_use"
             local _newpt=""
-            read -p "변경할 호스트 포트 입력 (그대로 진행=Enter, 편집=e): " _newpt </dev/tty
-            if [ "$_newpt" = "e" ] || [ "$_newpt" = "E" ]; then
+            read -p "변경할 호스트 포트 입력 (그대로 진행=Enter, 편집=e, 취소=c): " _newpt </dev/tty
+            if [ "$_newpt" = "c" ] || [ "$_newpt" = "C" ]; then
+                rm -rf "$_dir" 2>/dev/null
+                continue
+            elif [ "$_newpt" = "e" ] || [ "$_newpt" = "E" ]; then
                 ${EDITOR:-vi} "$_cfile"
             elif printf '%s' "$_newpt" | grep -qE '^[0-9]+$'; then
                 sed -i.bak -E "s/([\"'[:space:]-])${_pt}:/\1${_newpt}:/g" "$_cfile" 2>/dev/null
                 [ -f "${_cdir}/.env" ] && sed -i.bak -E "s/=${_pt}$/=${_newpt}/g" "${_cdir}/.env" 2>/dev/null
+                rm -f "${_cfile}.bak" "${_cdir}/.env.bak" 2>/dev/null
                 _pt="$_newpt"
                 _dk_p '\033[1;32m✔ 호스트 포트를 %s 으로 변경했습니다.\033[0m\n' "$_pt"
             fi
@@ -16963,7 +17621,7 @@ dkgit() {
             local _ed=""
             read -p "바로 실행할까요? [Enter=즉시 실행 / e=.env·compose 편집 / c=취소]: " _ed </dev/tty
             case "$_ed" in
-                c|C) continue ;;
+                c|C) rm -rf "$_dir" 2>/dev/null; continue ;;
                 e|E)
                     [ -f "${_cdir}/.env" ] && ${EDITOR:-vi} "${_cdir}/.env"
                     ${EDITOR:-vi} "$_cfile"
@@ -16972,7 +17630,7 @@ dkgit() {
         fi
 
         # 5) docker compose up -d 실행
-        _dk_p '\n\033[1;33m[4/4] %s -f "%s" up -d 실행 중...\033[0m\n' "$_DK_COMPOSE_BIN" "$(basename "$_cfile")"
+        _dk_p '\n\033[1;33m[실행] %s -f "%s" up -d 실행 중...\033[0m\n' "$_DK_COMPOSE_BIN" "$(basename "$_cfile")"
         if _dk_compose_run "$_cdir" -f "$_cfile" up -d; then
             echo
             _dk_p '\033[1;32m==============================================================\033[0m\n'
@@ -22137,7 +22795,7 @@ services:
       - MYSQL_PASSWORD=nextcloud
     volumes:
       - /data/mariadb/data/:/var/lib/mysql/
-      - /data/mariadb/log/:/var/lob/mysql/
+      - /data/mariadb/log/:/var/log/mysql/
 
 
 EOF
@@ -22411,6 +23069,7 @@ services:
     ports:
       - 3080:80
     container_name: nagios4
+    restart: unless-stopped
 
 EOF
         ;;
