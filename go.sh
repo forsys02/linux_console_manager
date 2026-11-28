@@ -15691,7 +15691,7 @@ _dk_render_full() {
     _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m\033[K\n'
     case "$_DK_TAB" in
         1) _dk_p '\033[1;33m[Enter]\033[0m메뉴 \033[1;32m[s]\033[0mStart/Stop \033[1;36m[R]\033[0m재시작 \033[1;35m[l]\033[0m로그 \033[1;37m[e]\033[0m쉘진입 \033[1;36m[i]\033[0m상세 \033[1;32m[U]\033[0m업그레이드 \033[1;33m[c]\033[0mCompose \033[1;31m[d]\033[0m삭제\033[K\n' ;;
-        2) _dk_p '\033[1;33m[Enter]\033[0m상세 \033[1;32m[u]\033[0mUp-d \033[1;31m[D]\033[0mDown \033[1;36m[R]\033[0m재시작 \033[1;35m[P]\033[0mPull+Up \033[1;33m[v]\033[0mYAML편집 \033[1;37m[l]\033[0m로그 \033[1;32m[n]\033[0m새스택 \033[1;36m[+]\033[0m경로\033[K\n' ;;
+        2) _dk_p '\033[1;33m[Enter]\033[0m상세 \033[1;32m[u]\033[0mUp-d \033[1;33m[s]\033[0mStop \033[1;31m[D]\033[0mDown \033[1;31m[X]\033[0m완전제거 \033[1;36m[R]\033[0m재시작 \033[1;35m[P]\033[0mPull+Up \033[1;33m[v]\033[0m편집 \033[1;37m[l]\033[0m로그 \033[1;32m[n]\033[0m새스택 \033[1;36m[+]\033[0m경로\033[K\n' ;;
         3) _dk_p '\033[1;33m[Enter/i]\033[0m상세 \033[1;32m[p]\033[0mPull이미지 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용정리(Prune)\033[K\n' ;;
         4) _dk_p '\033[1;33m[Enter/i]\033[0m상세/마운트 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용볼륨정리(Prune)\033[K\n' ;;
         5) _dk_p '\033[1;33m[Enter/i]\033[0m상세/서브넷 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용네트워크정리(Prune)\033[K\n' ;;
@@ -15834,8 +15834,8 @@ _dk_show_help() {
     _dk_p '    Enter : 액션 메뉴  | s : Start/Stop 토글 | R : 재시작 | l : 실시간 로그(Ctrl+C 복귀)\n'
     _dk_p '    e     : 쉘 즉시접속(bash->sh 폴백) | i : Inspect 요약 | U : 새버전확인/업그레이드 | c : Compose 편집 | d : 삭제\n\n'
     _dk_p '  \033[1;37m[Tab 2: Stacks (Docker Compose)]\033[0m\n'
-    _dk_p '    Enter : 스택 상세(compose ps) | u : up -d | D : down | R : restart | P : pull + up -d 업데이트\n'
-    _dk_p '    v     : compose.yml/.env vi2 편집(+문법검증/반영) | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
+    _dk_p '    Enter : 스택 상세(compose ps) | u : up -d | s : stop(일시중지) | D : down(단순내리기) | X : 완전제거(볼륨/이미지/폴더)\n'
+    _dk_p '    R     : restart | P : pull + up -d | v : compose.yml/.env 편집 | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
     _dk_p '  \033[1;37m[Tab 3~6: Images / Volumes / Networks / System]\033[0m\n'
     _dk_p '    i/Enter : 상세정보 | p : 이미지 Pull | d : 개별 삭제 | x : Prune 정리 | t : 실시간 stats\n\n'
     _dk_p '  \033[1;37m[Tab 7: Tools (25개 Docker/Compose 메뉴 + Hub 검색/랭크/설치)]\033[0m\n'
@@ -16201,23 +16201,27 @@ EOF
 _dk_stack_action() {
     local _act="$1" _idx="$2"
     local _dir="${_DK_IDS[$_idx]}" _nm="${_DK_NAMES[$_idx]}" _cf="${_DK_META[$_idx]}"
-    local _ans
+    local _ans _pchoice _confirm _normdir
     case "$_act" in
         menu)
             tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
             _dk_p '\033[1;36m◈ 스택 상세: %s (%s)\033[0m\n' "$_nm" "$_dir"
             _dk_p '──────────────────────────────────────────────────────────────────────\n'
             _dk_compose_run "$_dir" ps -a 2>/dev/null
-            _dk_p '\n  1) up -d (기동/반영)    2) down (내리기)    3) restart (재시작)\n'
-            _dk_p '  4) pull + up -d (최신업데이트)  5) YAML/.env 편집(vi2)  6) 통합 로그\n  0) 돌아가기\n'
-            read -p "선택 [0-6]: " _ans </dev/tty
+            _dk_p '\n  1) up -d (기동/반영)           2) stop (일시 중지 · 컨테이너 유지)\n'
+            _dk_p '  3) down (단순 내리기 · 볼륨/폴더 보존)   4) 완전 제거 (볼륨/이미지/폴더 선택 삭제)\n'
+            _dk_p '  5) restart (재시작)            6) pull + up -d (최신 업데이트)\n'
+            _dk_p '  7) YAML/.env 편집 (vi2)        8) 통합 로그\n  0) 돌아가기\n'
+            read -p "선택 [0-8]: " _ans </dev/tty
             case "$_ans" in
                 1) _dk_stack_action up "$_idx" ;;
-                2) _dk_stack_action down "$_idx" ;;
-                3) _dk_stack_action restart "$_idx" ;;
-                4) _dk_stack_action update "$_idx" ;;
-                5) _dk_stack_edit "$_dir" "$_cf" ;;
-                6) _dk_stack_action logs "$_idx" ;;
+                2) _dk_stack_action stop "$_idx" ;;
+                3) _dk_stack_action down "$_idx" ;;
+                4) _dk_stack_action purge "$_idx" ;;
+                5) _dk_stack_action restart "$_idx" ;;
+                6) _dk_stack_action update "$_idx" ;;
+                7) _dk_stack_edit "$_dir" "$_cf" ;;
+                8) _dk_stack_action logs "$_idx" ;;
             esac
             return
             ;;
@@ -16228,15 +16232,81 @@ _dk_stack_action() {
             _dk_load_summary; _dk_load_tab; _dk_build_view
             _dk_pause
             ;;
-        down)
+        stop)
             tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
-            _dk_p '\033[1;31m⚠ 스택 중지/제거 (compose down): %s (%s)\033[0m\n' "$_nm" "$_dir"
-            read -p "정말 down 할까요? [y/N]: " _ans </dev/tty
+            _dk_p '\033[1;33m⏸ 스택 일시 중지 (compose stop): %s (%s)\033[0m\n' "$_nm" "$_dir"
+            _dk_p '  • 컨테이너·네트워크·볼륨·폴더를 모두 유지한 채 실행만 멈춥니다.\n\n'
+            read -p "일시 중지(stop) 할까요? [y/N]: " _ans </dev/tty
             if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
-                _dk_compose_run "$_dir" down && _DK_MSG="✔ down 완료: $_nm" || _DK_MSG="✖ down 실패: $_nm"
+                _dk_compose_run "$_dir" stop && _DK_MSG="✔ stop 완료: $_nm" || _DK_MSG="✖ stop 실패: $_nm"
                 _dk_load_summary; _dk_load_tab; _dk_build_view
                 _dk_pause
             fi
+            ;;
+        down)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;31m▼ 스택 단순 내리기 (compose down): %s (%s)\033[0m\n' "$_nm" "$_dir"
+            _dk_p '  • 컨테이너와 네트워크만 내립니다. \033[1;32m볼륨(데이터)·이미지·스택 폴더는 보존\033[0m됩니다.\n'
+            _dk_p '  • 나중에 [u] Up-d 를 누르면 그대로 다시 기동됩니다.\n\n'
+            read -p "단순 down 할까요? [y/N]: " _ans </dev/tty
+            if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                _dk_compose_run "$_dir" down && _DK_MSG="✔ down 완료(데이터 보존): $_nm" || _DK_MSG="✖ down 실패: $_nm"
+                _dk_load_summary; _dk_load_tab; _dk_build_view
+                _dk_pause
+            fi
+            ;;
+        purge)
+            tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+            _dk_p '\033[1;31m⚠ 스택 다운 후 완전 제거: %s (%s)\033[0m\n' "$_nm" "$_dir"
+            _dk_p '──────────────────────────────────────────────────────────────────────\n'
+            _dk_p '  1) down -v                 : 컨테이너 + 네트워크 + \033[1;33m볼륨(데이터)\033[0m 삭제 (폴더 유지)\n'
+            _dk_p '  2) down -v --rmi all       : 컨테이너 + 네트워크 + 볼륨 + \033[1;33m이미지\033[0m 삭제 (폴더 유지)\n'
+            _dk_p '  3) 완전 삭제 (+ 폴더 삭제) : 위 항목 전부 + \033[1;31m스택 폴더(%s) 영구 삭제\033[0m\n' "$_dir"
+            _dk_p '  0) 취소\n\n'
+            read -p "제거 단계 선택 [0-3]: " _pchoice </dev/tty
+            case "$_pchoice" in
+                1)
+                    read -p "정말 down -v (볼륨/데이터 포함 삭제) 할까요? [y/N]: " _ans </dev/tty
+                    if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                        _dk_compose_run "$_dir" down -v --remove-orphans && _DK_MSG="✔ down -v 완료: $_nm" || _DK_MSG="✖ down -v 실패: $_nm"
+                        _dk_load_summary; _dk_load_tab; _dk_build_view
+                        _dk_pause
+                    fi
+                    ;;
+                2)
+                    read -p "정말 down -v --rmi all (볼륨+이미지 포함 삭제) 할까요? [y/N]: " _ans </dev/tty
+                    if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+                        _dk_compose_run "$_dir" down -v --rmi all --remove-orphans && _DK_MSG="✔ down -v --rmi all 완료: $_nm" || _DK_MSG="✖ 완전제거 실패: $_nm"
+                        _dk_load_summary; _dk_load_tab; _dk_build_view
+                        _dk_pause
+                    fi
+                    ;;
+                3)
+                    _normdir=$(printf '%s' "$_dir" | sed 's:/*$::')
+                    case "$_normdir" in
+                        ""|"/"|"/root"|"/home"|"/data"|"/opt"|"/var"|"/etc"|"/usr"|"/srv"|"/tmp")
+                            _dk_p '\033[1;31m[차단] 보호된 상위 경로(%s)는 폴더 삭제할 수 없습니다!\033[0m\n' "$_dir"
+                            _dk_pause
+                            return
+                            ;;
+                    esac
+                    _dk_p '\n\033[1;31m[최종 확인] 다음 경로가 영구 삭제됩니다: %s\033[0m\n' "$_dir"
+                    read -p "삭제를 진행하려면 스택 이름(${_nm})을 정확히 입력하세요: " _confirm </dev/tty
+                    if [ "$_confirm" = "$_nm" ]; then
+                        _dk_compose_run "$_dir" down -v --rmi all --remove-orphans
+                        if [ -d "$_normdir" ]; then
+                            rm -rf -- "$_normdir" && _DK_MSG="✔ 스택 완전 삭제 완료(폴더 포함): $_nm" || _DK_MSG="✖ 폴더 삭제 실패: $_normdir"
+                        else
+                            _DK_MSG="✔ 스택 제거 완료: $_nm"
+                        fi
+                        _dk_load_summary; _dk_load_tab; _dk_build_view
+                        _dk_pause
+                    else
+                        _dk_p '이름이 일치하지 않아 취소되었습니다.\n'
+                        _dk_pause
+                    fi
+                    ;;
+            esac
             ;;
         restart)
             tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
@@ -16398,7 +16468,9 @@ dkms() {
                                 ;;
                             "") [ -n "$_idx" ] && { _dk_stack_action menu "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
                             u)  [ -n "$_idx" ] && { _dk_stack_action up "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            s)  [ -n "$_idx" ] && { _dk_stack_action stop "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
                             D)  [ -n "$_idx" ] && { _dk_stack_action down "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
+                            X)  [ -n "$_idx" ] && { _dk_stack_action purge "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
                             R)  [ -n "$_idx" ] && { _dk_stack_action restart "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
                             P)  [ -n "$_idx" ] && { _dk_stack_action update "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
                             v)  [ -n "$_idx" ] && { _dk_stack_action edit "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null; } ;;
