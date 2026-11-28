@@ -15639,7 +15639,7 @@ _dk_render_full() {
     # Footer: Tab-specific hotkeys
     _dk_p '\033[0;36m──────────────────────────────────────────────────────────────────────\033[0m\033[K\n'
     case "$_DK_TAB" in
-        1) _dk_p '\033[1;33m[Enter]\033[0m메뉴 \033[1;32m[s]\033[0mStart/Stop \033[1;36m[R]\033[0m재시작 \033[1;35m[l]\033[0m로그 \033[1;37m[e]\033[0m쉘진입 \033[1;36m[i]\033[0m상세 \033[1;33m[c]\033[0mCompose편집 \033[1;31m[d]\033[0m삭제\033[K\n' ;;
+        1) _dk_p '\033[1;33m[Enter]\033[0m메뉴 \033[1;32m[s]\033[0mStart/Stop \033[1;36m[R]\033[0m재시작 \033[1;35m[l]\033[0m로그 \033[1;37m[e]\033[0m쉘진입 \033[1;36m[i]\033[0m상세 \033[1;32m[U]\033[0m업그레이드 \033[1;33m[c]\033[0mCompose \033[1;31m[d]\033[0m삭제\033[K\n' ;;
         2) _dk_p '\033[1;33m[Enter]\033[0m상세 \033[1;32m[u]\033[0mUp-d \033[1;31m[D]\033[0mDown \033[1;36m[R]\033[0m재시작 \033[1;35m[P]\033[0mPull+Up \033[1;33m[v]\033[0mYAML편집 \033[1;37m[l]\033[0m로그 \033[1;32m[n]\033[0m새스택 \033[1;36m[+]\033[0m경로\033[K\n' ;;
         3) _dk_p '\033[1;33m[Enter/i]\033[0m상세 \033[1;32m[p]\033[0mPull이미지 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용정리(Prune)\033[K\n' ;;
         4) _dk_p '\033[1;33m[Enter/i]\033[0m상세/마운트 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용볼륨정리(Prune)\033[K\n' ;;
@@ -15772,7 +15772,7 @@ _dk_show_help() {
     _dk_p '    r              : 데이터 새로고침   |   q : 종료\n\n'
     _dk_p '  \033[1;37m[Tab 1: Containers]\033[0m\n'
     _dk_p '    Enter : 액션 메뉴  | s : Start/Stop 토글 | R : 재시작 | l : 실시간 로그(Ctrl+C 복귀)\n'
-    _dk_p '    e     : 쉘 즉시접속(bash->sh 폴백) | i : Inspect 요약 | c : Compose YAML 편집 | d : 삭제\n\n'
+    _dk_p '    e     : 쉘 즉시접속(bash->sh 폴백) | i : Inspect 요약 | U : 새버전확인/업그레이드 | c : Compose 편집 | d : 삭제\n\n'
     _dk_p '  \033[1;37m[Tab 2: Stacks (Docker Compose)]\033[0m\n'
     _dk_p '    Enter : 스택 상세(compose ps) | u : up -d | D : down | R : restart | P : pull + up -d 업데이트\n'
     _dk_p '    v     : compose.yml/.env vi2 편집(+문법검증/반영) | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
@@ -15905,6 +15905,79 @@ _dk_web_urls() {
     _dk_pause
 }
 
+_dk_container_upgrade() {
+    local _id="$1" _nm="$2"
+    local _img _wdir _svc _cur_iid _local_dig _local_sha _rmt_json _rmt_sha _status _ans _has_upd=0
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _dk_p '\033[1;36m◈ 컨테이너 새 버전 확인 & 업그레이드: %s (%s)\033[0m\n' "$_nm" "$_id"
+    _dk_p '──────────────────────────────────────────────────────────────────────\n'
+
+    _img=$(docker inspect --format '{{.Config.Image}}' "$_id" 2>/dev/null)
+    _cur_iid=$(docker inspect --format '{{.Image}}' "$_id" 2>/dev/null)
+    _wdir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$_id" 2>/dev/null)
+    _svc=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$_id" 2>/dev/null)
+    _local_dig=$(docker image inspect --format '{{index .RepoDigests 0}}' "$_cur_iid" 2>/dev/null)
+    _local_sha="${_local_dig##*@}"
+
+    _dk_p '  이미지   : \033[1;37m%s\033[0m\n' "${_img:--}"
+    if [ -n "$_wdir" ] && [ -d "$_wdir" ]; then
+        _dk_p '  배포방식 : \033[1;32mDocker Compose\033[0m (%s / service=%s)\n' "$_wdir" "${_svc:-all}"
+    else
+        _dk_p '  배포방식 : \033[1;33m단독 컨테이너 (docker run)\033[0m -> watchtower --run-once 사용\n'
+    fi
+    _dk_p '  로컬해시 : %s\n' "${_local_sha:-알 수 없음}"
+    _dk_p '\n\033[1;33m⏳ 원격 레지스트리에서 최신 버전 확인 중...\033[0m\n'
+
+    _rmt_json=$(docker manifest inspect "$_img" 2>/dev/null)
+    if [ -n "$_rmt_json" ] && [ -n "$_local_sha" ]; then
+        if printf '%s\n' "$_rmt_json" | grep -qF "$_local_sha"; then
+            _status="latest"
+            _dk_p '\033[1;32m✔ 이미 최신 버전입니다!\033[0m\n'
+        else
+            _has_upd=1
+            _status="update"
+            _rmt_sha=$(printf '%s\n' "$_rmt_json" | grep -oE 'sha256:[0-9a-f]+' | head -n1)
+            _dk_p '\033[1;35m🆕 새 버전이 있습니다!\033[0m\n'
+            [ -n "$_rmt_sha" ] && _dk_p '  원격해시 : %s\n' "$_rmt_sha"
+        fi
+    else
+        _has_upd=1
+        _status="unknown"
+        _dk_p '\033[1;33m⚠ 원격 manifest 사전 비교 불가 (사설/인증 레지스트리 또는 태그). pull 로 직접 확인할 수 있습니다.\033[0m\n'
+    fi
+
+    _dk_p '\n'
+    if [ "$_has_upd" = "1" ]; then
+        read -p "지금 최신 버전으로 업그레이드할까요? [Y/n]: " _ans </dev/tty
+        if printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+            _DK_MSG="업그레이드 취소됨: $_nm"
+            return 0
+        fi
+    else
+        read -p "이미 최신이지만 강제로 pull & 재생성할까요? [y/N]: " _ans </dev/tty
+        if ! printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+            _DK_MSG="✔ 최신 버전 확인 완료: $_nm"
+            return 0
+        fi
+    fi
+
+    _dk_p '\n\033[1;36m▶ 업그레이드 진행 중...\033[0m\n'
+    if [ -n "$_wdir" ] && [ -d "$_wdir" ]; then
+        if [ -n "$_svc" ]; then
+            _dk_compose_run "$_wdir" pull "$_svc" && _dk_compose_run "$_wdir" up -d "$_svc" \
+                && _DK_MSG="✔ Compose 업그레이드 완료: $_nm" || _DK_MSG="✖ 업그레이드 실패: $_nm"
+        else
+            _dk_compose_run "$_wdir" pull && _dk_compose_run "$_wdir" up -d \
+                && _DK_MSG="✔ Compose 업그레이드 완료: $_nm" || _DK_MSG="✖ 업그레이드 실패: $_nm"
+        fi
+    else
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once --cleanup "$_nm" \
+            && _DK_MSG="✔ Watchtower 업그레이드 완료: $_nm" || _DK_MSG="✖ 업그레이드 실패: $_nm"
+    fi
+    _dk_load_summary; _dk_load_tab; _dk_build_view
+    _dk_pause
+}
+
 _dk_container_inspect() {
     local _id="$1" _nm="$2"
     tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
@@ -15933,8 +16006,8 @@ _dk_container_action() {
         menu)
             tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
             _dk_p '\033[1;36m◈ 컨테이너 액션: %s [%s]\033[0m\n' "$_nm" "$_st"
-            _dk_p '  1) Start / Stop 토글\n  2) Restart (재시작)\n  3) 실시간 로그 (logs -f)\n  4) 컨테이너 쉘 진입 (bash/sh)\n  5) 상세 Inspect 보기\n  6) 소속 Compose YAML 편집\n  7) 컨테이너 삭제 (rm)\n  8) 웹 창구 URL & 접속 안내 (비번 초기화 팁 포함)\n  0) 취소\n'
-            read -p "선택 [0-8]: " _ans </dev/tty
+            _dk_p '  1) Start / Stop 토글\n  2) Restart (재시작)\n  3) 실시간 로그 (logs -f)\n  4) 컨테이너 쉘 진입 (bash/sh)\n  5) 상세 Inspect 보기\n  6) 소속 Compose YAML 편집\n  7) 컨테이너 삭제 (rm)\n  8) 웹 창구 URL & 접속 안내 (비번 초기화 팁 포함)\n  9) 새 버전 확인 & 원클릭 업그레이드\n  0) 취소\n'
+            read -p "선택 [0-9]: " _ans </dev/tty
             case "$_ans" in
                 1) _dk_container_action toggle "$_idx" ;;
                 2) _dk_container_action restart "$_idx" ;;
@@ -15944,6 +16017,7 @@ _dk_container_action() {
                 6) _dk_container_action compose_edit "$_idx" ;;
                 7) _dk_container_action rm "$_idx" ;;
                 8) _dk_web_urls "$_id" ;;
+                9) _dk_container_upgrade "$_id" "$_nm" ;;
             esac
             return
             ;;
@@ -16240,6 +16314,7 @@ dkms() {
                             l)  _dk_container_action logs "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
                             e)  _dk_container_action exec "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
                             i)  _dk_container_action inspect "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+                            U)  _dk_container_upgrade "${_DK_IDS[$_idx]}" "${_DK_NAMES[$_idx]}"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
                             c)  _dk_container_action compose_edit "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
                             d)  _dk_container_action rm "$_idx"; _DK_DIRTY=1; tput civis 2>/dev/null ;;
                         esac
