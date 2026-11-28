@@ -15329,9 +15329,17 @@ _dk_compose_run() {
         return 1
     fi
     if [ -n "$_dir" ] && [ -d "$_dir" ]; then
-        ( cd "$_dir" && $_DK_COMPOSE_BIN "$@" )
+        if [ "$_DK_COMPOSE_BIN" = "docker compose" ]; then
+            ( cd "$_dir" && docker compose "$@" )
+        else
+            ( cd "$_dir" && "$_DK_COMPOSE_BIN" "$@" )
+        fi
     else
-        $_DK_COMPOSE_BIN "$@"
+        if [ "$_DK_COMPOSE_BIN" = "docker compose" ]; then
+            docker compose "$@"
+        else
+            "$_DK_COMPOSE_BIN" "$@"
+        fi
     fi
 }
 
@@ -16714,6 +16722,7 @@ Containers:
 # - 기본 설치 경로 /opt/docker-apps/<app> (dkms 스캔 경로에 자동 포함)
 # ==============================================================================
 dkgit() {
+    local IFS=$' \t\n'
     _dk_detect_env || return 1
     if ! command -v git >/dev/null 2>&1; then
         _dk_p '\033[1;33m[안내] git 이 설치되어 있지 않습니다.\033[0m\n'
@@ -16851,12 +16860,12 @@ dkgit() {
                 1)
                     ( cd "$_dir" && git pull --ff-only 2>/dev/null || true )
                     if [ -n "$_ecfile" ]; then
-                        ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" pull && $_DK_COMPOSE_BIN -f "$_ecfile" up -d && $_DK_COMPOSE_BIN -f "$_ecfile" ps )
+                        _dk_compose_run "$_ecdir" -f "$_ecfile" pull && _dk_compose_run "$_ecdir" -f "$_ecfile" up -d && _dk_compose_run "$_ecdir" -f "$_ecfile" ps
                     fi
                     ;;
-                2) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" restart && $_DK_COMPOSE_BIN -f "$_ecfile" ps ) ;;
-                3) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" logs --tail=80 ) ;;
-                4) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" down ) ;;
+                2) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" restart && _dk_compose_run "$_ecdir" -f "$_ecfile" ps ;;
+                3) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" logs --tail=80 ;;
+                4) [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down ;;
                 5)
                     [ -f "${_ecdir}/.env" ] && ${EDITOR:-vi} "${_ecdir}/.env"
                     [ -n "$_ecfile" ] && ${EDITOR:-vi} "$_ecfile"
@@ -16865,7 +16874,7 @@ dkgit() {
                     local _del=""
                     read -p "정말 ${_nm} 을(를) 중지하고 ${_dir} 를 삭제할까요? [y/N]: " _del </dev/tty
                     if printf '%s' "$_del" | grep -qE '^[Yy]$'; then
-                        [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" down )
+                        [ -n "$_ecfile" ] && _dk_compose_run "$_ecdir" -f "$_ecfile" down
                         rm -rf "$_dir" && _dk_p '\033[1;32m✔ 삭제 완료: %s\033[0m\n' "$_dir"
                     fi
                     ;;
@@ -16964,7 +16973,7 @@ dkgit() {
 
         # 5) docker compose up -d 실행
         _dk_p '\n\033[1;33m[4/4] %s -f "%s" up -d 실행 중...\033[0m\n' "$_DK_COMPOSE_BIN" "$(basename "$_cfile")"
-        if ( cd "$_cdir" && $_DK_COMPOSE_BIN -f "$_cfile" up -d ); then
+        if _dk_compose_run "$_cdir" -f "$_cfile" up -d; then
             echo
             _dk_p '\033[1;32m==============================================================\033[0m\n'
             _dk_p '\033[1;32m  ✔ %s 배포 완료!\033[0m\n' "$_nm"
@@ -16972,7 +16981,7 @@ dkgit() {
             _dk_p '  • 예상 접속 : \033[1;36mhttp://%s:%s\033[0m\n' "$_pubip" "$_pt"
             _dk_p '  • 통합 관리 : [dkms] 1번 메뉴 → [2] Stacks 탭에서 자동 관리 가능\n'
             _dk_p '\033[1;32m==============================================================\033[0m\n'
-            ( cd "$_cdir" && $_DK_COMPOSE_BIN -f "$_cfile" ps )
+            _dk_compose_run "$_cdir" -f "$_cfile" ps
         else
             _dk_p '\033[1;31m[실패] compose up 중 오류가 발생했습니다. .env 또는 포트를 확인해 주세요.\033[0m\n'
             _dk_p '  경로: %s\n' "$_cdir"
