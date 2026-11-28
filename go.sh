@@ -15190,7 +15190,7 @@ _tui_bg_cleanup() {
 }
 
 _tui_poll_tab_load() {
-    local _done="$1" _tab="$2" _enc="$3" _pfn="$4"
+    local _done="$1" _tab="$2" _enc="$3" _pfn="$4" _max="${5:-6}"
     local _tmo="0.1" _tick=0 _sp _k _k2 _k3
     [ "${BASH_VERSINFO[0]:-3}" -lt 4 ] && _tmo="1"
     _TUI_POLL_ACT="done"
@@ -15201,12 +15201,12 @@ _tui_poll_tab_load() {
             case $((_tick % 4)) in
                 0) _sp="|" ;; 1) _sp="/" ;; 2) _sp="-" ;; 3) _sp='\' ;;
             esac
-            "$_pfn" '\r\033[1;33m[%s] 데이터 불러오는 중... ([<-/->/Tab/1-6] 즉시이동  [q] 종료)\033[K\033[0m' "$_sp"
+            "$_pfn" '\r\033[1;33m[%s] 데이터 불러오는 중... ([<-/->/Tab/1-%s] 즉시이동  [q] 종료)\033[K\033[0m' "$_sp" "$_max"
         else
             case $((_tick % 6)) in
                 0) _sp="⠋" ;; 1) _sp="⠙" ;; 2) _sp="⠹" ;; 3) _sp="⠸" ;; 4) _sp="⠼" ;; 5) _sp="⠴" ;;
             esac
-            "$_pfn" '\r\033[1;33m%s 데이터 불러오는 중... ([←→/Tab/1-6] 다른 탭으로 즉시 이동  [q] 종료)\033[K\033[0m' "$_sp"
+            "$_pfn" '\r\033[1;33m%s 데이터 불러오는 중... ([←→/Tab/1-%s] 다른 탭으로 즉시 이동  [q] 종료)\033[K\033[0m' "$_sp" "$_max"
         fi
         _tick=$((_tick + 1))
 
@@ -15219,16 +15219,16 @@ _tui_poll_tab_load() {
                     _k3=""
                     IFS= read -rsn1 -t "$_tmo" _k3 </dev/tty
                     case "$_k3" in
-                        C) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % 6 + 1)); return 0 ;;
-                        D) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$(( (_tab + 4) % 6 + 1 )); return 0 ;;
+                        C) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % _max + 1)); return 0 ;;
+                        D) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$(( (_tab + _max - 2) % _max + 1 )); return 0 ;;
                     esac
                 fi
             else
                 case "$_k" in
                     q|Q)   _TUI_POLL_ACT="quit"; return 0 ;;
-                    $'\t') _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % 6 + 1)); return 0 ;;
-                    1|2|3|4|5|6)
-                        if [ "$_tab" != "$_k" ]; then
+                    $'\t') _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % _max + 1)); return 0 ;;
+                    1|2|3|4|5|6|7|8|9)
+                        if [ "$_k" -le "$_max" ] && [ "$_tab" != "$_k" ]; then
                             _TUI_POLL_ACT="tab"; _TUI_POLL_VAL="$_k"; return 0
                         fi
                         ;;
@@ -15471,6 +15471,44 @@ _dk_load_tab() {
                 _DK_TOTAL=$((_DK_TOTAL + 1))
             done < <(docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null)
             ;;
+        7) # Tools & Hub Search/Rank/Install (all 25 docker menus)
+            while IFS='|' read -r _c1 _c2 _c3 _c4; do
+                [ -z "$_c1" ] && continue
+                _DK_IDS[$_DK_TOTAL]="$_c1"
+                _DK_NAMES[$_DK_TOTAL]="[${_c1}] ${_c2}"
+                _DK_STATE[$_DK_TOTAL]="tool"
+                _DK_COL2[$_DK_TOTAL]="$_c3"
+                _DK_COL3[$_DK_TOTAL]="$_c4"
+                _DK_META[$_DK_TOTAL]="$_c1"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done <<'EOF'
+dks|docker search / rank / install|[검색/설치]|Docker Hub 이미지 검색·스타 랭킹 조회 및 원클릭 설치
+dki|docker install / reset|[설치/초기화]|Docker·Compose 엔진 설치 및 초기화
+dkp|docker ps|[컨테이너]|실행 중/전체 컨테이너 목록 및 상태 상세 조회
+dkr|docker run|[컨테이너]|새 컨테이너 실행·포트/볼륨 옵션 관리
+dkl|docker linux|[컨테이너]|Ubuntu/Alpine/Alma 등 리눅스 컨테이너 빠른 실행
+dkt|docker teldrive|[스토리지/앱]|Teldrive(텔레그램 클라우드 드라이브) Docker 구축
+flow_docker_basic|Docker 기본 관리 가이드|[가이드]|Docker 컨테이너·이미지 기본 관리 워크플로우
+flow_docker_compose|Docker Compose 활용 가이드|[가이드]|Docker Compose 멀티 컨테이너 운영 가이드
+dklamp|compose lamp 1 - apache/mysql/php|[웹/CMS]|Apache + MySQL + PHP LAMP 스택 구축
+dklampc|compose lamp 2 - cms install|[웹/CMS]|LAMP 환경 CMS(그누보드/워드프레스 등) 설치
+dklemp|compose lemp nginx/mysql/php|[웹/CMS]|Nginx + MySQL + PHP LEMP 스택 구축
+dkav|compose media_center|[미디어]|Jellyfin · Navidrome · FileBrowser 미디어 센터 구축
+dkse|compose ansible webui semaphore|[자동화]|Ansible WebUI(Semaphore) 자동화 서버 구축
+dkna|compose nagios|[모니터링]|Nagios 서버·네트워크 모니터링 구축
+dkro|compose Rocket.Chat|[협업/채팅]|Rocket.Chat 사내 메신저 서버 구축
+dkw|compose wg-easy wireguard|[네트워크/VPN]|WireGuard VPN (wg-easy WebUI) 구축
+dkrm|compose rhymix/nginx/mariadb|[웹/CMS]|Rhymix(라이믹스) + Nginx + MariaDB 스택 구축
+dkwp|compose wordpress / phpmyadmin|[웹/CMS]|WordPress + phpMyAdmin 스택 구축
+dkim|compose immich|[미디어/사진]|Immich 셀프호스팅 사진/동영상 백업 서버 구축
+dktf|compose traefik|[프록시]|Traefik 자동 SSL 리버스 프록시 구축
+dkg|compose guacamole|[원격접속]|Apache Guacamole 웹 기반 RDP/SSH/VNC 게이트웨이
+dkha|compose home assistant os|[스마트홈]|Home Assistant 스마트홈 허브 구축
+dknpm|compose nginx-proxy-manager|[프록시]|Nginx Proxy Manager(NPM) 웹UI 리버스 프록시 구축
+dkc|compose next-cloud|[클라우드]|Nextcloud 개인 클라우드 서버 구축
+dkca|compose caddy|[프록시]|Caddy 자동 HTTPS 웹서버/프록시 구축
+EOF
+            ;;
     esac
 }
 
@@ -15514,6 +15552,7 @@ _dk_render_row() {
         paused)   _ico="◐"; _iclr='\033[1;33m' ;;
         dangling) _ico="⚠"; _iclr='\033[1;33m' ;;
         local)    _ico="○"; _iclr='\033[0;36m' ;;
+        tool)     _ico="▸"; _iclr='\033[1;36m' ;;
         image|volume|network) _ico="◆"; _iclr='\033[1;36m' ;;
         *)        _ico="○"; _iclr='\033[1;31m' ;;
     esac
@@ -15555,14 +15594,15 @@ _dk_render_full() {
 
     # Line 2: Tab Bar
     local _t _tlbl _tbar=""
-    for _t in 1 2 3 4 5 6; do
+    for _t in 1 2 3 4 5 6 7; do
         case "$_t" in
             1) _tlbl="1:Containers" ;;
-            2) _tlbl="2:Stacks(Compose)" ;;
+            2) _tlbl="2:Stacks" ;;
             3) _tlbl="3:Images" ;;
             4) _tlbl="4:Volumes" ;;
             5) _tlbl="5:Networks" ;;
-            6) _tlbl="6:System&Stats" ;;
+            6) _tlbl="6:Stats" ;;
+            7) _tlbl="7:Tools(25)" ;;
         esac
         if [ "$_t" = "$_DK_TAB" ]; then
             _tbar="${_tbar}\033[46;1;30m [${_tlbl}] \033[0m "
@@ -15589,6 +15629,7 @@ _dk_render_full() {
         4) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "VOLUME NAME" "DRIVER" "MOUNTPOINT" ;;
         5) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "NETWORK NAME" "DRIVER/SCOPE" "NETWORK ID" ;;
         6) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "CONTAINER (LIVE)" "CPU / MEM" "NET / BLOCK IO" ;;
+        7) _dk_p '\033[1;37m     %-24s  %-26s  %s\033[0m\033[K\n' "[KEY] MENU NAME" "CATEGORY" "DESCRIPTION" ;;
     esac
 
     # Lines 5..(5+PAGE-1): List rows
@@ -15645,8 +15686,9 @@ _dk_render_full() {
         4) _dk_p '\033[1;33m[Enter/i]\033[0m상세/마운트 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용볼륨정리(Prune)\033[K\n' ;;
         5) _dk_p '\033[1;33m[Enter/i]\033[0m상세/서브넷 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용네트워크정리(Prune)\033[K\n' ;;
         6) _dk_p '\033[1;32m[Enter/t]\033[0m실시간Stats \033[1;36m[i]\033[0m디스크점유(df-v) \033[1;35m[x]\033[0mSystemPrune \033[1;33m[B]\033[0m빌드캐시정리 \033[1;31m[R]\033[0m데몬재시작\033[K\n' ;;
+        7) _dk_p '\033[1;33m[Enter]\033[0m선택한 Docker 메뉴 실행 (종료 후 dkms 복귀)  \033[1;32m[s]\033[0mHub검색/랭크/설치  \033[1;36m[/]\033[0m필터\033[K\n' ;;
     esac
-    _dk_p '\033[0;37m[↑↓]이동 [←→/Tab/1-6]탭전환 [w]웹URL [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
+    _dk_p '\033[0;37m[↑↓]이동 [←→/Tab/1-7]탭전환 [w]웹URL [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
     _dk_p '\033[1;32m%s\033[0m\033[K' "${_DK_MSG:-}"
     _DK_DIRTY=0
     _DK_PREV_CUR="$_DK_CUR"
@@ -15681,11 +15723,19 @@ _dk_load_tab_async() {
         _DK_TOTAL=0
         _DK_VIEW=()
         _DK_VCNT=0
+        if [ "$_DK_TAB" = "7" ]; then
+            _DK_LOADING=0
+            _dk_load_tab
+            _dk_build_view
+            _DK_MSG=""
+            _DK_DIRTY=1
+            return 0
+        fi
         _DK_LOADING=1
         if [ "$_DK_ENC" = "euckr" ]; then
-            _DK_MSG="... 데이터 불러오는 중 ([<-/->/Tab/1-6] 즉시이동)"
+            _DK_MSG="... 데이터 불러오는 중 ([<-/->/Tab/1-7] 즉시이동)"
         else
-            _DK_MSG="⏳ 데이터 불러오는 중... ([←→/Tab/1-6] 다른 탭으로 즉시 이동)"
+            _DK_MSG="⏳ 데이터 불러오는 중... ([←→/Tab/1-7] 다른 탭으로 즉시 이동)"
         fi
         _DK_DIRTY=1
         _dk_render_full
@@ -15713,7 +15763,7 @@ _dk_load_tab_async() {
         _DK_BG_PID=$!
         [ "$_had_m" = "1" ] && set -m
 
-        _tui_poll_tab_load "$_done" "$_DK_TAB" "$_DK_ENC" "_dk_p"
+        _tui_poll_tab_load "$_done" "$_DK_TAB" "$_DK_ENC" "_dk_p" 7
         case "$_TUI_POLL_ACT" in
             tab)
                 _tui_bg_cleanup "$_DK_BG_PID" "$_DK_BG_TMP"
@@ -15766,7 +15816,7 @@ _dk_show_help() {
     _dk_p '\033[1;36m◈ 통합 도커·컴포즈 관리 TUI [dkms] 단축키 도움말\033[0m\n\n'
     _dk_p '  \033[1;37m[공통 이동/탭]\033[0m\n'
     _dk_p '    ↑/↓, j/k       : 항목 이동 (PgUp/PgDn 페이지 이동)\n'
-    _dk_p '    ←/→, Tab, 1~6  : 6개 탭 즉시 전환 (Containers/Stacks/Images/Volumes/Networks/System)\n'
+    _dk_p '    ←/→, Tab, 1~7  : 7개 탭 즉시 전환 (Containers/Stacks/Images/Volumes/Networks/Stats/Tools)\n'
     _dk_p '    /              : 현재 탭 키워드 필터 검색 (빈 값으로 Enter = 초기화)\n'
     _dk_p '    w              : 실행 중인 컨테이너 웹 창구 URL 자동 추적 + 접속/초기화 팁\n'
     _dk_p '    r              : 데이터 새로고침   |   q : 종료\n\n'
@@ -15777,7 +15827,9 @@ _dk_show_help() {
     _dk_p '    Enter : 스택 상세(compose ps) | u : up -d | D : down | R : restart | P : pull + up -d 업데이트\n'
     _dk_p '    v     : compose.yml/.env vi2 편집(+문법검증/반영) | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
     _dk_p '  \033[1;37m[Tab 3~6: Images / Volumes / Networks / System]\033[0m\n'
-    _dk_p '    i/Enter : 상세정보 | p : 이미지 Pull | d : 개별 삭제 | x : Prune 정리 | t : 실시간 stats\n'
+    _dk_p '    i/Enter : 상세정보 | p : 이미지 Pull | d : 개별 삭제 | x : Prune 정리 | t : 실시간 stats\n\n'
+    _dk_p '  \033[1;37m[Tab 7: Tools (25개 Docker/Compose 메뉴 + Hub 검색/랭크/설치)]\033[0m\n'
+    _dk_p '    Enter : 선택한 메뉴 실행 (종료 시 dkms 복귀) | s : Docker Hub 스타랭크 검색·설치 | / : 필터\n'
     _dk_pause
 }
 
@@ -16236,7 +16288,7 @@ dkms() {
         printf '\n'; return 0
     fi
     _dk_load_summary
-    _DK_MSG="✔ dkms 준비 완료 (1~6 탭전환, Enter 메뉴, ? 도움말)"
+    _DK_MSG="✔ dkms 준비 완료 (1~7 탭전환, Enter 메뉴, w 웹URL, ? 도움말)"
 
     while true; do
         _dk_render_delta
@@ -16251,8 +16303,8 @@ dkms() {
                 case "$_k3" in
                     A) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
                     B) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
-                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
-                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
+                    C) _DK_TAB=$((_DK_TAB % 7 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
+                    D) _DK_TAB=$(( (_DK_TAB + 5) % 7 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
                     5) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR - _DK_PAGE)); [ "$_DK_CUR" -lt 0 ] && _DK_CUR=0; _DK_DIRTY=1 ;;
                     6) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR + _DK_PAGE)); [ "$_DK_CUR" -ge "$_DK_VCNT" ] && _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0)); _DK_DIRTY=1 ;;
                     H) _DK_CUR=0; _DK_DIRTY=1 ;;
@@ -16270,11 +16322,11 @@ dkms() {
         case "$_k" in
             q|Q) break ;;
             $'\t')
-                _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
+                _DK_TAB=$((_DK_TAB % 7 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
                 _dk_load_tab_async
                 [ "$_DK_REQ_QUIT" = "1" ] && break
                 ;;
-            1|2|3|4|5|6)
+            1|2|3|4|5|6|7)
                 if [ "$_DK_TAB" != "$_k" ]; then
                     _DK_TAB="$_k"; _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
                     _dk_load_tab_async
@@ -16505,6 +16557,58 @@ Containers:
                                     sleep 2
                                     _DK_MSG="✔ Docker 데몬 재시작 완료"
                                     _dk_load_summary; _dk_load_tab; _dk_build_view
+                                fi
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                        esac
+                        ;;
+                    7) # Tools (25 Docker/Compose menus + Hub Search/Rank/Install)
+                        case "$_k" in
+                            "")
+                                [ -z "$_idx" ] && continue
+                                local _tkey="${_DK_IDS[$_idx]}"
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                if declare -f process_commands >/dev/null 2>&1; then
+                                    process_commands "$_tkey"
+                                else
+                                    _dk_p '\033[1;31mprocess_commands 함수를 찾을 수 없습니다.\033[0m\n'
+                                    _dk_pause
+                                fi
+                                _DK_MSG="✔ 메뉴 종료 후 복귀: [${_tkey}]"
+                                _dk_load_summary; _dk_load_tab; _dk_build_view
+                                _DK_DIRTY=1; tput civis 2>/dev/null
+                                ;;
+                            s|S)
+                                tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+                                _dk_p '\033[1;36m◈ Docker Hub 이미지 검색 · 스타 랭크 · 원클릭 설치\033[0m\n'
+                                _dk_p '──────────────────────────────────────────────────────────────────────\n'
+                                local _sq="" _snum="" _simg="" _sn=0 _sarr=() _snm _sst _sof _sdesc
+                                read -p "검색 키워드 (예: nginx, portainer, immich, mysql): " _sq </dev/tty
+                                if [ -n "$_sq" ]; then
+                                    _dk_p '\033[1;33m⏳ Docker Hub 검색 중 (Star 순 정렬)...\033[0m\n\n'
+                                    while IFS='|' read -r _snm _sst _sof _sdesc; do
+                                        [ -z "$_snm" ] && continue
+                                        _sn=$((_sn + 1))
+                                        _sarr[$_sn]="$_snm"
+                                        printf '  %2d) %-32s ★%-6s %-4s %s\n' "$_sn" "$_snm" "$_sst" "$_sof" "${_sdesc:0:45}"
+                                    done < <(docker search --limit 25 --format '{{.Name}}|{{.StarCount}}|{{.IsOfficial}}|{{.Description}}' "$_sq" 2>/dev/null | sort -t'|' -k2 -rn)
+                                    if [ "$_sn" -gt 0 ]; then
+                                        _dk_p '\n'
+                                        read -p "설치(docker pull)할 번호 또는 이미지명 입력 (취소=Enter): " _snum </dev/tty
+                                        if [ -n "$_snum" ]; then
+                                            if printf '%s' "$_snum" | grep -qE '^[0-9]+$' && [ -n "${_sarr[$_snum]}" ]; then
+                                                _simg="${_sarr[$_snum]}"
+                                            else
+                                                _simg="$_snum"
+                                            fi
+                                            _dk_p '\033[1;32m▶ docker pull %s\033[0m\n' "$_simg"
+                                            docker pull "$_simg" && _DK_MSG="✔ 이미지 설치(pull) 완료: ${_simg}" || _DK_MSG="✖ pull 실패: ${_simg}"
+                                            _dk_load_summary
+                                        fi
+                                    else
+                                        _dk_p '\033[0;33m검색 결과가 없습니다.\033[0m\n'
+                                    fi
+                                    _dk_pause
                                 fi
                                 _DK_DIRTY=1; tput civis 2>/dev/null
                                 ;;
