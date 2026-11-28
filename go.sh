@@ -3645,15 +3645,18 @@ menufunc() {
                         done
 
                         # 한줄짜리 한줄만 하나만
-                        # 명령줄이 하나일때 실행 loop 종료하고 상위 메뉴 이동
-                        #[ $num_commands -eq 1 ] && break
+                        # 명령줄이 하나일때 실행 loop 종료:
+                        # - 현재 메뉴 화면에서 번호/단축키로 진입한 경우(skipmain 미설정): nav_back 하면
+                        #   상위(초기) 메뉴로 튕기므로, 진입 컨텍스트(NAVENTRY_*)만 복원하고 break 하여
+                        #   현재 페이지에 그대로 머무른다.
+                        # - 외부 직행 진입(skipmain="y", 예: [I] 색인 검색/초기 인자)일 때만 이전 화면 복귀.
                         if [ "$num_commands" -eq 1 ] || [ "${_non_meta_cnt:-0}" -eq 1 ]; then
-                            # 이전에는 ooldscut(파일순서 기준 최근 메뉴) 를 보고 이동해서
-                            # 실제 경로와 다른곳으로 튀거나 아무 이동도 안 하는 경우가 있었음
-                            # 이력 스택의 바로 위 화면으로 정확히 복귀
-                            if [ -n "$NAV_scut" ]; then
+                            if [ "${skipmain:-}" = "y" ] && [ -n "$NAV_scut" ]; then
                                 echo "go to [${NAV_scut}] ${NAV_title}" #; readxy
                                 nav_back 1
+                            else
+                                chosen_command_sub="${NAVENTRY_sub-}"
+                                title_of_menu_sub="${NAVENTRY_title-}"
                             fi
                             break
                         fi
