@@ -22026,7 +22026,7 @@ services:
     image: weejewel/wg-easy
     container_name: wg-easy
     volumes:
-      - /data/wireguard/data:/etc/wireguard
+      - ./data:/etc/wireguard
     ports:
       - "51820:51820/udp"
       - "51821:51821/tcp"
@@ -22773,10 +22773,10 @@ services:
     links:
       - "db:mariadb"
     volumes:
-      - /data/nextcloud/nextcloud/:/var/www/html/
-      - /data/nextcloud/data/:/var/www/html/data/
-      - /data/nextcloud/apps/:/var/www/html/custom_apps/
-      - /data/nextcloud/theme/:/var/www/html/themes/
+      - ./nextcloud:/var/www/html
+      - ./data:/var/www/html/data
+      - ./apps:/var/www/html/custom_apps
+      - ./theme:/var/www/html/themes
     environment:
       - MYSQL_HOST=mariadb
       - MYSQL_DATABASE=nextcloud
@@ -22794,8 +22794,8 @@ services:
       - MYSQL_USER=nextcloud
       - MYSQL_PASSWORD=nextcloud
     volumes:
-      - /data/mariadb/data/:/var/lib/mysql/
-      - /data/mariadb/log/:/var/log/mysql/
+      - ./db/data:/var/lib/mysql
+      - ./db/log:/var/log/mysql
 
 
 EOF
