@@ -17152,11 +17152,12 @@ EOF
         printf '  \033[1;33m5)\033[0m 일시 해제 (제한 OFF · systemctl stop, 재적용 가능)\n'
         printf '  \033[1;31m6)\033[0m 완전 삭제 (tc 해제 + systemd 삭제 + 스크립트/설정 제거)\n'
         printf '  \033[1;36m7)\033[0m 상세 상태 확인 (tc -s qdisc & systemctl status)\n'
+        printf '  \033[1;35m8)\033[0m 트래픽 · 속도 테스트 메뉴 진입 [nmon] (iftop/nload/speedtest)\n'
         printf '  \033[1;37m0/q)\033[0m 돌아가기\n'
         printf '────────────────────────────────────────────────────────────────────────\n'
 
         local _sel=""
-        read -p ">>> 선택 [1-7, 0/q] : " _sel </dev/tty
+        read -p ">>> 선택 [1-8, 0/q] : " _sel </dev/tty
         case "$_sel" in
             ""|0|q|Q|b|B) return 0 ;;
             1) _pxbw_install_and_apply "70mbit" "70mbit" "$_iface" ;;
@@ -17205,6 +17206,10 @@ EOF
                 fi
                 echo
                 systemctl status net-limit.service --no-pager 2>/dev/null || printf '(net-limit.service 미설치)\n'
+                ;;
+            8)
+                bash "${BASH_SOURCE[0]:-$0}" nmon
+                continue
                 ;;
             *)
                 printf '\033[1;31m잘못된 선택입니다.\033[0m\n'
