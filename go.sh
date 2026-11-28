@@ -17302,6 +17302,203 @@ _dkgit_manage_dir() {
     return 0
 }
 
+_dkgit_read_text_to_file() {
+    local _label="$1" _outfile="$2" _optional="${3:-0}"
+    _dk_p '\n\033[1;36m▶ %s 입력 방식 선택\033[0m\n' "$_label"
+    _dk_p '  1) 터미널에 바로 붙여넣기 (우클릭 붙여넣기 후 새 줄에서 \033[1;33mCtrl+D\033[0m 입력) [기본]\n'
+    _dk_p '  2) 편집기(%s)로 열어서 붙여넣기\n' "${EDITOR:-vi}"
+    _dk_p '  3) 서버에 있는 기존 파일 경로 복사\n'
+    [ "$_optional" = "1" ] && _dk_p '  4) 건너뛰기 (.env 없음)\n'
+    _dk_p '  0) 취소\n'
+
+    local _im=""
+    read -p ">>> 선택 [1]: " _im </dev/tty
+    [ -z "$_im" ] && _im="1"
+    case "$_im" in
+        0|q|Q|c|C) return 2 ;;
+        4)
+            [ "$_optional" = "1" ] && return 3
+            return 2
+            ;;
+        1)
+            _dk_p '\033[1;33m─── 아래에 %s 내용을 붙여넣고, 끝에서 Enter 후 [Ctrl+D] 를 누르세요 ───\033[0m\n' "$_label"
+            cat </dev/tty > "$_outfile"
+            # Windows CRLF 붙여넣기 자동 정리
+            sed -i 's/\r$//' "$_outfile" 2>/dev/null || true
+            if [ ! -s "$_outfile" ]; then
+                _dk_p '\033[1;31m[안내] 입력된 내용이 없습니다.\033[0m\n'
+                rm -f "$_outfile"
+                return 1
+            fi
+            _dk_p '\033[1;32m✔ %s 저장 완료 (%s줄)\033[0m\n' "$_label" "$(wc -l < "$_outfile" | tr -d ' ')"
+            return 0
+            ;;
+        2)
+            ${EDITOR:-vi} "$_outfile" </dev/tty
+            sed -i 's/\r$//' "$_outfile" 2>/dev/null || true
+            [ -s "$_outfile" ] && return 0
+            rm -f "$_outfile"
+            return 1
+            ;;
+        3)
+            local _src=""
+            read -p "복사할 원본 파일 경로: " _src </dev/tty
+            if [ -n "$_src" ] && [ -f "$_src" ]; then
+                cp -f "$_src" "$_outfile"
+                sed -i 's/\r$//' "$_outfile" 2>/dev/null || true
+                _dk_p '\033[1;32m✔ 파일 복사 완료: %s\033[0m\n' "$_src"
+                return 0
+            else
+                _dk_p '\033[1;31m[오류] 파일을 찾을 수 없습니다: %s\033[0m\n' "$_src"
+                return 1
+            fi
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+_dkgit_paste_deploy() {
+    local _base="${1:-${DKGIT_BASE:-/opt/docker-apps}}"
+    local _pubip="${2:-localhost}"
+    clear
+    _dk_p '\033[1;36m◈ 외부 Compose + .env 붙여넣기 원클릭 배포 [dkpaste]\033[0m\n'
+    _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+    _dk_p '  🌐 스택 조합 사이트 : \033[1;33mhttps://self-host.fyi/apps\033[0m  (또는 https://self-host.fyi/compose)\n'
+    _dk_p '  📁 기본 설치 경로   : \033[1;32m%s/<스택이름>\033[0m\n' "$_base"
+    _dk_p '  💡 사용법: 사이트에서 원하는 앱들을 고른 뒤 생성된 docker-compose.yml + .env 를 복사해 붙여넣기!\n'
+    _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
+
+    local _def_name="dcm-$(date +%m%d-%H%M)"
+    local _sname=""
+    read -p "1) 스택(폴더) 이름 입력 [${_def_name}] (취소=0): " _sname </dev/tty
+    case "$_sname" in
+        0|q|Q) return 0 ;;
+        "") _sname="$_def_name" ;;
+    esac
+    # 폴더명 안전 문자 정리
+    _sname="$(printf '%s' "$_sname" | tr -cd 'a-zA-Z0-9._-')"
+    if [ -z "$_sname" ]; then
+        _dk_p '\033[1;31m[오류] 유효한 스택 이름이 아닙니다.\033[0m\n'
+        sleep 1.5
+        return 1
+    fi
+
+    local _dir="${_base}/${_sname}"
+    if [ -d "$_dir" ]; then
+        _dk_p '\033[1;33m[안내] 이미 존재하는 스택 폴더입니다: %s\033[0m\n' "$_dir"
+        _dkgit_manage_dir "$_sname" "$_dir" "docker-compose.yml" 1
+        return 0
+    fi
+
+    mkdir -p "$_dir" || { _dk_p '\033[1;31m[오류] 폴더 생성 실패: %s\033[0m\n' "$_dir"; return 1; }
+    local _cfile="${_dir}/docker-compose.yml"
+    local _efile="${_dir}/.env"
+
+    # 2) docker-compose.yml 입력
+    if ! _dkgit_read_text_to_file "docker-compose.yml" "$_cfile" 0; then
+        rm -rf "$_dir" 2>/dev/null
+        read -p $'\n[Enter] 돌아가기...' _ </dev/tty
+        return 1
+    fi
+
+    # 3) .env 입력 (${VAR} 사용 여부 자동 안내)
+    local _has_vars=""
+    _has_vars="$(grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' "$_cfile" 2>/dev/null | sort -u | head -n 8 | tr '\n' ' ')"
+    if [ -n "$_has_vars" ]; then
+        _dk_p '\n\033[1;33mℹ compose 파일에서 환경 변수가 감지되었습니다: %s\033[0m\n' "$_has_vars"
+        _dk_p '  → 사이트에서 함께 생성된 \033[1;32m.env\033[0m 내용을 붙여넣어 주세요.\n'
+    fi
+    local _erc=0
+    _dkgit_read_text_to_file ".env" "$_efile" 1 || _erc=$?
+    if [ "$_erc" -eq 2 ]; then
+        rm -rf "$_dir" 2>/dev/null
+        return 0
+    fi
+
+    # 4) .env 내 CONFIG_PATH / DATA_PATH 폴더 자동 생성 (상대/절대 경로 안전 처리)
+    if [ -f "$_efile" ]; then
+        local _pvar _pval
+        for _pvar in CONFIG_PATH DATA_PATH; do
+            _pval="$(grep -E "^[[:space:]]*${_pvar}=" "$_efile" 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d "\"'[:space:]")"
+            if [ -n "$_pval" ]; then
+                case "$_pval" in
+                    /*) mkdir -p "$_pval" 2>/dev/null || true ;;
+                    *)  mkdir -p "${_dir}/${_pval}" 2>/dev/null || true ;;
+                esac
+            fi
+        done
+    fi
+
+    # 5) Compose 문법 & 변수 치환 사전 검증
+    _dk_p '\n\033[1;33m[검증] docker compose config 문법 검사 중...\033[0m\n'
+    local _cfg_err=""
+    if ! _cfg_err="$(_dk_compose_run "$_dir" -f "$_cfile" config -q 2>&1)"; then
+        _dk_p '\033[1;31m[경고] Compose 문법/변수 오류가 감지되었습니다:\033[0m\n%s\n' "$_cfg_err"
+        local _fix=""
+        read -p "편집기로 수정할까요? [Y=편집 / i=무시하고 진행 / c=취소]: " _fix </dev/tty
+        case "$_fix" in
+            c|C) rm -rf "$_dir" 2>/dev/null; return 0 ;;
+            i|I) ;;
+            *)
+                [ -f "$_efile" ] && ${EDITOR:-vi} "$_efile" </dev/tty
+                ${EDITOR:-vi} "$_cfile" </dev/tty
+                ;;
+        esac
+    else
+        _dk_p '\033[1;32m✔ Compose 문법 및 .env 변수 검증 통과!\033[0m\n'
+    fi
+
+    # 6) 호스트 포트 충돌 일괄 사전 체크
+    local _ports_list="" _hp _pinuse _conflict_cnt=0
+    _ports_list="$(_dk_compose_run "$_dir" -f "$_cfile" config 2>/dev/null | awk '/published:/{gsub(/"/,"",$2); print $2}' | sort -u)"
+    if [ -z "$_ports_list" ]; then
+        _ports_list="$(grep -oE '^[[:space:]]*-[[:space:]]*"?[0-9]+:[0-9]+' "$_cfile" 2>/dev/null | grep -oE '[0-9]+:' | tr -d ':' | sort -u)"
+    fi
+    if [ -n "$_ports_list" ]; then
+        for _hp in $_ports_list; do
+            _pinuse=""
+            if type -P ss >/dev/null 2>&1; then
+                _pinuse="$(command ss -tlnH 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_hp}$" | head -n 1)"
+            elif type -P netstat >/dev/null 2>&1; then
+                _pinuse="$(command netstat -tln 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_hp}$" | head -n 1)"
+            fi
+            if [ -n "$_pinuse" ]; then
+                _dk_p '\033[1;31m  ⚠ 포트 충돌 감지: 호스트 포트 %s 이(가) 이미 사용 중 (%s)\033[0m\n' "$_hp" "$_pinuse"
+                _conflict_cnt=$((_conflict_cnt + 1))
+            fi
+        done
+        [ "$_conflict_cnt" -eq 0 ] && _dk_p '\033[1;32m✔ 호스트 포트 충돌 없음 (예정 포트: %s)\033[0m\n' "$(echo $_ports_list | tr '\n' ' ')"
+    fi
+
+    # 7) 실행 전 최종 확인
+    local _go=""
+    read -p $'\n바로 배포(compose up -d)할까요? [Enter=실행 / e=편집 / c=취소]: ' _go </dev/tty
+    case "$_go" in
+        c|C) rm -rf "$_dir" 2>/dev/null; return 0 ;;
+        e|E)
+            [ -f "$_efile" ] && ${EDITOR:-vi} "$_efile" </dev/tty
+            ${EDITOR:-vi} "$_cfile" </dev/tty
+            ;;
+    esac
+
+    _dk_p '\n\033[1;33m[실행] %s -f docker-compose.yml up -d 진행 중...\033[0m\n' "$_DK_COMPOSE_BIN"
+    if _dk_compose_run "$_dir" -f "$_cfile" up -d; then
+        echo
+        _dk_p '\033[1;32m==============================================================\033[0m\n'
+        _dk_p '\033[1;32m  ✔ %s 배포 완료!\033[0m\n' "$_sname"
+        _dk_p '  • 설치 경로 : %s\n' "$_dir"
+        [ -n "$_ports_list" ] && _dk_p '  • 열린 포트 : %s (http://%s:<포트>)\n' "$(echo $_ports_list | tr '\n' ' ')" "$_pubip"
+        _dk_p '  • 통합 관리 : [dkms] 1번 메뉴 → [2] Stacks 탭에서 자동 관리 가능\n'
+        _dk_p '\033[1;32m==============================================================\033[0m\n'
+        _dk_compose_run "$_dir" -f "$_cfile" ps
+    else
+        _dk_p '\033[1;31m[실패] compose up 중 오류가 발생했습니다. .env 또는 포트를 확인해 주세요.\033[0m\n'
+        _dk_p '  경로: %s\n' "$_dir"
+    fi
+    read -p $'\n[Enter] 돌아가기...' _ </dev/tty
+    return 0
+}
+
 dkgit() {
     local IFS=$' \t\n'
     _dk_detect_env || return 1
@@ -17309,9 +17506,14 @@ dkgit() {
     local _base="${DKGIT_BASE:-/opt/docker-apps}"
     mkdir -p "$_base" 2>/dev/null || { _dk_p '\033[1;31m[오류] 디렉터리 생성 실패: %s\033[0m\n' "$_base"; return 1; }
 
+    local _pubip="${publicip:-}"
+    [ -z "$_pubip" ] && _pubip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [ -z "$_pubip" ] && _pubip="localhost"
+
     local _mode="git"
     case "${1:-}" in
         -t|--template|template|builtin) _mode="builtin" ;;
+        -p|--paste|paste|dcm) _dkgit_paste_deploy "$_base" "$_pubip"; return $? ;;
     esac
 
     # GitHub 카탈로그: "이름|owner/repo|compose상대경로|기본포트|카테고리|설명|중복감지정규식"
@@ -17352,10 +17554,6 @@ dkgit() {
         "nagios|BUILTIN|docker-compose.yml|3080|모니터링|Nagios 4 서버·네트워크 모니터링|nagios"
         "lamp|BUILTIN|docker-compose.yml|8080|웹/개발|Apache + PHP 8 + MySQL 8 + phpMyAdmin|lamp_php_apache_app"
     )
-
-    local _pubip="${publicip:-}"
-    [ -z "$_pubip" ] && _pubip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    [ -z "$_pubip" ] && _pubip="localhost"
 
     while true; do
         clear
@@ -17407,18 +17605,19 @@ dkgit() {
 
         _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
         if [ "$_mode" = "builtin" ]; then
-            _dk_p '  \033[1;36m[g]\033[0m GitHub 앱 전환(16종)  \033[1;33m[u]\033[0m Custom URL  \033[1;33m[l]\033[0m 실행 상태(ps)  \033[1;33m[q/0]\033[0m 돌아가기\n'
+            _dk_p '  \033[1;36m[g]\033[0m GitHub(16종)  \033[1;32m[p]\033[0m 붙여넣기(self-host.fyi)  \033[1;33m[u]\033[0m URL  \033[1;33m[l]\033[0m ps  \033[1;33m[q/0]\033[0m 종료\n'
         else
-            _dk_p '  \033[1;35m[t]\033[0m 내장 템플릿 전환(15종·Jellyfin등)  \033[1;33m[u]\033[0m Custom URL  \033[1;33m[l]\033[0m 상태(ps)  \033[1;33m[q/0]\033[0m 종료\n'
+            _dk_p '  \033[1;35m[t]\033[0m 내장템플릿(15종)  \033[1;32m[p]\033[0m 붙여넣기(self-host.fyi)  \033[1;33m[u]\033[0m URL  \033[1;33m[l]\033[0m ps  \033[1;33m[q/0]\033[0m 종료\n'
         fi
         _dk_p '──────────────────────────────────────────────────────────────────────────────────────\n'
 
         local _sel=""
-        read -p ">>> 선택 [1-${#_CUR_CAT[@]}, t/g, u, l, q] : " _sel </dev/tty
+        read -p ">>> 선택 [1-${#_CUR_CAT[@]}, t/g, p, u, l, q] : " _sel </dev/tty
         case "$_sel" in
             ""|0|q|Q|b|B) return 0 ;;
             t|T) _mode="builtin"; continue ;;
             g|G) _mode="git"; continue ;;
+            p|P) _dkgit_paste_deploy "$_base" "$_pubip"; continue ;;
             l|L)
                 echo
                 _dk_p '\033[1;36m◈ 설치된 앱 폴더 (%s)\033[0m\n' "$_base"
