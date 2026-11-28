@@ -17064,6 +17064,102 @@ _px_vm_inspect() {
     _px_pause
 }
 
+_px_guest_shell() {
+    local _vmid="$1" _nm="$2" _node="$3"
+    local _cmd _res _out _err _rc
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    _px_p '\033[1;36m◈ QEMU Guest Agent 응급 쉘: qemu/%s (%s) @%s\033[0m\n' "$_vmid" "$_nm" "$_node"
+    _px_p '──────────────────────────────────────────────────────────────────────\n'
+    _px_p '\033[0;37m  • SSH/네트워크 없이 호스트<->VM 직통 채널로 명령을 실행합니다.\n'
+    _px_p '  • 대화형 앱(vi/top)은 불가 | 종료: exit 또는 q\n'
+    _px_p '  • 팁: 시리얼콘솔 영구활성화 -> systemctl enable --now serial-getty@ttyS0\033[0m\n\n'
+
+    if [ "$_node" = "$_PX_NODE" ]; then
+        qm agent "$_vmid" ping >/dev/null 2>&1
+    else
+        ssh "$_node" "qm agent ${_vmid} ping" >/dev/null 2>&1
+    fi
+    if [ $? -ne 0 ]; then
+        _px_p '\033[1;31m✖ QEMU Guest Agent 응답이 없습니다.\033[0m\n'
+        _px_p '  VM 설정에 \033[1;33magent: 1\033[0m 이 켜져 있고, 게스트 내부에 \033[1;33mqemu-guest-agent\033[0m 가 실행 중이어야 합니다.\n'
+        _px_pause
+        return 1
+    fi
+
+    _px_p '\033[1;32m✔ Guest Agent 연결 확인 완료!\033[0m\n\n'
+    while true; do
+        printf '\033[1;35m[agent:%s(%s)]#\033[0m ' "$_vmid" "$_nm"
+        IFS= read -r _cmd </dev/tty || break
+        [ -z "$_cmd" ] && continue
+        case "$_cmd" in
+            exit|quit|q) break ;;
+        esac
+        if [ "$_node" = "$_PX_NODE" ]; then
+            _res=$(qm guest exec "$_vmid" -- bash -c "$_cmd" 2>&1)
+        else
+            _res=$(ssh "$_node" "qm guest exec ${_vmid} -- bash -c $(printf '%q' "$_cmd")" 2>&1)
+        fi
+        if [ "$_PX_HAS_JQ" = "1" ] && printf '%s\n' "$_res" | jq -e . >/dev/null 2>&1; then
+            _out=$(printf '%s\n' "$_res" | jq -r '.["out-data"] // empty')
+            _err=$(printf '%s\n' "$_res" | jq -r '.["err-data"] // empty')
+            _rc=$(printf '%s\n' "$_res" | jq -r '.exitcode // 0')
+            if [ -n "$_out" ]; then
+                printf '%s\n' "$_out"
+            fi
+            if [ -n "$_err" ]; then
+                printf '\033[1;31m%s\033[0m\n' "$_err"
+            fi
+            if [ "$_rc" != "0" ]; then
+                printf '\033[1;33m[exit: %s]\033[0m\n' "$_rc"
+            fi
+        else
+            printf '%s\n' "$_res"
+        fi
+    done
+    return 0
+}
+
+_px_serial_enter() {
+    local _vmid="$1" _nm="$2" _node="$3"
+    local _conf _ans _has_agent=0
+    _conf=$(_px_find_conf "$_vmid" "qemu" "$_node")
+    if [ -n "$_conf" ] && [ -f "$_conf" ] && ! grep -q '^serial0:' "$_conf" 2>/dev/null; then
+        _px_p '\n\033[1;33m⚠ 이 VM(%s)에 serial0 (가상 시리얼 포트)가 설정되어 있지 않습니다.\033[0m\n' "$_vmid"
+        _px_p '  (serial0 가 없으면 qm terminal 연결 시 화면이 나오지 않습니다)\n'
+        read -p "지금 'qm set ${_vmid} --serial0 socket' 을 추가할까요? [Y/n]: " _ans </dev/tty
+        if ! printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+            if [ "$_node" = "$_PX_NODE" ]; then
+                qm set "$_vmid" --serial0 socket
+                qm agent "$_vmid" ping >/dev/null 2>&1 && _has_agent=1
+            else
+                ssh "$_node" "qm set ${_vmid} --serial0 socket"
+                ssh "$_node" "qm agent ${_vmid} ping" >/dev/null 2>&1 && _has_agent=1
+            fi
+            if [ "$_has_agent" = "1" ]; then
+                read -p "Guest Agent 감지됨! 게스트 내부에 serial-getty@ttyS0 도 미리 켜둘까요? [Y/n]: " _ans </dev/tty
+                if ! printf '%s' "$_ans" | grep -qE '^[Nn]$'; then
+                    if [ "$_node" = "$_PX_NODE" ]; then
+                        qm guest exec "$_vmid" -- bash -c "systemctl enable --now serial-getty@ttyS0 2>/dev/null || true" >/dev/null 2>&1
+                    else
+                        ssh "$_node" "qm guest exec ${_vmid} -- bash -c 'systemctl enable --now serial-getty@ttyS0 2>/dev/null || true'" >/dev/null 2>&1
+                    fi
+                    _px_p '\033[1;32m✔ 게스트 serial-getty@ttyS0 활성화 완료!\033[0m\n'
+                fi
+            fi
+            _px_p '\n\033[1;32m✔ serial0 추가 완료!\033[0m\n'
+            _px_p '  ※ 하드웨어 반영을 위해 VM을 한 번 \033[1;33mStop -> Start (재시작)\033[0m 하면 바로 qm terminal 로 로그인 프롬프트가 뜹니다.\n'
+            _px_pause
+            return 0
+        fi
+    fi
+    _px_p '\033[0;36m(연결 후 화면이 비어 있으면 Enter 를 한 번 눌러보세요 | 종료: Ctrl+O)\033[0m\n'
+    if [ "$_node" = "$_PX_NODE" ]; then
+        qm terminal "$_vmid"
+    else
+        ssh -t "$_node" "qm terminal ${_vmid}"
+    fi
+}
+
 _px_vm_action() {
     local _act="$1" _idx="$2"
     local _meta="${_PX_META[$_idx]}"
@@ -17080,7 +17176,7 @@ _px_vm_action() {
             _px_p '   1) Start / Shutdown(정상종료) 토글\n'
             _px_p '   2) 강제 중지 (Hard Stop)\n'
             _px_p '   3) 재부팅 (Reboot)\n'
-            _px_p '   4) 쉘 진입 (LXC: pct enter / VM: qssh 또는 qm terminal)\n'
+            _px_p '   4) 쉘 진입 (LXC: pct enter / VM: SSH · 시리얼콘솔 · Guest Agent)\n'
             _px_p '   5) 상세 정보 + IP + LVM 디스크 + 설정 요약\n'
             _px_p '   6) 설정 파일(.conf) 편집 (vi2)\n'
             _px_p '   7) 빠른 스냅샷 생성 (snapshot)\n'
@@ -17196,23 +17292,18 @@ _px_vm_action() {
                     ssh -t "$_node" "pct enter ${_vmid}"
                 fi
             else
-                _px_p '  1) SSH 접속 (qssh %s root)\n  2) 시리얼 콘솔 (qm terminal %s)\n  0) 취소\n' "$_vmid" "$_vmid"
+                _px_p '  1) SSH 접속 (qssh %s root)\n  2) 시리얼 콘솔 (qm terminal %s — serial0 미설정 시 자동 설정 안내)\n  3) Guest Agent 응급 쉘 (qm guest exec — SSH·네트워크 없이 직통 실행)\n  0) 취소\n' "$_vmid" "$_vmid"
                 read -p "진입 방식 선택 [1]: " _ans </dev/tty
                 case "$_ans" in
                     0) return ;;
-                    2)
-                        if [ "$_node" = "$_PX_NODE" ]; then
-                            qm terminal "$_vmid"
-                        else
-                            ssh -t "$_node" "qm terminal ${_vmid}"
-                        fi
-                        ;;
+                    2) _px_serial_enter "$_vmid" "$_nm" "$_node" ;;
+                    3) _px_guest_shell "$_vmid" "$_nm" "$_node" ;;
                     *)
                         if declare -f qssh >/dev/null 2>&1; then
                             qssh "$_vmid" root
                         else
-                            _px_p '\033[1;33mqssh 함수를 찾을 수 없어 qm terminal 로 전환합니다.\033[0m\n'
-                            qm terminal "$_vmid"
+                            _px_p '\033[1;33mqssh 함수를 찾을 수 없어 시리얼 콘솔로 전환합니다.\033[0m\n'
+                            _px_serial_enter "$_vmid" "$_nm" "$_node"
                         fi
                         ;;
                 esac
