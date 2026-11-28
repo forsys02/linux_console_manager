@@ -16669,6 +16669,7 @@ _px_load_tab() {
                 _PX_META[$_PX_TOTAL]="$_c1"
                 _PX_TOTAL=$((_PX_TOTAL + 1))
             done <<'EOF'
+pxguest|guest agent & serial0 setup|[VM/콘솔]|게스트 qemu-guest-agent + serial-getty@ttyS0 원클릭 설치·원격푸시·점검
 px|manage vms|[VM/제어]|LXC/KVM 목록·시작·중지·재부팅 기본 관리
 pxx|start stop enter vm|[VM/제어]|빠른 VM/CT 제어 및 진입 (vm 함수)
 pxm|monitoring vms|[모니터링]|VM/CT 리소스 실시간 모니터링
