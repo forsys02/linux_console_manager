@@ -16929,13 +16929,13 @@ dkgit() {
             done
         fi
 
-        # 4) 포트 충돌 사전 체크 (ss / netstat)
+        # 4) 포트 충돌 사전 체크 (ss / netstat) — go.sh 내부 ss() 함수 충돌 방지를 위해 type -P / command ss 사용
         local _port_in_use=""
         if [ -n "$_pt" ] && [ "$_pt" != "0" ]; then
-            if command -v ss >/dev/null 2>&1; then
-                _port_in_use="$(ss -tlnH 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
-            elif command -v netstat >/dev/null 2>&1; then
-                _port_in_use="$(netstat -tln 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
+            if type -P ss >/dev/null 2>&1; then
+                _port_in_use="$(command ss -tlnH 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
+            elif type -P netstat >/dev/null 2>&1; then
+                _port_in_use="$(command netstat -tln 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
             fi
         fi
         if [ -n "$_port_in_use" ]; then
