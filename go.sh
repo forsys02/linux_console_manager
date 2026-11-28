@@ -16636,6 +16636,280 @@ Containers:
 }
 
 # ==============================================================================
+# GitHub Compose 자동 배포: dkgit (Popular Self-Hosted Apps 1-Click Deploy)
+# - 공식 GitHub 레포에서 compose.yml/docker-compose.yml 을 제공하는 16개 인기 앱 + Custom URL
+# - git clone --depth 1 -> compose 자동탐지 -> .env 자동복사 -> 포트충돌 체크 -> compose up -d
+# - 기본 설치 경로 /opt/docker-apps/<app> (dkms 스캔 경로에 자동 포함)
+# ==============================================================================
+dkgit() {
+    _dk_detect_env || return 1
+    if ! command -v git >/dev/null 2>&1; then
+        _dk_p '\033[1;33m[안내] git 이 설치되어 있지 않습니다.\033[0m\n'
+        local _gi=""
+        read -p "지금 git 을 설치할까요? [Y/n]: " _gi </dev/tty
+        if ! printf '%s' "$_gi" | grep -qE '^[Nn]$'; then
+            yyay git || { _dk_p '\033[1;31m[실패] git 설치 실패\033[0m\n'; return 1; }
+        else
+            return 1
+        fi
+    fi
+
+    local _base="${DKGIT_BASE:-/opt/docker-apps}"
+    mkdir -p "$_base" 2>/dev/null || { _dk_p '\033[1;31m[오류] 디렉터리 생성 실패: %s\033[0m\n' "$_base"; return 1; }
+
+    # 카탈로그: "이름|owner/repo|compose상대경로|기본포트|카테고리|설명"
+    local -a _DKGIT_CAT=(
+        "uptime-kuma|louislam/uptime-kuma|compose.yaml|3001|모니터링|실시간 서버·웹 업타임 모니터링"
+        "dockge|louislam/dockge|compose.yaml|5001|관리|웹 UI Docker Compose 스택 관리자"
+        "dozzle|amir20/dozzle|docker-compose.yml|8080|모니터링|실시간 Docker 로그 웹 뷰어"
+        "umami|umami-software/umami|docker-compose.yml|3000|분석|프라이버시 친화 웹 방문자 통계"
+        "open-webui|open-webui/open-webui|docker-compose.yaml|3000|AI|Ollama/OpenAI ChatGPT 스타일 웹 UI"
+        "n8n|n8n-io/n8n-hosting|docker-compose/withPostgres/docker-compose.yml|5678|자동화|노코드 워크플로우 자동화"
+        "dify|langgenius/dify|docker/docker-compose.yaml|80|AI|LLM 앱·에이전트 빌더 플랫폼"
+        "flowise|FlowiseAI/Flowise|docker/docker-compose.yml|3000|AI|드래그앤드롭 LLM 플로우 빌더"
+        "immich|immich-app/immich|docker/docker-compose.yml|2283|사진|구글 포토 대체 AI 사진 백업"
+        "paperless-ngx|paperless-ngx/paperless-ngx|docker/compose/docker-compose.sqlite.yml|8000|문서|PDF·문서 OCR 아카이빙"
+        "stirling-pdf|Stirling-Tools/Stirling-PDF|exampleYmlFiles/docker-compose-latest.yml|8080|문서|PDF 병합·분할·변환 만능 웹툴"
+        "memos|usememos/memos|scripts/compose.yaml|5230|메모|초경량 개인 메모·트윗 스타일 노트"
+        "nocodb|nocodb/nocodb|docker-compose/2_pg/docker-compose.yml|8080|DB|오픈소스 Airtable (노코드 DB)"
+        "karakeep|karakeep-app/karakeep|docker/docker-compose.yml|3000|북마크|AI 태그 북마크·읽기목록 아카이브"
+        "actual|actualbudget/actual|docker-compose.yml|5006|가계부|개인 가계부·예산 관리 웹앱"
+        "linkwarden|linkwarden/linkwarden|docker-compose.yml|3000|북마크|웹페이지 영구 보관 북마크 매니저"
+    )
+
+    local _pubip="${publicip:-}"
+    [ -z "$_pubip" ] && _pubip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [ -z "$_pubip" ] && _pubip="localhost"
+
+    while true; do
+        clear
+        _dk_p '\033[1;36m◈ GitHub Compose 자동 배포 [dkgit]\033[0m  설치경로: \033[1;33m%s\033[0m  Compose: \033[1;32m%s\033[0m\n' "$_base" "$_DK_COMPOSE_BIN"
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+        _dk_p '  번호만 고르면 git clone → .env 자동생성 → 포트충돌 체크 → compose up -d 원클릭!\n'
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+
+        local _i=0 _row _rest _nm _rp _cf _pt _cg _ds _st
+        for _row in "${_DKGIT_CAT[@]}"; do
+            _i=$((_i + 1))
+            _nm="${_row%%|*}"; _rest="${_row#*|}"
+            _rp="${_rest%%|*}"; _rest="${_rest#*|}"
+            _cf="${_rest%%|*}"; _rest="${_rest#*|}"
+            _pt="${_rest%%|*}"; _rest="${_rest#*|}"
+            _cg="${_rest%%|*}"; _ds="${_rest#*|}"
+            if [ -d "${_base}/${_nm}" ]; then
+                _st='\033[1;32m[설치됨]\033[0m'
+            else
+                _st='        '
+            fi
+            _dk_p '  \033[1;37m%2d)\033[0m %-14s %b \033[0;36m[%-4s]\033[0m %-32s \033[0;90m:%-4s\033[0m\n' \
+                "$_i" "$_nm" "$_st" "$_cg" "$_ds" "$_pt"
+        done
+
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+        _dk_p '  \033[1;33m[u]\033[0m Custom GitHub URL 직접 입력   \033[1;33m[l]\033[0m 설치된 앱 상태(ps)   \033[1;33m[q/0]\033[0m 돌아가기\n'
+        _dk_p '──────────────────────────────────────────────────────────────────────────────────\n'
+
+        local _sel=""
+        read -p ">>> 선택 [1-${#_DKGIT_CAT[@]}, u, l, q] : " _sel </dev/tty
+        case "$_sel" in
+            ""|0|q|Q|b|B) return 0 ;;
+            l|L)
+                echo
+                _dk_p '\033[1;36m◈ 설치된 앱 폴더 (%s)\033[0m\n' "$_base"
+                ls -1 "$_base" 2>/dev/null | sed 's/^/  - /'
+                echo
+                _dk_p '\033[1;36m◈ 실행 중 Docker 컨테이너\033[0m\n'
+                docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+                read -p $'\n[Enter] 계속...' _ </dev/tty
+                continue
+                ;;
+            u|U)
+                local _url="" _cname=""
+                read -p "GitHub 레포 URL (예: https://github.com/owner/repo 또는 owner/repo): " _url </dev/tty
+                [ -z "$_url" ] && continue
+                case "$_url" in
+                    http://*|https://*|git@*) ;;
+                    */*) _url="https://github.com/${_url}" ;;
+                    *) _dk_p '\033[1;31m[오류] 올바른 GitHub URL 형식이 아닙니다.\033[0m\n'; sleep 1.5; continue ;;
+                esac
+                _cname="$(basename "${_url%.git}")"
+                _nm="$_cname"; _rp="$_url"; _cf="AUTO"; _pt="8080"; _ds="Custom GitHub Repo"
+                ;;
+            *)
+                if ! printf '%s' "$_sel" | grep -qE '^[0-9]+$' || [ "$_sel" -lt 1 ] || [ "$_sel" -gt "${#_DKGIT_CAT[@]}" ]; then
+                    _dk_p '\033[1;31m잘못된 선택입니다.\033[0m\n'; sleep 1; continue
+                fi
+                _row="${_DKGIT_CAT[$((_sel - 1))]}"
+                _nm="${_row%%|*}"; _rest="${_row#*|}"
+                _rp="${_rest%%|*}"; _rest="${_rest#*|}"
+                _cf="${_rest%%|*}"; _rest="${_rest#*|}"
+                _pt="${_rest%%|*}"; _rest="${_rest#*|}"
+                _cg="${_rest%%|*}"; _ds="${_rest#*|}"
+                _rp="https://github.com/${_rp}.git"
+                ;;
+        esac
+
+        local _dir="${_base}/${_nm}"
+        echo
+        _dk_p '\033[1;36m▶ 대상: %s (%s)\033[0m\n' "$_nm" "$_ds"
+        _dk_p '  레포: %s\n  경로: %s\n' "$_rp" "$_dir"
+
+        # 이미 설치된 폴더가 있으면 관리 메뉴 제공
+        if [ -d "$_dir" ]; then
+            local _ecfile=""
+            if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
+                _ecfile="${_dir}/${_cf}"
+            else
+                _ecfile="$(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | head -n 1)"
+            fi
+            local _ecdir="${_dir}"
+            [ -n "$_ecfile" ] && _ecdir="$(dirname "$_ecfile")"
+            _dk_p '\n\033[1;33m[이미 설치된 앱입니다]\033[0m\n'
+            _dk_p '  1) 업데이트 & 재기동 (git pull + compose up -d)\n'
+            _dk_p '  2) 재시작 (compose restart)\n'
+            _dk_p '  3) 로그 보기 (compose logs --tail 60)\n'
+            _dk_p '  4) 중지 (compose down)\n'
+            _dk_p '  5) compose / .env 편집 (vi)\n'
+            _dk_p '  6) 완전 삭제 (compose down + 폴더 삭제)\n'
+            _dk_p '  0) 취소\n'
+            local _act=""
+            read -p ">>> 작업 선택 [1]: " _act </dev/tty
+            [ -z "$_act" ] && _act="1"
+            case "$_act" in
+                1)
+                    ( cd "$_dir" && git pull --ff-only 2>/dev/null || true )
+                    if [ -n "$_ecfile" ]; then
+                        ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" pull && $_DK_COMPOSE_BIN -f "$_ecfile" up -d && $_DK_COMPOSE_BIN -f "$_ecfile" ps )
+                    fi
+                    ;;
+                2) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" restart && $_DK_COMPOSE_BIN -f "$_ecfile" ps ) ;;
+                3) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" logs --tail=80 ) ;;
+                4) [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" down ) ;;
+                5)
+                    [ -f "${_ecdir}/.env" ] && ${EDITOR:-vi} "${_ecdir}/.env"
+                    [ -n "$_ecfile" ] && ${EDITOR:-vi} "$_ecfile"
+                    ;;
+                6)
+                    local _del=""
+                    read -p "정말 ${_nm} 을(를) 중지하고 ${_dir} 를 삭제할까요? [y/N]: " _del </dev/tty
+                    if printf '%s' "$_del" | grep -qE '^[Yy]$'; then
+                        [ -n "$_ecfile" ] && ( cd "$_ecdir" && $_DK_COMPOSE_BIN -f "$_ecfile" down )
+                        rm -rf "$_dir" && _dk_p '\033[1;32m✔ 삭제 완료: %s\033[0m\n' "$_dir"
+                    fi
+                    ;;
+                *) continue ;;
+            esac
+            read -p $'\n[Enter] 메뉴로 돌아가기...' _ </dev/tty
+            continue
+        fi
+
+        # 1) git clone --depth 1
+        _dk_p '\n\033[1;33m[1/4] git clone --depth 1 진행 중...\033[0m\n'
+        if ! git clone --depth 1 "$_rp" "$_dir"; then
+            _dk_p '\033[1;31m[실패] git clone 실패: %s\033[0m\n' "$_rp"
+            rm -rf "$_dir" 2>/dev/null
+            read -p $'\n[Enter] 계속...' _ </dev/tty
+            continue
+        fi
+
+        # 2) compose 파일 탐지
+        local _cfile=""
+        if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
+            _cfile="${_dir}/${_cf}"
+        else
+            local -a _cands=()
+            local _f
+            while IFS= read -r _f; do
+                [ -n "$_f" ] && _cands[${#_cands[@]}]="$_f"
+            done < <(find "$_dir" -maxdepth 3 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) 2>/dev/null | sort)
+            if [ ${#_cands[@]} -eq 0 ]; then
+                _dk_p '\033[1;31m[오류] 레포 안에 compose.yml / docker-compose.yml 파일이 없습니다.\033[0m\n'
+                read -p $'\n[Enter] 계속...' _ </dev/tty
+                continue
+            elif [ ${#_cands[@]} -eq 1 ]; then
+                _cfile="${_cands[0]}"
+            else
+                _dk_p '\033[1;33m여러 개의 compose 파일이 발견되었습니다:\033[0m\n'
+                local _ci=0
+                for _f in "${_cands[@]}"; do
+                    _ci=$((_ci + 1))
+                    printf '  %2d) %s\n' "$_ci" "${_f#${_dir}/}"
+                done
+                local _csel=""
+                read -p "사용할 번호 [1]: " _csel </dev/tty
+                [ -z "$_csel" ] && _csel="1"
+                _cfile="${_cands[$((_csel - 1))]:-${_cands[0]}}"
+            fi
+        fi
+
+        local _cdir="$(dirname "$_cfile")"
+        _dk_p '\033[1;32m[2/4] Compose 파일 확인: %s\033[0m\n' "${_cfile#${_dir}/}"
+
+        # 3) .env 자동 생성 (.env.example / example.env / .env.sample 탐지)
+        if [ ! -f "${_cdir}/.env" ]; then
+            local _ef
+            for _ef in "${_cdir}/.env.example" "${_cdir}/example.env" "${_cdir}/.env.sample" "${_dir}/.env.example" "${_dir}/example.env"; do
+                if [ -f "$_ef" ]; then
+                    cp -f "$_ef" "${_cdir}/.env"
+                    _dk_p '\033[1;32m[3/4] .env 자동 생성 완료 (원본: %s)\033[0m\n' "${_ef#${_dir}/}"
+                    break
+                fi
+            done
+        fi
+
+        # 4) 포트 충돌 사전 체크 (ss / netstat)
+        local _port_in_use=""
+        if [ -n "$_pt" ] && [ "$_pt" != "0" ]; then
+            if command -v ss >/dev/null 2>&1; then
+                _port_in_use="$(ss -tlnH 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
+            elif command -v netstat >/dev/null 2>&1; then
+                _port_in_use="$(netstat -tln 2>/dev/null | awk '{print $4}' | grep -E "(^|:)${_pt}$" | head -n 1)"
+            fi
+        fi
+        if [ -n "$_port_in_use" ]; then
+            _dk_p '\033[1;31m[경고] 기본 포트 %s 이(가) 이미 사용 중입니다! (%s)\033[0m\n' "$_pt" "$_port_in_use"
+            local _newpt=""
+            read -p "변경할 호스트 포트 입력 (그대로 진행=Enter, 편집=e): " _newpt </dev/tty
+            if [ "$_newpt" = "e" ] || [ "$_newpt" = "E" ]; then
+                ${EDITOR:-vi} "$_cfile"
+            elif printf '%s' "$_newpt" | grep -qE '^[0-9]+$'; then
+                sed -i.bak -E "s/([\"'[:space:]-])${_pt}:/\1${_newpt}:/g" "$_cfile" 2>/dev/null
+                [ -f "${_cdir}/.env" ] && sed -i.bak -E "s/=${_pt}$/=${_newpt}/g" "${_cdir}/.env" 2>/dev/null
+                _pt="$_newpt"
+                _dk_p '\033[1;32m✔ 호스트 포트를 %s 으로 변경했습니다.\033[0m\n' "$_pt"
+            fi
+        else
+            local _ed=""
+            read -p "바로 실행할까요? [Enter=즉시 실행 / e=.env·compose 편집 / c=취소]: " _ed </dev/tty
+            case "$_ed" in
+                c|C) continue ;;
+                e|E)
+                    [ -f "${_cdir}/.env" ] && ${EDITOR:-vi} "${_cdir}/.env"
+                    ${EDITOR:-vi} "$_cfile"
+                    ;;
+            esac
+        fi
+
+        # 5) docker compose up -d 실행
+        _dk_p '\n\033[1;33m[4/4] %s -f "%s" up -d 실행 중...\033[0m\n' "$_DK_COMPOSE_BIN" "$(basename "$_cfile")"
+        if ( cd "$_cdir" && $_DK_COMPOSE_BIN -f "$_cfile" up -d ); then
+            echo
+            _dk_p '\033[1;32m==============================================================\033[0m\n'
+            _dk_p '\033[1;32m  ✔ %s 배포 완료!\033[0m\n' "$_nm"
+            _dk_p '  • 설치 경로 : %s\n' "$_cdir"
+            _dk_p '  • 예상 접속 : \033[1;36mhttp://%s:%s\033[0m\n' "$_pubip" "$_pt"
+            _dk_p '  • 통합 관리 : [dkms] 1번 메뉴 → [2] Stacks 탭에서 자동 관리 가능\n'
+            _dk_p '\033[1;32m==============================================================\033[0m\n'
+            ( cd "$_cdir" && $_DK_COMPOSE_BIN -f "$_cfile" ps )
+        else
+            _dk_p '\033[1;31m[실패] compose up 중 오류가 발생했습니다. .env 또는 포트를 확인해 주세요.\033[0m\n'
+            _dk_p '  경로: %s\n' "$_cdir"
+        fi
+        read -p $'\n[Enter] 메뉴로 돌아가기...' _ </dev/tty
+    done
+}
+
+# ==============================================================================
 # 통합 Proxmox VM & CT 관리 TUI: pxms (Proxmox VM & CT Manager Studio)
 # - Proxmox WebUI + proxmox vms manager 36개 메뉴를 방향키 + 엔터 + 원키로 통합 제어
 # - 6개 탭: [1]VM&CT [2]Snapshots [3]Backups [4]Storage&ISO [5]Node&Tasks [6]Tools(36)
