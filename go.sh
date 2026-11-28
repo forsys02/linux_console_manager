@@ -16991,6 +16991,232 @@ dkgit() {
 }
 
 # ==============================================================================
+# VM/서버 네트워크 대역폭 제한 매니저: pxbw (CAKE + ifb + systemd)
+# - 100M IDC 회선 등에서 docker pull 등 대역폭 독점을 방지 (예: 70% = 70mbit)
+# - 적용(systemd 영구 등록) / 일시 해제(stop) / 완전 삭제(remove) / 상태 확인
+# ==============================================================================
+pxbw() {
+    local IFS=$' \t\n'
+    if ! type -P tc >/dev/null 2>&1; then
+        printf '\033[1;31m[오류] tc (iproute2) 명령을 찾을 수 없습니다. iproute2 를 먼저 설치하세요.\033[0m\n'
+        read -p $'\n[Enter] 돌아가기...' _ </dev/tty
+        return 1
+    fi
+
+    local _iface=""
+    _iface="$(ip route 2>/dev/null | awk '/^default/ {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+    [ -z "$_iface" ] && _iface="$(ip -o link show up 2>/dev/null | awk -F': ' '$2!="lo" && $2!~/^(docker|br-|veth|ifb)/ {print $2; exit}')"
+
+    local _cfg="/etc/default/net-limit"
+    local _script="/usr/local/sbin/net-limit.sh"
+    local _unit="/etc/systemd/system/net-limit.service"
+
+    _pxbw_install_and_apply() {
+        local _down="$1"
+        local _up="${2:-$1}"
+        local _dev="${3:-$_iface}"
+        if [ -z "$_dev" ]; then
+            printf '\033[1;31m[오류] 기본 네트워크 인터페이스를 감지하지 못했습니다.\033[0m\n'
+            return 1
+        fi
+
+        cat > "$_cfg" <<EOF
+# Managed by go.sh pxbw
+IFACE=${_dev}
+DOWN_RATE=${_down}
+UP_RATE=${_up}
+EOF
+
+        cat > "$_script" <<'EOF'
+#!/usr/bin/env bash
+set -u
+CFG="/etc/default/net-limit"
+[ -f "$CFG" ] && . "$CFG"
+IFACE="${IFACE:-$(ip route 2>/dev/null | awk '/^default/ {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')}"
+DOWN_RATE="${DOWN_RATE:-70mbit}"
+UP_RATE="${UP_RATE:-70mbit}"
+IFB="ifb0"
+
+clear_rules() {
+    tc qdisc del dev "$IFACE" root 2>/dev/null || true
+    tc qdisc del dev "$IFACE" ingress 2>/dev/null || true
+    tc qdisc del dev "$IFB" root 2>/dev/null || true
+    ip link set dev "$IFB" down 2>/dev/null || true
+}
+
+start_rules() {
+    [ -n "$IFACE" ] || { echo "No default interface found"; exit 1; }
+    clear_rules
+
+    # Egress shaping (prefer CAKE, fallback to TBF)
+    if tc qdisc replace dev "$IFACE" root cake bandwidth "$UP_RATE" besteffort 2>/dev/null; then
+        echo "[OK] Egress CAKE applied: ${IFACE} -> ${UP_RATE}"
+    else
+        tc qdisc replace dev "$IFACE" root tbf rate "$UP_RATE" burst 256kbit latency 50ms
+        echo "[OK] Egress TBF applied: ${IFACE} -> ${UP_RATE}"
+    fi
+
+    # Ingress shaping (prefer ifb0 + CAKE, fallback to ingress police)
+    if modprobe ifb numifbs=1 2>/dev/null && (ip link show "$IFB" >/dev/null 2>&1 || ip link add "$IFB" type ifb 2>/dev/null) && ip link set dev "$IFB" up 2>/dev/null; then
+        tc qdisc add dev "$IFACE" handle ffff: ingress 2>/dev/null || true
+        if tc filter add dev "$IFACE" parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev "$IFB" 2>/dev/null; then
+            if tc qdisc replace dev "$IFB" root cake bandwidth "$DOWN_RATE" besteffort ingress 2>/dev/null; then
+                echo "[OK] Ingress CAKE(ifb0) applied: ${IFACE} -> ${DOWN_RATE}"
+                return 0
+            elif tc qdisc replace dev "$IFB" root tbf rate "$DOWN_RATE" burst 256kbit latency 50ms 2>/dev/null; then
+                echo "[OK] Ingress TBF(ifb0) applied: ${IFACE} -> ${DOWN_RATE}"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fallback: basic ingress policer
+    tc qdisc del dev "$IFACE" ingress 2>/dev/null || true
+    tc qdisc add dev "$IFACE" handle ffff: ingress 2>/dev/null || true
+    tc filter add dev "$IFACE" parent ffff: protocol all u32 match u32 0 0 police rate "$DOWN_RATE" burst 1m drop flowid :1
+    echo "[OK] Ingress Police fallback applied: ${IFACE} -> ${DOWN_RATE}"
+}
+
+case "${1:-status}" in
+    start)  start_rules ;;
+    stop)   clear_rules; echo "[OK] Bandwidth limit cleared on ${IFACE}" ;;
+    status)
+        echo "=== Config ($CFG) ==="
+        cat "$CFG" 2>/dev/null || echo "(none)"
+        echo "=== Egress ($IFACE) ==="
+        tc -s qdisc show dev "$IFACE" 2>/dev/null
+        echo "=== Ingress ($IFB) ==="
+        tc -s qdisc show dev "$IFB" 2>/dev/null || echo "(ifb0 inactive)"
+        ;;
+    *) echo "Usage: $0 {start|stop|status}"; exit 1 ;;
+esac
+EOF
+        chmod +x "$_script"
+
+        cat > "$_unit" <<EOF
+[Unit]
+Description=VM Network Bandwidth Limit (CAKE/ifb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${_script} start
+ExecStop=${_script} stop
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        systemctl daemon-reload
+        systemctl enable net-limit.service >/dev/null 2>&1
+        if systemctl restart net-limit.service; then
+            printf '\033[1;32m✔ 적용 및 systemd 영구 등록 완료! (%s: 다운 %s / 업 %s)\033[0m\n' "$_dev" "$_down" "$_up"
+        else
+            printf '\033[1;31m[실패] net-limit.service 시작 실패 (systemctl status net-limit.service 확인)\033[0m\n'
+            systemctl status net-limit.service --no-pager
+        fi
+    }
+
+    while true; do
+        clear
+        local _svc_st="미설치"
+        local _cfg_info="없음"
+        if [ -f "$_unit" ]; then
+            if systemctl is-active --quiet net-limit.service 2>/dev/null; then
+                _svc_st='\033[1;32m활성 (적용 중 · 재부팅 유지)\033[0m'
+            else
+                _svc_st='\033[1;33m일시 해제됨 (설치됨 · OFF)\033[0m'
+            fi
+        fi
+        if [ -f "$_cfg" ]; then
+            local _cd _cu _ci
+            _ci="$(awk -F= '/^IFACE=/{print $2}' "$_cfg" 2>/dev/null)"
+            _cd="$(awk -F= '/^DOWN_RATE=/{print $2}' "$_cfg" 2>/dev/null)"
+            _cu="$(awk -F= '/^UP_RATE=/{print $2}' "$_cfg" 2>/dev/null)"
+            _cfg_info="${_ci:-$_iface} | 다운:${_cd:-?} / 업:${_cu:-?}"
+        fi
+
+        printf '\033[1;36m◈ VM 네트워크 대역폭 제한 매니저 [pxbw]\033[0m  (CAKE + ifb + systemd)\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  • 기본 NIC   : \033[1;33m%s\033[0m\n' "${_iface:-미감지}"
+        printf '  • 서비스 상태: %b\n' "$_svc_st"
+        printf '  • 현재 설정  : \033[1;37m%s\033[0m\n' "$_cfg_info"
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  \033[1;37m1)\033[0m \033[1;32m70%% 한도 적용 (70mbit)\033[0m  — 100M IDC 추천 + systemd 영구 등록\n'
+        printf '  \033[1;37m2)\033[0m 50%% 한도 적용 (50mbit)  — 보수적 제한 + systemd 영구 등록\n'
+        printf '  \033[1;37m3)\033[0m 30%% 한도 적용 (30mbit)  — 저속 백그라운드용 + systemd 영구 등록\n'
+        printf '  \033[1;37m4)\033[0m 사용자 지정 대역폭 적용 (다운/업 직접 입력) + systemd 등록\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+        printf '  \033[1;33m5)\033[0m 일시 해제 (제한 OFF · systemctl stop, 재적용 가능)\n'
+        printf '  \033[1;31m6)\033[0m 완전 삭제 (tc 해제 + systemd 삭제 + 스크립트/설정 제거)\n'
+        printf '  \033[1;36m7)\033[0m 상세 상태 확인 (tc -s qdisc & systemctl status)\n'
+        printf '  \033[1;37m0/q)\033[0m 돌아가기\n'
+        printf '────────────────────────────────────────────────────────────────────────\n'
+
+        local _sel=""
+        read -p ">>> 선택 [1-7, 0/q] : " _sel </dev/tty
+        case "$_sel" in
+            ""|0|q|Q|b|B) return 0 ;;
+            1) _pxbw_install_and_apply "70mbit" "70mbit" "$_iface" ;;
+            2) _pxbw_install_and_apply "50mbit" "50mbit" "$_iface" ;;
+            3) _pxbw_install_and_apply "30mbit" "30mbit" "$_iface" ;;
+            4)
+                local _in_down="" _in_up=""
+                read -p "다운로드 한도 (예: 70mbit, 80mbit) [70mbit]: " _in_down </dev/tty
+                [ -z "$_in_down" ] && _in_down="70mbit"
+                read -p "업로드 한도 (비우면 다운로드와 동일) [${_in_down}]: " _in_up </dev/tty
+                [ -z "$_in_up" ] && _in_up="$_in_down"
+                _pxbw_install_and_apply "$_in_down" "$_in_up" "$_iface"
+                ;;
+            5)
+                if [ -f "$_unit" ]; then
+                    systemctl stop net-limit.service 2>/dev/null
+                    systemctl disable net-limit.service 2>/dev/null
+                fi
+                [ -x "$_script" ] && "$_script" stop 2>/dev/null
+                tc qdisc del dev "$_iface" root 2>/dev/null || true
+                tc qdisc del dev "$_iface" ingress 2>/dev/null || true
+                tc qdisc del dev ifb0 root 2>/dev/null || true
+                printf '\033[1;33m✔ 대역폭 제한이 일시 해제되었습니다 (부팅 자동시작 OFF).\033[0m\n'
+                ;;
+            6)
+                local _cf=""
+                read -p "정말 대역폭 제한 서비스/스크립트/설정을 모두 삭제할까요? [y/N]: " _cf </dev/tty
+                if printf '%s' "$_cf" | grep -qE '^[Yy]$'; then
+                    systemctl stop net-limit.service 2>/dev/null || true
+                    systemctl disable net-limit.service 2>/dev/null || true
+                    [ -x "$_script" ] && "$_script" stop 2>/dev/null || true
+                    tc qdisc del dev "$_iface" root 2>/dev/null || true
+                    tc qdisc del dev "$_iface" ingress 2>/dev/null || true
+                    tc qdisc del dev ifb0 root 2>/dev/null || true
+                    rm -f "$_unit" "$_script" "$_cfg"
+                    systemctl daemon-reload 2>/dev/null || true
+                    printf '\033[1;32m✔ 완전 삭제 및 네트워크 원복 완료!\033[0m\n'
+                fi
+                ;;
+            7)
+                echo
+                if [ -x "$_script" ]; then
+                    "$_script" status
+                else
+                    tc -s qdisc show dev "$_iface" 2>/dev/null
+                fi
+                echo
+                systemctl status net-limit.service --no-pager 2>/dev/null || printf '(net-limit.service 미설치)\n'
+                ;;
+            *)
+                printf '\033[1;31m잘못된 선택입니다.\033[0m\n'
+                sleep 1
+                continue
+                ;;
+        esac
+        read -p $'\n[Enter] 계속...' _ </dev/tty
+    done
+}
+
+# ==============================================================================
 # 통합 Proxmox VM & CT 관리 TUI: pxms (Proxmox VM & CT Manager Studio)
 # - Proxmox WebUI + proxmox vms manager 36개 메뉴를 방향키 + 엔터 + 원키로 통합 제어
 # - 6개 탭: [1]VM&CT [2]Snapshots [3]Backups [4]Storage&ISO [5]Node&Tasks [6]Tools(36)
