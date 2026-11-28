@@ -15646,7 +15646,7 @@ _dk_render_full() {
         5) _dk_p '\033[1;33m[Enter/i]\033[0m상세/서브넷 \033[1;31m[d]\033[0m삭제 \033[1;35m[x]\033[0m미사용네트워크정리(Prune)\033[K\n' ;;
         6) _dk_p '\033[1;32m[Enter/t]\033[0m실시간Stats \033[1;36m[i]\033[0m디스크점유(df-v) \033[1;35m[x]\033[0mSystemPrune \033[1;33m[B]\033[0m빌드캐시정리 \033[1;31m[R]\033[0m데몬재시작\033[K\n' ;;
     esac
-    _dk_p '\033[0;37m[↑↓]이동 [←→/Tab/1-6]탭전환 [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
+    _dk_p '\033[0;37m[↑↓]이동 [←→/Tab/1-6]탭전환 [w]웹URL [/]검색 [r]새로고침 [?]도움말 [q]종료\033[0m\033[K\n'
     _dk_p '\033[1;32m%s\033[0m\033[K' "${_DK_MSG:-}"
     _DK_DIRTY=0
     _DK_PREV_CUR="$_DK_CUR"
@@ -15768,6 +15768,7 @@ _dk_show_help() {
     _dk_p '    ↑/↓, j/k       : 항목 이동 (PgUp/PgDn 페이지 이동)\n'
     _dk_p '    ←/→, Tab, 1~6  : 6개 탭 즉시 전환 (Containers/Stacks/Images/Volumes/Networks/System)\n'
     _dk_p '    /              : 현재 탭 키워드 필터 검색 (빈 값으로 Enter = 초기화)\n'
+    _dk_p '    w              : 실행 중인 컨테이너 웹 창구 URL 자동 추적 + 접속/초기화 팁\n'
     _dk_p '    r              : 데이터 새로고침   |   q : 종료\n\n'
     _dk_p '  \033[1;37m[Tab 1: Containers]\033[0m\n'
     _dk_p '    Enter : 액션 메뉴  | s : Start/Stop 토글 | R : 재시작 | l : 실시간 로그(Ctrl+C 복귀)\n'
@@ -15777,6 +15778,130 @@ _dk_show_help() {
     _dk_p '    v     : compose.yml/.env vi2 편집(+문법검증/반영) | l : 통합로그 | n : 새 스택 | + : 스캔경로 추가\n\n'
     _dk_p '  \033[1;37m[Tab 3~6: Images / Volumes / Networks / System]\033[0m\n'
     _dk_p '    i/Enter : 상세정보 | p : 이미지 Pull | d : 개별 삭제 | x : Prune 정리 | t : 실시간 stats\n'
+    _dk_pause
+}
+
+_dk_web_urls() {
+    local _target_id="${1:-}"
+    local _pub_ip _fqdn _cid _cname _cimg _ports _hp _proto _code _title _tmpb _found=0 _npm_cid _tr_hosts _vol _ans
+    tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
+    if [ -n "$_target_id" ]; then
+        _dk_p '\033[1;36m◈ 도커 웹 창구 URL & 접속 안내 (대상: %s)\033[0m\n' "$_target_id"
+    else
+        _dk_p '\033[1;36m◈ 도커 웹 창구 URL 자동 추적 & 접속 안내 (전체 실행 중 컨테이너)\033[0m\n'
+    fi
+    _dk_p '──────────────────────────────────────────────────────────────────────\n'
+
+    _pub_ip="${publicip:-}"
+    [ -z "$_pub_ip" ] && _pub_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$_pub_ip" ] && _pub_ip="127.0.0.1"
+    _fqdn=$(hostname -f 2>/dev/null || hostname 2>/dev/null)
+    _tmpb=$(mktemp /tmp/dkms_web.XXXXXX 2>/dev/null || echo "/tmp/dkms_web.$$")
+
+    local _list_cmd
+    if [ -n "$_target_id" ]; then
+        _list_cmd=$(docker ps -a --filter "id=${_target_id}" --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null)
+        [ -z "$_list_cmd" ] && _list_cmd=$(docker ps -a --filter "name=^/${_target_id}$" --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null)
+    else
+        _list_cmd=$(docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}' 2>/dev/null)
+    fi
+
+    while IFS='|' read -r _cid _cname _cimg; do
+        [ -z "$_cid" ] && continue
+        _ports=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{range $conf}}{{.HostPort}}{{"\n"}}{{end}}{{end}}{{end}}' "$_cid" 2>/dev/null | grep -E '^[0-9]+$' | sort -nu)
+        [ -z "$_ports" ] && [ -z "$_target_id" ] && continue
+
+        _found=1
+        _dk_p '\n\033[1;33m▸ %s\033[0m  \033[0;37m(%s)\033[0m\n' "$_cname" "$_cimg"
+        if [ -z "$_ports" ]; then
+            _dk_p '   (호스트에 공개된 포트 없음 — 내부 전용 또는 리버스 프록시 뒤 서비스)\n'
+        else
+            while IFS= read -r _hp; do
+                [ -z "$_hp" ] && continue
+                _proto="http"
+                case "$_hp" in 443|8443|9443) _proto="https" ;; esac
+                _code="000"
+                _title=""
+                if command -v curl >/dev/null 2>&1; then
+                    _code=$(curl -skL -m 2 --max-redirs 2 -o "$_tmpb" -w '%{http_code}' "${_proto}://127.0.0.1:${_hp}/" 2>/dev/null || echo "000")
+                    if [ "$_code" = "000" ] && [ "$_proto" = "http" ]; then
+                        _code=$(curl -skL -m 2 --max-redirs 2 -o "$_tmpb" -w '%{http_code}' "https://127.0.0.1:${_hp}/" 2>/dev/null || echo "000")
+                        [ "$_code" != "000" ] && _proto="https"
+                    fi
+                    if [ "$_code" != "000" ] && [ -s "$_tmpb" ]; then
+                        _title=$(head -c 16384 "$_tmpb" 2>/dev/null | tr '\n\r\t' '   ' | sed -n 's/.*<[Tt][Ii][Tt][Ll][Ee][^>]*>\([^<]*\)<\/[Tt][Ii][Tt][Ll][Ee]>.*/\1/p' | sed 's/^ *//;s/ *$//' | head -c 48)
+                    fi
+                fi
+                if [ "$_code" != "000" ]; then
+                    if [ -n "$_fqdn" ] && [ "$_fqdn" != "$_pub_ip" ]; then
+                        _dk_p '   \033[1;32m[WEB %s]\033[0m %s://%s:%s   (%s://%s:%s)%s\n' "$_code" "$_proto" "$_pub_ip" "$_hp" "$_proto" "$_fqdn" "$_hp" "${_title:+  — $_title}"
+                    else
+                        _dk_p '   \033[1;32m[WEB %s]\033[0m %s://%s:%s%s\n' "$_code" "$_proto" "$_pub_ip" "$_hp" "${_title:+  — $_title}"
+                    fi
+                else
+                    _dk_p '   \033[0;37m[TCP :%s]\033[0m %s:%s  (비-웹 포트: Agent/DB/TCP 등)\n' "$_hp" "$_pub_ip" "$_hp"
+                fi
+            done < <(printf '%s\n' "$_ports")
+        fi
+
+        # Traefik router Host() labels if present
+        _tr_hosts=$(docker inspect --format '{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}{{"\n"}}{{end}}' "$_cid" 2>/dev/null | grep -iE 'traefik\.http\.routers\..*\.rule=' | sed -n 's/.*Host(`\([^`]*\)`).*/\1/p' | sort -u)
+        if [ -n "$_tr_hosts" ]; then
+            while IFS= read -r _hp; do
+                [ -n "$_hp" ] && _dk_p '   \033[1;36m[Traefik]\033[0m https://%s\n' "$_hp"
+            done < <(printf '%s\n' "$_tr_hosts")
+        fi
+
+        # App-specific login / reset hints
+        case "$_cimg" in
+            *portainer*)
+                _vol=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$_cid" 2>/dev/null)
+                _dk_p '   \033[1;36m💡 팁:\033[0m 기본 계정 \033[1;37madmin\033[0m | 비번 분실 시 초기화:\n'
+                _dk_p '      docker stop %s && docker run --rm -v %s:/data portainer/helper-reset-password && docker start %s\n' "$_cname" "${_vol:-portainer_data}" "$_cname"
+                ;;
+            *nginx-proxy-manager*)
+                _dk_p '   \033[1;36m💡 팁:\033[0m NPM 관리 UI는 \033[1;37m:81\033[0m 포트 (초기: admin@example.com / changeme)\n'
+                ;;
+            *immich*)
+                _dk_p '   \033[1;36m💡 팁:\033[0m Immich 웹/모바일 앱 접속 주소 (기본 포트 :2283)\n'
+                ;;
+            *grafana*)
+                _dk_p '   \033[1;36m💡 팁:\033[0m Grafana 초기 계정 admin / admin\n'
+                ;;
+            *wg-easy*)
+                _dk_p '   \033[1;36m💡 팁:\033[0m WireGuard 웹 관리 UI (PASSWORD 환경변수 참조)\n'
+                ;;
+        esac
+    done < <(printf '%s\n' "$_list_cmd")
+    rm -f "$_tmpb" 2>/dev/null
+
+    # Reverse Proxy (Nginx Proxy Manager) mapped domains if NPM is running
+    if [ -z "$_target_id" ]; then
+        _npm_cid=$(docker ps --format '{{.ID}} {{.Image}}' 2>/dev/null | awk '/nginx-proxy-manager/ {print $1; exit}')
+        if [ -n "$_npm_cid" ]; then
+            local _npm_map
+            _npm_map=$(docker exec "$_npm_cid" sh -c 'for f in /data/nginx/proxy_host/*.conf; do [ -f "$f" ] || continue; sn=$(awk "/server_name/{gsub(/;/,\"\"); \$1=\"\"; print; exit}" "$f"); sv=$(awk "/set \\\$server/{gsub(/;|\"/,\"\"); print \$3; exit}" "$f"); pt=$(awk "/set \\\$port/{gsub(/;|\"/,\"\"); print \$3; exit}" "$f"); [ -n "$sn" ] && printf "%s -> %s:%s\n" "$sn" "$sv" "$pt"; done' 2>/dev/null)
+            if [ -n "$_npm_map" ]; then
+                _dk_p '\n\033[1;36m◈ Nginx Proxy Manager 등록 도메인\033[0m\n'
+                while IFS= read -r _hp; do
+                    [ -n "$_hp" ] && _dk_p '   🌐 %s\n' "$_hp"
+                done < <(printf '%s\n' "$_npm_map")
+            fi
+        fi
+    fi
+
+    [ "$_found" = "0" ] && _dk_p '\n\033[0;33m(호스트에 공개된 웹 포트가 있는 실행 중 컨테이너가 없습니다)\033[0m\n'
+
+    # Optional one-click Portainer password reset when inspecting a single Portainer container
+    if [ -n "$_target_id" ] && printf '%s' "$_cimg" | grep -qi 'portainer'; then
+        _dk_p '\n'
+        read -p "이 Portainer(${_cname}) 비밀번호를 지금 초기화할까요? [y/N]: " _ans </dev/tty
+        if printf '%s' "$_ans" | grep -qE '^[Yy]$'; then
+            docker stop "$_cname" && docker run --rm -v "${_vol:-portainer_data}:/data" portainer/helper-reset-password
+            docker start "$_cname"
+            _DK_MSG="✔ Portainer 비밀번호 초기화 완료: ${_cname}"
+        fi
+    fi
     _dk_pause
 }
 
@@ -15808,8 +15933,8 @@ _dk_container_action() {
         menu)
             tput cnorm 2>/dev/null; stty echo 2>/dev/null; printf '\033[2J\033[H'
             _dk_p '\033[1;36m◈ 컨테이너 액션: %s [%s]\033[0m\n' "$_nm" "$_st"
-            _dk_p '  1) Start / Stop 토글\n  2) Restart (재시작)\n  3) 실시간 로그 (logs -f)\n  4) 컨테이너 쉘 진입 (bash/sh)\n  5) 상세 Inspect 보기\n  6) 소속 Compose YAML 편집\n  7) 컨테이너 삭제 (rm)\n  0) 취소\n'
-            read -p "선택 [0-7]: " _ans </dev/tty
+            _dk_p '  1) Start / Stop 토글\n  2) Restart (재시작)\n  3) 실시간 로그 (logs -f)\n  4) 컨테이너 쉘 진입 (bash/sh)\n  5) 상세 Inspect 보기\n  6) 소속 Compose YAML 편집\n  7) 컨테이너 삭제 (rm)\n  8) 웹 창구 URL & 접속 안내 (비번 초기화 팁 포함)\n  0) 취소\n'
+            read -p "선택 [0-8]: " _ans </dev/tty
             case "$_ans" in
                 1) _dk_container_action toggle "$_idx" ;;
                 2) _dk_container_action restart "$_idx" ;;
@@ -15818,6 +15943,7 @@ _dk_container_action() {
                 5) _dk_container_inspect "$_id" "$_nm" ;;
                 6) _dk_container_action compose_edit "$_idx" ;;
                 7) _dk_container_action rm "$_idx" ;;
+                8) _dk_web_urls "$_id" ;;
             esac
             return
             ;;
@@ -16085,6 +16211,8 @@ dkms() {
             j) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
             \?|h)
                 _dk_show_help; _DK_DIRTY=1; tput civis 2>/dev/null ;;
+            w|W)
+                _dk_web_urls; _DK_DIRTY=1; tput civis 2>/dev/null ;;
             /)
                 tput cnorm 2>/dev/null; stty echo 2>/dev/null
                 _dk_p '\n검색어 입력 (빈 값=초기화): '
