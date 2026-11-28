@@ -15170,6 +15170,78 @@ ums() {
 }
 
 # ==============================================================================
+# 공용 TUI 비동기 탭 백그라운드 로더 & 즉시 탈출 유틸리티 (dkms / pxms 공용)
+# - 탭 전환 후 로딩 중에도 방향키(←/→)·Tab·1~6·r·q 입력 시 진행 중 작업 즉시 중단 후 탈출
+# - interactive shell 의 [1]+ Terminated 출력 억제를 위해 백그라운드 제어 구간에 set +m 적용
+# ==============================================================================
+
+_tui_bg_cleanup() {
+    local _p="$1" _f="$2" _had_m=0
+    case "$-" in *m*) _had_m=1; set +m ;; esac
+    if [ -n "$_p" ]; then
+        pkill -P "$_p" 2>/dev/null
+        kill "$_p" 2>/dev/null
+        wait "$_p" 2>/dev/null
+    fi
+    [ "$_had_m" = "1" ] && set -m
+    if [ -n "$_f" ]; then
+        rm -f "$_f" "${_f}.tmp" "${_f}.done" 2>/dev/null
+    fi
+}
+
+_tui_poll_tab_load() {
+    local _done="$1" _tab="$2" _enc="$3" _pfn="$4"
+    local _tmo="0.1" _tick=0 _sp _k _k2 _k3
+    [ "${BASH_VERSINFO[0]:-3}" -lt 4 ] && _tmo="1"
+    _TUI_POLL_ACT="done"
+    _TUI_POLL_VAL="$_tab"
+
+    while [ ! -f "$_done" ]; do
+        if [ "$_enc" = "euckr" ]; then
+            case $((_tick % 4)) in
+                0) _sp="|" ;; 1) _sp="/" ;; 2) _sp="-" ;; 3) _sp='\' ;;
+            esac
+            "$_pfn" '\r\033[1;33m[%s] 데이터 불러오는 중... ([<-/->/Tab/1-6] 즉시이동  [q] 종료)\033[K\033[0m' "$_sp"
+        else
+            case $((_tick % 6)) in
+                0) _sp="⠋" ;; 1) _sp="⠙" ;; 2) _sp="⠹" ;; 3) _sp="⠸" ;; 4) _sp="⠼" ;; 5) _sp="⠴" ;;
+            esac
+            "$_pfn" '\r\033[1;33m%s 데이터 불러오는 중... ([←→/Tab/1-6] 다른 탭으로 즉시 이동  [q] 종료)\033[K\033[0m' "$_sp"
+        fi
+        _tick=$((_tick + 1))
+
+        _k=""
+        if IFS= read -rsn1 -t "$_tmo" _k </dev/tty; then
+            if [ "$_k" = $'\x1b' ]; then
+                _k2=""
+                IFS= read -rsn1 -t "$_tmo" _k2 </dev/tty
+                if [ "$_k2" = "[" ] || [ "$_k2" = "O" ]; then
+                    _k3=""
+                    IFS= read -rsn1 -t "$_tmo" _k3 </dev/tty
+                    case "$_k3" in
+                        C) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % 6 + 1)); return 0 ;;
+                        D) _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$(( (_tab + 4) % 6 + 1 )); return 0 ;;
+                    esac
+                fi
+            else
+                case "$_k" in
+                    q|Q)   _TUI_POLL_ACT="quit"; return 0 ;;
+                    $'\t') _TUI_POLL_ACT="tab"; _TUI_POLL_VAL=$((_tab % 6 + 1)); return 0 ;;
+                    1|2|3|4|5|6)
+                        if [ "$_tab" != "$_k" ]; then
+                            _TUI_POLL_ACT="tab"; _TUI_POLL_VAL="$_k"; return 0
+                        fi
+                        ;;
+                    r|R)   _TUI_POLL_ACT="reload"; return 0 ;;
+                esac
+            fi
+        fi
+    done
+    _TUI_POLL_ACT="done"
+    return 0
+}
+
+# ==============================================================================
 # 통합 도커·컴포즈 관리 TUI: dkms (Docker & Compose Manager Studio)
 # - Portainer + Dockge 핵심 기능을 콘솔에서 방향키 + 엔터 + 원키 단축키로 통합 제어
 # - 6개 탭: [1]Containers [2]Stacks(Compose) [3]Images [4]Volumes [5]Networks [6]System&Stats
@@ -15598,28 +15670,95 @@ _dk_render_delta() {
 }
 
 _dk_load_tab_async() {
-    _DK_IDS=()
-    _DK_NAMES=()
-    _DK_STATE=()
-    _DK_COL2=()
-    _DK_COL3=()
-    _DK_META=()
-    _DK_TOTAL=0
-    _DK_VIEW=()
-    _DK_VCNT=0
-    _DK_LOADING=1
-    if [ "$_DK_ENC" = "euckr" ]; then
-        _DK_MSG="... 데이터 불러오는 중"
-    else
-        _DK_MSG="⏳ 데이터 불러오는 중..."
-    fi
-    _DK_DIRTY=1
-    _dk_render_full
-    _dk_load_tab
-    _DK_LOADING=0
-    _dk_build_view
-    _DK_MSG=""
-    _DK_DIRTY=1
+    local _tmp _done _had_m _i _f1 _f2 _f3 _f4 _f5 _f6 _f7
+    while true; do
+        _DK_IDS=()
+        _DK_NAMES=()
+        _DK_STATE=()
+        _DK_COL2=()
+        _DK_COL3=()
+        _DK_META=()
+        _DK_TOTAL=0
+        _DK_VIEW=()
+        _DK_VCNT=0
+        _DK_LOADING=1
+        if [ "$_DK_ENC" = "euckr" ]; then
+            _DK_MSG="... 데이터 불러오는 중 ([<-/->/Tab/1-6] 즉시이동)"
+        else
+            _DK_MSG="⏳ 데이터 불러오는 중... ([←→/Tab/1-6] 다른 탭으로 즉시 이동)"
+        fi
+        _DK_DIRTY=1
+        _dk_render_full
+
+        _tmp=$(mktemp /tmp/dkms_tab.XXXXXX 2>/dev/null || echo "/tmp/dkms_tab.$$")
+        _done="${_tmp}.done"
+        _DK_BG_TMP="$_tmp"
+        rm -f "$_tmp" "${_tmp}.tmp" "$_done" 2>/dev/null
+
+        _had_m=0
+        case "$-" in *m*) _had_m=1; set +m ;; esac
+        (
+            _dk_load_tab
+            _i=0
+            : > "${_tmp}.tmp"
+            while [ "$_i" -lt "$_DK_TOTAL" ]; do
+                printf '%s\037%s\037%s\037%s\037%s\037%s\037.\n' \
+                    "${_DK_IDS[$_i]}" "${_DK_NAMES[$_i]}" "${_DK_STATE[$_i]}" \
+                    "${_DK_COL2[$_i]}" "${_DK_COL3[$_i]}" "${_DK_META[$_i]}" >> "${_tmp}.tmp"
+                _i=$((_i + 1))
+            done
+            mv -f "${_tmp}.tmp" "$_tmp" 2>/dev/null
+            : > "$_done"
+        ) </dev/null >/dev/null 2>&1 &
+        _DK_BG_PID=$!
+        [ "$_had_m" = "1" ] && set -m
+
+        _tui_poll_tab_load "$_done" "$_DK_TAB" "$_DK_ENC" "_dk_p"
+        case "$_TUI_POLL_ACT" in
+            tab)
+                _tui_bg_cleanup "$_DK_BG_PID" "$_DK_BG_TMP"
+                _DK_BG_PID=""; _DK_BG_TMP=""
+                _DK_TAB="$_TUI_POLL_VAL"; _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
+                continue
+                ;;
+            reload)
+                _tui_bg_cleanup "$_DK_BG_PID" "$_DK_BG_TMP"
+                _DK_BG_PID=""; _DK_BG_TMP=""
+                continue
+                ;;
+            quit)
+                _tui_bg_cleanup "$_DK_BG_PID" "$_DK_BG_TMP"
+                _DK_BG_PID=""; _DK_BG_TMP=""
+                _DK_LOADING=0; _DK_REQ_QUIT=1
+                return 0
+                ;;
+        esac
+
+        _had_m=0
+        case "$-" in *m*) _had_m=1; set +m ;; esac
+        wait "$_DK_BG_PID" 2>/dev/null
+        [ "$_had_m" = "1" ] && set -m
+
+        _DK_TOTAL=0
+        if [ -f "$_tmp" ]; then
+            while IFS=$'\x1f' read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7; do
+                _DK_IDS[$_DK_TOTAL]="$_f1"
+                _DK_NAMES[$_DK_TOTAL]="$_f2"
+                _DK_STATE[$_DK_TOTAL]="$_f3"
+                _DK_COL2[$_DK_TOTAL]="$_f4"
+                _DK_COL3[$_DK_TOTAL]="$_f5"
+                _DK_META[$_DK_TOTAL]="$_f6"
+                _DK_TOTAL=$((_DK_TOTAL + 1))
+            done < "$_tmp"
+        fi
+        rm -f "$_tmp" "${_tmp}.tmp" "$_done" 2>/dev/null
+        _DK_BG_PID=""; _DK_BG_TMP=""
+        _DK_LOADING=0
+        _dk_build_view
+        _DK_MSG=""
+        _DK_DIRTY=1
+        return 0
+    done
 }
 
 _dk_show_help() {
@@ -15877,17 +16016,25 @@ dkms() {
     _DK_PREV_TOP=0
     _DK_SEARCH=""
     _DK_LOADING=0
+    _DK_REQ_QUIT=0
+    _DK_BG_PID=""
+    _DK_BG_TMP=""
     _DK_CNT_RUN="-"; _DK_CNT_STOP="-"; _DK_CNT_IMG="-"; _DK_CNT_VOL="-"; _DK_CNT_NET="-"
     _DK_DIRTY=1
 
     local _old_trap _k _k2 _k3 _idx _ans _img _ndir
     _old_trap=$(trap -p INT)
-    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+    trap '_tui_bg_cleanup "$_DK_BG_PID" "$_DK_BG_TMP"; tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
 
     tput civis 2>/dev/null
     printf '\033[2J\033[H'
 
     _dk_load_tab_async
+    if [ "$_DK_REQ_QUIT" = "1" ]; then
+        tput cnorm 2>/dev/null; stty sane 2>/dev/null
+        [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+        printf '\n'; return 0
+    fi
     _dk_load_summary
     _DK_MSG="✔ dkms 준비 완료 (1~6 탭전환, Enter 메뉴, ? 도움말)"
 
@@ -15899,13 +16046,13 @@ dkms() {
         # Arrow / Page / Home / End escape sequences
         if [ "$_k" = $'\x1b' ]; then
             IFS= read -rsn1 -t 1 _k2 </dev/tty
-            if [ "$_k2" = "[" ]; then
+            if [ "$_k2" = "[" ] || [ "$_k2" = "O" ]; then
                 IFS= read -rsn1 -t 1 _k3 </dev/tty
                 case "$_k3" in
                     A) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
                     B) [ "$_DK_CUR" -lt $((_DK_VCNT - 1)) ] && _DK_CUR=$((_DK_CUR + 1)) ;;
-                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async ;;
-                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async ;;
+                    C) _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
+                    D) _DK_TAB=$(( (_DK_TAB + 4) % 6 + 1 )); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""; _dk_load_tab_async; [ "$_DK_REQ_QUIT" = "1" ] && break ;;
                     5) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR - _DK_PAGE)); [ "$_DK_CUR" -lt 0 ] && _DK_CUR=0; _DK_DIRTY=1 ;;
                     6) IFS= read -rsn1 -t 1 _ </dev/tty; _DK_CUR=$((_DK_CUR + _DK_PAGE)); [ "$_DK_CUR" -ge "$_DK_VCNT" ] && _DK_CUR=$((_DK_VCNT > 0 ? _DK_VCNT - 1 : 0)); _DK_DIRTY=1 ;;
                     H) _DK_CUR=0; _DK_DIRTY=1 ;;
@@ -15925,11 +16072,13 @@ dkms() {
             $'\t')
                 _DK_TAB=$((_DK_TAB % 6 + 1)); _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
                 _dk_load_tab_async
+                [ "$_DK_REQ_QUIT" = "1" ] && break
                 ;;
             1|2|3|4|5|6)
                 if [ "$_DK_TAB" != "$_k" ]; then
                     _DK_TAB="$_k"; _DK_CUR=0; _DK_TOP=0; _DK_SEARCH=""
                     _dk_load_tab_async
+                    [ "$_DK_REQ_QUIT" = "1" ] && break
                 fi
                 ;;
             k) [ "$_DK_CUR" -gt 0 ] && _DK_CUR=$((_DK_CUR - 1)) ;;
@@ -15944,6 +16093,7 @@ dkms() {
                 ;;
             r)
                 _dk_load_tab_async
+                [ "$_DK_REQ_QUIT" = "1" ] && break
                 _dk_load_summary
                 _DK_MSG="✔ 새로고침 완료"
                 _DK_DIRTY=1
@@ -16762,30 +16912,103 @@ _px_render_delta() {
 }
 
 _px_load_tab_async() {
-    _PX_IDS=()
-    _PX_NAMES=()
-    _PX_STATE=()
-    _PX_COL2=()
-    _PX_COL3=()
-    _PX_META=()
-    _PX_TOTAL=0
-    _PX_VIEW=()
-    _PX_VCNT=0
-    if [ "$_PX_TAB" != "6" ]; then
+    local _tmp _done _had_m _i _f1 _f2 _f3 _f4 _f5 _f6 _f7
+    while true; do
+        _PX_IDS=()
+        _PX_NAMES=()
+        _PX_STATE=()
+        _PX_COL2=()
+        _PX_COL3=()
+        _PX_META=()
+        _PX_TOTAL=0
+        _PX_VIEW=()
+        _PX_VCNT=0
+        if [ "$_PX_TAB" = "6" ]; then
+            _PX_LOADING=0
+            _px_load_tab
+            _px_build_view
+            _PX_MSG=""
+            _PX_DIRTY=1
+            return 0
+        fi
         _PX_LOADING=1
         if [ "$_PX_ENC" = "euckr" ]; then
-            _PX_MSG="... 데이터 불러오는 중"
+            _PX_MSG="... 데이터 불러오는 중 ([<-/->/Tab/1-6] 즉시이동)"
         else
-            _PX_MSG="⏳ 데이터 불러오는 중..."
+            _PX_MSG="⏳ 데이터 불러오는 중... ([←→/Tab/1-6] 다른 탭으로 즉시 이동)"
         fi
         _PX_DIRTY=1
         _px_render_full
-    fi
-    _px_load_tab
-    _PX_LOADING=0
-    _px_build_view
-    _PX_MSG=""
-    _PX_DIRTY=1
+
+        _tmp=$(mktemp /tmp/pxms_tab.XXXXXX 2>/dev/null || echo "/tmp/pxms_tab.$$")
+        _done="${_tmp}.done"
+        _PX_BG_TMP="$_tmp"
+        rm -f "$_tmp" "${_tmp}.tmp" "$_done" 2>/dev/null
+
+        _had_m=0
+        case "$-" in *m*) _had_m=1; set +m ;; esac
+        (
+            _px_load_tab
+            _i=0
+            : > "${_tmp}.tmp"
+            while [ "$_i" -lt "$_PX_TOTAL" ]; do
+                printf '%s\037%s\037%s\037%s\037%s\037%s\037.\n' \
+                    "${_PX_IDS[$_i]}" "${_PX_NAMES[$_i]}" "${_PX_STATE[$_i]}" \
+                    "${_PX_COL2[$_i]}" "${_PX_COL3[$_i]}" "${_PX_META[$_i]}" >> "${_tmp}.tmp"
+                _i=$((_i + 1))
+            done
+            mv -f "${_tmp}.tmp" "$_tmp" 2>/dev/null
+            : > "$_done"
+        ) </dev/null >/dev/null 2>&1 &
+        _PX_BG_PID=$!
+        [ "$_had_m" = "1" ] && set -m
+
+        _tui_poll_tab_load "$_done" "$_PX_TAB" "$_PX_ENC" "_px_p"
+        case "$_TUI_POLL_ACT" in
+            tab)
+                _tui_bg_cleanup "$_PX_BG_PID" "$_PX_BG_TMP"
+                _PX_BG_PID=""; _PX_BG_TMP=""
+                _PX_TAB="$_TUI_POLL_VAL"; _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
+                continue
+                ;;
+            reload)
+                _tui_bg_cleanup "$_PX_BG_PID" "$_PX_BG_TMP"
+                _PX_BG_PID=""; _PX_BG_TMP=""
+                continue
+                ;;
+            quit)
+                _tui_bg_cleanup "$_PX_BG_PID" "$_PX_BG_TMP"
+                _PX_BG_PID=""; _PX_BG_TMP=""
+                _PX_LOADING=0; _PX_REQ_QUIT=1
+                return 0
+                ;;
+        esac
+
+        _had_m=0
+        case "$-" in *m*) _had_m=1; set +m ;; esac
+        wait "$_PX_BG_PID" 2>/dev/null
+        [ "$_had_m" = "1" ] && set -m
+
+        _PX_TOTAL=0
+        if [ -f "$_tmp" ]; then
+            while IFS=$'\x1f' read -r _f1 _f2 _f3 _f4 _f5 _f6 _f7; do
+                _PX_IDS[$_PX_TOTAL]="$_f1"
+                _PX_NAMES[$_PX_TOTAL]="$_f2"
+                _PX_STATE[$_PX_TOTAL]="$_f3"
+                _PX_COL2[$_PX_TOTAL]="$_f4"
+                _PX_COL3[$_PX_TOTAL]="$_f5"
+                _PX_META[$_PX_TOTAL]="$_f6"
+                _PX_TOTAL=$((_PX_TOTAL + 1))
+            done < "$_tmp"
+        fi
+        rm -f "$_tmp" "${_tmp}.tmp" "$_done" 2>/dev/null
+        _PX_BG_PID=""; _PX_BG_TMP=""
+        _PX_LOADING=0
+        _px_build_view
+        _PX_MSG=""
+        _PX_DIRTY=1
+        return 0
+    done
 }
 
 _px_show_help() {
@@ -17104,17 +17327,25 @@ pxms() {
     _PX_PREV_TOP=0
     _PX_SEARCH=""
     _PX_LOADING=0
+    _PX_REQ_QUIT=0
+    _PX_BG_PID=""
+    _PX_BG_TMP=""
     _PX_CNT_RUN="-"; _PX_CNT_STOP="-"; _PX_CNT_VM="-"; _PX_CNT_CT="-"; _PX_LOAD="-"; _PX_MEM_PCT="-"
     _PX_DIRTY=1
 
     local _old_trap _k _k2 _k3 _idx _ans _meta _t _n _id _sn _stg _vol _fmt _upid _newid _def_sn _desc _tkey _vms
     _old_trap=$(trap -p INT)
-    trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
+    trap '_tui_bg_cleanup "$_PX_BG_PID" "$_PX_BG_TMP"; tput cnorm 2>/dev/null; stty sane 2>/dev/null; printf "\n"; return 0' INT
 
     tput civis 2>/dev/null
     printf '\033[2J\033[H'
 
     _px_load_tab_async
+    if [ "$_PX_REQ_QUIT" = "1" ]; then
+        tput cnorm 2>/dev/null; stty sane 2>/dev/null
+        [ -n "$_old_trap" ] && eval "$_old_trap" || trap - INT
+        printf '\n'; return 0
+    fi
     _px_load_summary
     _PX_MSG="✔ pxms 준비 완료 (1~6 탭전환, Enter 메뉴, / 검색, ? 도움말)"
 
@@ -17126,13 +17357,13 @@ pxms() {
         # Arrow / Page / Home / End escape sequences
         if [ "$_k" = $'\x1b' ]; then
             IFS= read -rsn1 -t 1 _k2 </dev/tty
-            if [ "$_k2" = "[" ]; then
+            if [ "$_k2" = "[" ] || [ "$_k2" = "O" ]; then
                 IFS= read -rsn1 -t 1 _k3 </dev/tty
                 case "$_k3" in
                     A) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
                     B) [ "$_PX_CUR" -lt $((_PX_VCNT - 1)) ] && _PX_CUR=$((_PX_CUR + 1)) ;;
-                    C) _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async ;;
-                    D) _PX_TAB=$(( (_PX_TAB + 4) % 6 + 1 )); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async ;;
+                    C) _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async; [ "$_PX_REQ_QUIT" = "1" ] && break ;;
+                    D) _PX_TAB=$(( (_PX_TAB + 4) % 6 + 1 )); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""; _px_load_tab_async; [ "$_PX_REQ_QUIT" = "1" ] && break ;;
                     5) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR - _PX_PAGE)); [ "$_PX_CUR" -lt 0 ] && _PX_CUR=0; _PX_DIRTY=1 ;;
                     6) IFS= read -rsn1 -t 1 _ </dev/tty; _PX_CUR=$((_PX_CUR + _PX_PAGE)); [ "$_PX_CUR" -ge "$_PX_VCNT" ] && _PX_CUR=$((_PX_VCNT > 0 ? _PX_VCNT - 1 : 0)); _PX_DIRTY=1 ;;
                     H) _PX_CUR=0; _PX_DIRTY=1 ;;
@@ -17151,11 +17382,13 @@ pxms() {
             $'\t')
                 _PX_TAB=$((_PX_TAB % 6 + 1)); _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
                 _px_load_tab_async
+                [ "$_PX_REQ_QUIT" = "1" ] && break
                 ;;
             1|2|3|4|5|6)
                 if [ "$_PX_TAB" != "$_k" ]; then
                     _PX_TAB="$_k"; _PX_CUR=0; _PX_TOP=0; _PX_SEARCH=""
                     _px_load_tab_async
+                    [ "$_PX_REQ_QUIT" = "1" ] && break
                 fi
                 ;;
             k) [ "$_PX_CUR" -gt 0 ] && _PX_CUR=$((_PX_CUR - 1)) ;;
@@ -17170,6 +17403,7 @@ pxms() {
                 ;;
             r)
                 _px_load_tab_async
+                [ "$_PX_REQ_QUIT" = "1" ] && break
                 _px_load_summary
                 _PX_MSG="✔ 새로고침 완료"
                 _PX_DIRTY=1
