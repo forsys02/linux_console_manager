@@ -5646,6 +5646,7 @@ nav_set() {
     NAV_scut="${1%%|*}"
     local rest="${1#*|}"
     NAV_sub="${rest%%|*}"
+    [ "$NAV_sub" = "{}" ] && NAV_sub="" # "{}" 는 서브태그 없음("")과 동일하므로 정규화
     NAV_title="${rest#*|}"
     NAV_title="${NAV_title%|}"
     [ -n "$NAV_scut" ] || NAV_scut="m"
@@ -5663,11 +5664,13 @@ nav_reset() {
 
 # 화면 전환 : 현재 화면을 이력에 남기고 새 화면으로 이동
 nav_goto() { # $1=scut $2=sub $3=title
-    [ "$NAV_scut|$NAV_sub" = "$1|$2" ] && return 0 # 같은 화면이면 이력 불필요
+    local _g_scut="$1" _g_sub="$2" _g_title="$3"
+    [ "$_g_sub" = "{}" ] && _g_sub="" # scutsub 이 반환한 "{}" 자리표시자를 "" 로 정규화 (b 무한루프 방지)
+    [ "$NAV_scut|$NAV_sub" = "$_g_scut|$_g_sub" ] && return 0 # 같은 화면이면 이력 불필요
     [ -n "$NAV_scut" ] && nav_save "$NAV_scut" "$NAV_sub" "$NAV_title"
-    NAV_scut="$1"
-    NAV_sub="$2"
-    NAV_title="$3"
+    NAV_scut="$_g_scut"
+    NAV_sub="$_g_sub"
+    NAV_title="$_g_title"
     [ -n "$NAV_scut" ] || NAV_scut="m"
     return 0
 }
@@ -5680,9 +5683,16 @@ nav_goto() { # $1=scut $2=sub $3=title
 #     menufunc "px"                 → ("px",       "")
 nav_sync() {
     local nsub="$1" ntitle="$2" nscut=""
+    [ "$nsub" = "{}" ] && nsub="" # "{}" 자리표시자는 서브태그 없음("")으로 정규화
     if [ -n "$nsub" ] && [ "${nsub:0:1}" != "{" ]; then
         if [ -z "$ntitle" ]; then
             ntitle="$(scuttitle "$nsub")" # menufunc "px" 처럼 제목이 없을때
+            if declare -F scutsub >/dev/null 2>&1; then
+                nsub="$(scutsub "$nsub")"
+                [ "$nsub" = "{}" ] && nsub=""
+            else
+                nsub=""
+            fi
         else
             nsub="" # $1 이 단축키로 넘어온 경우 서브태그 아님
         fi
