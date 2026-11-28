@@ -92,8 +92,13 @@ fi
 if [ -f "$HOME"/go.private.env ]; then
     chmod 600 "$HOME"/go.private.env
     while IFS= read -r line; do
-        if echo "$line" | grep -q -E '^[a-zA-Z_]+(=\"[^\"]*\"|=[^[:space:]]*)$'; then
-            export "$line"
+        if echo "$line" | grep -q -E '^[a-zA-Z_][a-zA-Z0-9_]*=("[^"]*"|[^[:space:]]*)$'; then
+            _pe_k="${line%%=*}"
+            _pe_v="${line#*=}"
+            case "$_pe_v" in
+                \"*\") _pe_v="${_pe_v#\"}"; _pe_v="${_pe_v%\"}" ;;
+            esac
+            export "$_pe_k=$_pe_v"
         fi
     done <"$HOME"/go.private.env
 fi
@@ -592,14 +597,16 @@ process_commands() {
         echo "$command" >>"$gotmp"/go_history.txt 2>/dev/null
         # post
         # cd 명령이 들어왔을때 현재 위치의 ls
-        echo "${command%% *}" | grep -qE "cd" && echo && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && echo $(pwd) >/dev/shm/pwd && dline && ls -ltr | tail -n5 && echo
-        # rm 또는 mkdri 이 들어왔을때 마지막 인자의 ls
-        echo "${command%% *}" | grep -qE "rm" >/dev/null 2>&1 && (
+        echo "${command%% *}" | grep -qE '^cd$' && echo && echo "pwd: $(pwd) ... ls -ltr | tail -n5 " && pwd >/dev/shm/pwd && dline && ls -ltr | tail -n5 && echo
+        # rm 또는 mkdir 이 들어왔을때 마지막 인자의 ls
+        echo "${command%% *}" | grep -qE '^(rm|mkdir)$' >/dev/null 2>&1 && (
             command_args=($command)
-            last_arg="${command_args[$((${#command_args[@]} - 1))]}"
-            target_dir=$(dirname "$last_arg")
-            [ ! -d "$target_dir" ] && target_dir="."
-            echo "pwd: $(pwd) ... ls -ltr indirectory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
+            if [ "${#command_args[@]}" -gt 0 ]; then
+                last_arg="${command_args[$((${#command_args[@]} - 1))]}"
+                target_dir=$(dirname "$last_arg")
+                [ ! -d "$target_dir" ] && target_dir="."
+                echo "pwd: $(pwd) ... ls -ltr in directory: $target_dir | tail -n5 " && echo && ls -ltr "$target_dir" | tail -n5 && echo
+            fi
         )
         echo "=============================================="
         # unset var_value var_name
@@ -608,7 +615,7 @@ process_commands() {
         [ "$pipeitem" ] && echo "selected: $pipeitem"
         # sleep 1 or [Enter]
         #if [[ $command == vi* ]] || [[ $command == explorer* ]] || [[ $command == ": nodone"* ]] ; then
-        if echo "$command" | egrep -q '^(vi.*|explorer.*|: nodone.*|bm)'; then
+        if echo "$command" | grep -Eq '^(vi.*|explorer.*|: nodone.*|bm)'; then
             nodone=y && sleep 1
             #elif [ -z "$IN_BASHCOMM" ] && echo "${command%% *}" | grep -qwE 'cd'; then
         elif [ -z "$IN_BASHCOMM" ] && (
@@ -721,7 +728,8 @@ menu_prompt() { # $1=최대번호 $2=스크롤여부(0|1) (? 는 항상 help 로
 ###############################################################
 menu_read() {
     local _mrp="$1" _n1="$2" _n2="$3" _allow_nav="${4:-0}" _c="" _x="" _rest="" _rc=0 _eol=0
-    local -a _w=()
+    local -a _w
+    _w=()
     #  [규칙] IFS 고정 (인수 분리 버그 근본 차단)
     #   아래 "${_w[*]:1}" 은 배열 결합이면서 **IFS 의 첫 글자를 구분자로 쓴다.**
     #   IFS 가 $'\n' 로 오염되어 있으면 "shutdown -h now" 의 now 가
@@ -1947,8 +1955,8 @@ menufunc() {
                 #[ "$scut" ] && [ "$scut" != "m" ] && {
                 [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" &&
                     [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" &&
-                    [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" &&
-                    [ "$toooldscut" != "$ooooldscut" ] && toooldscut=$ooldscut && export ooooldscut="$toooldscut"
+                    [ "$tooldscut" != "$oooldscut" ] && toooldscut=$oooldscut && export oooldscut="$tooldscut" &&
+                    [ "$toooldscut" != "$ooooldscut" ] && export ooooldscut="$toooldscut"
                 #[ "$scut" != "m" ] && [ "$scut" != "$oldscut" ] && toldscut=$oldscut && export oldscut="$scut" && \
                 #[ "$oldscut" != "m" ] && [ "$toldscut" != "$ooldscut" ] && tooldscut=$ooldscut && export ooldscut="$toldscut" && \
                 #[ "$ooldscut" != "m" ] && [ "$tooldscut" != "$oooldscut" ] && toooldscut=$ooldscut && export oooldscut="$tooldscut" && \
@@ -2515,7 +2523,7 @@ menufunc() {
 
             readxx $LINENO choice99 choice: $choice
             # 선택한 줄번호의 타이틀 가져옴
-            [ ! "$choice" == 99 ] && title_of_menu="$(print_menulist | awk -v choice="$choice" 'NR==choice {print}')"
+            [ "$choice" != 99 ] && title_of_menu="$(print_menulist | awk -v choice="$choice" 'NR==choice {print}')"
 
             ###############################################################
             # 선택한 줄번호의 타이틀에 맞는 리스트가져옴
@@ -3254,7 +3262,7 @@ menufunc() {
                                 chosen_command="$(printf '%s\n' "$chosen_command" | sed -e 's/^[[:space:]]*!!![[:space:]]*//' -e 's/\([[:space:];]\)!!![[:space:]]*/\1/g')"
                                 echo -e "--> \x1b[1;31m${chosen_command//@@//}\x1b[0m"
                                 echo
-                                printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Excute [Y/y/Enter or N/n]: " && read cfm
+                                printf "\x1b[1;33;41;4m !!!Danger!!! \x1b[0m Execute [Y/y/Enter or N/n]: " && read cfm
                             else
                                 echo
                                 cfm=y
@@ -3369,7 +3377,7 @@ menufunc() {
                                                 local -a _sel_opts
                                                 _sel_opts=("${dvar_value_array[@]}" All Cancel)
                                                 [ "${cmd_is_danger:-0}" -eq 0 ] && _sel_opts=("${_sel_opts[@]}" Interactive)
-                                                IFS='\n'
+                                                IFS=$'\n'
                                                 select dvar_value in "${_sel_opts[@]}"; do
                                                     reply=$REPLY && break
                                                 done
@@ -3625,10 +3633,10 @@ menufunc() {
                             # 해당 메뉴의 선택명령이 딱 하나일때 바로 실행
                             # 한줄짜리 한줄만 하나만
                             if ((${#cmd_array[@]} == 1)); then
-                                [ ! "$cancel" == "yes" ] && process_commands "$cmd" "$cfm"
+                                [ "$cancel" != "yes" ] && process_commands "$cmd" "$cfm"
                             else
                                 # 명령어가 끝날때 Done... [Enter] print
-                                [ ! "$cancel" == "yes" ] && { if ((${#cmd_array[@]} > count)); then process_commands "$cmd" "$cfm" "nodone"; else process_commands "$cmd" "$cfm"; fi; }
+                                [ "$cancel" != "yes" ] && { if ((${#cmd_array[@]} > count)); then process_commands "$cmd" "$cfm" "nodone"; else process_commands "$cmd" "$cfm"; fi; }
                             fi
                             readxx $LINENO cmd_choice: $cmd_choice
 
@@ -3932,7 +3940,7 @@ menufunc() {
                                 fi
 
                             # Check 2: Alarm? (Numeric, starts with 0, not just "0")
-                            elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" || $cmd_choice != "00" ]]; then
+                            elif [[ ! ${cmd_choice//[0-9]/} ]] && [[ ${cmd_choice:0:1} == "0" ]] && [[ $cmd_choice != "0" && $cmd_choice != "00" ]]; then
                                 echo "alarm set -> $cmd_choice $cmd_choice1" && sleep 1
                                 alarm "$cmd_choice" "$cmd_choice1" && {
                                     echo
@@ -4158,7 +4166,7 @@ menufunc() {
             krr)
                 # 한글이 네모나 다이아몬드 보이는 경우 (콘솔 tty) jftterm
                 if [[ $(who am i | awk '{print $2}') == tty[1-9]* ]] && ! ps -ef | grep -q "[j]fbterm"; then
-                    which jfbterm 2>/dev/null && jfbterm || (yum install -y jfbterm && jfbterm)
+                    command -v jfbterm >/dev/null 2>&1 && jfbterm || (yum install -y jfbterm && jfbterm)
                 fi
                 ;;
 
@@ -5483,7 +5491,9 @@ fclear() {
 
 # 파이프로 들어온 줄을 dialog 메뉴로 파싱
 fdialog() {
-    local i=0
+    local i=0 choice
+    local -a options
+    options=()
     while IFS= read -r line; do
         options[i]="${line%% *}"
         options[i + 1]=$(echo "${line#* }" | awk '{if (NF>1) {$1=$1;print} else {print " "}}')
@@ -5493,7 +5503,9 @@ fdialog() {
     echo "$choice"
 }
 fdialogw() {
-    local i=0
+    local i=0 choice
+    local -a options
+    options=()
     while IFS= read -r line; do
         options[i]="${line%% *}"
         options[i + 1]=$(echo "${line#* }" | awk '{if (NF>1) {$1=$1;print} else {print " "}}')
@@ -5511,7 +5523,9 @@ done; }
 
 # 파이프로 들어온 각열을 dialog 메뉴로 파싱
 fdialog1() {
-    local i=0
+    local i=0 choice
+    local -a options
+    options=()
     while IFS=' ' read -ra words; do for word in "${words[@]}"; do
         options[i]="$word"
         options[i + 1]=" "
@@ -6096,12 +6110,18 @@ disksetup() {
         return 1
     fi
 
-    local -a free_names=()
-    local -a free_sizes=()
-    local -a free_models=()
-    local -a free_reasons=()
-    local -a free_details=()
-    local -a busy_lines=()
+    local -a free_names
+    free_names=()
+    local -a free_sizes
+    free_sizes=()
+    local -a free_models
+    free_models=()
+    local -a free_reasons
+    free_reasons=()
+    local -a free_details
+    free_details=()
+    local -a busy_lines
+    busy_lines=()
     local line name size model tran st state reason detail
     local idx=0 sel sel_name sel_dev sel_size sel_model sel_reason sel_detail
     local mode fstype label part1 default_mp
@@ -6270,7 +6290,8 @@ disksetup() {
     # [1] 기존 파티션 바로 마운트 (포맷 없이 데이터 보존)
     # ------------------------------------------------------------------
     1)
-        local -a parts_arr=()
+        local -a parts_arr
+        parts_arr=()
         local p p_sz p_fs p_sel target_part
         while IFS= read -r p; do
             [ -n "$p" ] && parts_arr[${#parts_arr[@]}]="$p"
@@ -6410,7 +6431,8 @@ disksetup() {
         fi
 
         local pv_mode="part" pv_target vg_action="new" vg_name thin_pool thin_size
-        local -a exist_vgs=()
+        local -a exist_vgs
+        exist_vgs=()
 
         if [ "$sel_reason" = "ORPHAN-PV" ]; then
             pv_mode="orphan"
@@ -6675,7 +6697,8 @@ disksetup() {
         fi
 
         local pv_target vg_name=""
-        local -a exist_vgs=()
+        local -a exist_vgs
+        exist_vgs=()
         if [ "$sel_reason" = "ORPHAN-PV" ]; then
             pv_target="$sel_detail"
             echo "[안내] 이미 고아 PV($pv_target) 상태입니다."
@@ -7164,9 +7187,12 @@ isodl() {
     fi
 
     local distro_key="" distro_name="" dsel raw_list target_dir
-    local -a item_labels=()
-    local -a item_names=()
-    local -a item_urls=()
+    local -a item_labels
+    item_labels=()
+    local -a item_names
+    item_names=()
+    local -a item_urls
+    item_urls=()
     local idx sel pick_label pick_name pick_url
     local spd_in spd_val out_path dl_rc exist_sz
 
@@ -8404,7 +8430,7 @@ push() {
     # 인수도 파이프값도 없을때 기본값 hostname 으로 지정
     [ ! "$message" ] && message="$HOSTNAME"
 
-    if [ "$@" ] && [[ -z ${telegram_token} || -z ${telegram_chatid} ]]; then
+    if [ $# -gt 0 ] && [[ -z ${telegram_token} || -z ${telegram_chatid} ]]; then
         read -rep "Telegram. Add token and chatid? (y/n): " add_vars
 
         if [[ ${add_vars} == "y" ]]; then
@@ -8661,7 +8687,7 @@ rmv() {
         done
 
     else                        # 소스가 1개일 때
-        eval src="\$$1"         # 첫 번째 인자가 소스
+        src="$1"                # 첫 번째 인자가 소스
         src_normalized=${src%/} # 소스 슬래시 제거 (mv처럼)
 
         if [ ! -e "$src_normalized" ]; then
@@ -8882,7 +8908,7 @@ idpw() {
 }
 
 userinfo() {
-    dline() {
+    _userinfo_dline() {
         num_characters="${1-46}"
         delimiter="${2-=}"
         i=1
@@ -8925,7 +8951,7 @@ userinfo() {
                 /Maximum/ { printf "Max days: %s; ", $2 }
                 /warning/ { printf "Warn days: %s", $2 }')
             echo -e "\033[1;34m기본 정보\033[0m"
-            dline
+            _userinfo_dline
             echo -e "\033[1;37m사용자명\033[0m: \033[1;36m$NAME\033[0m"
             echo -e "\033[1;37mUID\033[0m: \033[1;36m$USER_UID\033[0m"
             echo -e "\033[1;37mGID\033[0m: \033[1;36m$GID\033[0m"
@@ -8951,9 +8977,9 @@ userinfo() {
                     MAIL_LOG="메일 로그 파일 없음 또는 접근 권한 없음"
                 fi
             fi
-            dline
+            _userinfo_dline
             echo -e "\033[1;34m활동 정보\033[0m"
-            dline
+            _userinfo_dline
             echo -e "\033[1;37m현재 로그인 세션\033[0m: \033[1;36m$WHO_INFO\033[0m"
             echo -e "\033[1;37m최근 로그인 로그 (최대 5회)\033[0m:"
             echo -e "\033[1;36m$LAST_LOG\033[0m"
@@ -8968,9 +8994,9 @@ userinfo() {
             HOME_INFO=$(ls -ld "$HOME" | awk '{print $1, $3, $4, $6, $7, $8, $9}')
             HOME_USAGE=$(du -sh "$HOME" 2>/dev/null | cut -f1 || echo "사용량 확인 불가")
             SHADOW_INFO=$(sudo grep "^$USERNAME:" /etc/shadow 2>/dev/null | cut -d: -f1-8 || echo "Shadow 정보 접근 불가 (sudo 권한 필요)")
-            dline
+            _userinfo_dline
             echo -e "\033[1;34m권한 및 리소스\033[0m"
-            dline
+            _userinfo_dline
             echo -e "\033[1;37mID 및 그룹 정보\033[0m: \033[1;36m$ID_INFO\033[0m"
             echo -e "\033[1;37m소속 그룹\033[0m: \033[1;36m$GROUPS_INFO\033[0m"
             echo -e "\033[1;37m홈 디렉토리 상태\033[0m: \033[1;36m$HOME_INFO\033[0m"
@@ -10012,7 +10038,7 @@ readxy() {
     dline
     while true; do
         [ "$1" ] && printf "$CYN1%s$NC " "$1" # 메시지 있으면 줄바꿈 없이 출력
-        read -p "preceed? [Enter/y/Y = OK, n = Cancel] " x </dev/tty
+        read -p "proceed? [Enter/y/Y = OK, n = Cancel] " x </dev/tty
         case "$x" in
         [yY] | "") return 0 ;; # 진행
         [nN])
@@ -17517,7 +17543,8 @@ dkgit() {
     esac
 
     # GitHub 카탈로그: "이름|owner/repo|compose상대경로|기본포트|카테고리|설명|중복감지정규식"
-    local -a _DKGIT_CAT=(
+    local -a _DKGIT_CAT
+    _DKGIT_CAT=(
         "uptime-kuma|louislam/uptime-kuma|compose.yaml|3001|모니터링|실시간 서버·웹 업타임 모니터링|uptime-kuma"
         "dockge|louislam/dockge|compose.yaml|5001|관리|웹 UI Docker Compose 스택 관리자|dockge"
         "dozzle|amir20/dozzle|docker-compose.yml|8080|모니터링|실시간 Docker 로그 웹 뷰어|dozzle"
@@ -17537,7 +17564,8 @@ dkgit() {
     )
 
     # 내장 템플릿 카탈로그: "이름|BUILTIN|docker-compose.yml|기본포트|카테고리|설명|중복감지정규식"
-    local -a _DKGIT_BUILTIN=(
+    local -a _DKGIT_BUILTIN
+    _DKGIT_BUILTIN=(
         "jellyfin|BUILTIN|docker-compose.yml|8096|미디어|오픈소스 미디어 스트리밍 서버 (단독)|jellyfin"
         "media-center|BUILTIN|docker-compose.yml|8096|미디어|Jellyfin+Navidrome+FileBrowser 3종|media_jellyfin|navidrome"
         "portainer|BUILTIN|docker-compose.yml|9000|관리|Docker 웹 GUI 통합 관리자 (CE)|portainer"
@@ -17561,7 +17589,8 @@ dkgit() {
         local _ps_cache=""
         _ps_cache="$(docker ps -a --format '{{.Names}}|{{.Image}}|{{.State}}|{{.Label "com.docker.compose.project.working_dir"}}|{{.Ports}}' 2>/dev/null)"
 
-        local -a _CUR_CAT=()
+        local -a _CUR_CAT
+        _CUR_CAT=()
         if [ "$_mode" = "builtin" ]; then
             _CUR_CAT=("${_DKGIT_BUILTIN[@]}")
             _dk_p '\033[1;35m◈ 내장 템플릿 원클릭 배포 [dkgit -t]\033[0m  설치경로: \033[1;33m%s\033[0m  Compose: \033[1;32m%s\033[0m\n' "$_base" "$_DK_COMPOSE_BIN"
@@ -17753,7 +17782,8 @@ dkgit() {
             if [ "$_cf" != "AUTO" ] && [ -f "${_dir}/${_cf}" ]; then
                 _cfile="${_dir}/${_cf}"
             else
-                local -a _cands=()
+                local -a _cands
+                _cands=()
                 local _f
                 while IFS= read -r _f; do
                     [ -n "$_f" ] && _cands[${#_cands[@]}]="$_f"
@@ -19598,24 +19628,24 @@ update() {
 yyay() {
     [[ " $* " == *" Cancel "* ]] && echo "Canceled... " && return 1
 
-    [ "$(which yum)" ] && yum="yum" || yum="apt"
+    command -v yum >/dev/null 2>&1 && yum="yum" || yum="apt"
     while [ $# -gt 0 ]; do
-        $yum install -y $1
+        $yum install -y "$1"
         shift
     done
 }
-ayyy() { yyay $@; }
+ayyy() { yyay "$@"; }
 aptupup() {
     apt update -y
     apt upgrade -y
 }
 aptupd() { apt update -y; }
-aptupg() { atp upgrade -y; }
-ay() { [ "$(which apt)" ] && while [ $# -gt 0 ]; do
-    apt install -y $1
+aptupg() { apt upgrade -y; }
+ay() { command -v apt >/dev/null 2>&1 && while [ $# -gt 0 ]; do
+    apt install -y "$1"
     shift
 done; }
-yy() { [ "$(which yum)" ] && while [ $# -gt 0 ]; do
+yy() { command -v yum >/dev/null 2>&1 && while [ $# -gt 0 ]; do
     yum install -y $1
     shift
 done; }
@@ -19662,7 +19692,7 @@ ipban() {
     $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipban24() {
-    valid_ips=true
+    local valid_ips=true ip base net
     for ip in "$@"; do
         base=${ip%/*}
         if ipcheck "$base"; then
@@ -19677,7 +19707,7 @@ ipban24() {
     $valid_ips && iptables -L INPUT -v -n | grep DROP | tail -n20 | gip | cip
 }
 ipban16() {
-    valid_ips=true
+    local valid_ips=true ip base net
     for ip in "$@"; do
         base=${ip%/*}
         if ipcheck "$base"; then
@@ -19789,9 +19819,9 @@ runlockadd() {
     }
     rbackup $f && sed -e '1a\runlock() { local lockfile_base="$(basename "$0").lock"; Lockfile="/var/run/$lockfile_base"; [ -f $Lockfile ] && { P=$(cat $Lockfile); [ -n "$(ps --no-headers -f $P)" ] && { echo "already running... exit."; exit 1; }; }; echo $$ > $Lockfile; trap '\''rm -f "$Lockfile"'\'' INT TERM EXIT; }' -e '1a\runlock' "$f" >"$t" && {
         cat "$t" >"$f"
-        rm -f $t
-        diff ${f}.1 ${f}
-        ls -al ${f} ${f}.1
+        rm -f "$t"
+        diff "${f}.1.bak" "${f}"
+        ls -al "${f}" "${f}.1.bak"
     }
 }
 
@@ -20160,7 +20190,7 @@ vm() {
             '.[] | select((.nodes == null or .nodes == $node) and (.type == "dir") and (.content | contains("backup"))) | .storage')
 
         if [[ $(echo "$storage" | wc -l) -gt 1 ]]; then
-            storage=$(echo $storage | pipemenu stoage slect)
+            storage=$(echo $storage | pipemenu storage select)
         fi
 
         # 스토리지 없으면 기본값 사용
@@ -20416,7 +20446,7 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
             eval "net_out_$id=$n_out"
             eval "last_time_$id=$now"
             vm_uptime_fmt=$(awk -v u="$vm_uptime" 'BEGIN{d=int(u/86400); h=int((u%86400)/3600); m=int((u%3600)/60); printf "%dd %02dh%02dm", d,h,m}')
-            line=$(printf "%-8s %-12s %-7s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s   %s" "$id" "$node" "$vm_type" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c""$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd" "$vm_uptime_fmt")
+            line=$(printf "%-8s %-12s %-7s %-27s %-20s %b%6s%%%b   %6s/%-6s(%b%3s%%%b)     D:%-10s/%-10s   N:%-10s/%-10s   %s" "$id" "$node" "$vm_type" "${name:0:27}" "$vm_ip" "$cpu_c" "$cpu_p" "$NC" "$mem_mb" "$max_mb" "$mem_c" "$mem_p" "$NC" "$dr_spd" "$dw_spd" "$ni_spd" "$no_spd" "$vm_uptime_fmt")
             output="$output$line\n"
         done </tmp/.vm_data.$$
         rm -f /tmp/.vm_data.$$
@@ -20432,11 +20462,11 @@ Node          IP Address           Status     CPU(%)       Mem(GB/%)            
 explorer() {
     [ $# -eq 0 ] && echo "Usage: explorer file1 [file2 ...]" && return 1
 
-    open() {
+    _explorer_open() {
         if command -v ranger &>/dev/null; then
             ranger "$1"
         else
-            sh="$HOME/explorer.sh"
+            local sh="$HOME/explorer.sh"
             # (2026-09-28) srt.byus.net 이 유일 배포처로 통일 / byus.net 은 예비 경로
             [ -f "$sh" ] || { curl -fsSL -m 10 http://srt.byus.net/explorer.sh -o "$sh" 2>/dev/null \
                 || curl -fsSL -m 10 http://byus.net/explorer.sh -o "$sh" 2>/dev/null \
@@ -20446,11 +20476,11 @@ explorer() {
         fi
     }
 
-    [ $# -eq 1 ] && open "$1" && return
+    [ $# -eq 1 ] && _explorer_open "$1" && return
 
     select f in "$@" "Cancel"; do
         [ "$f" = "Cancel" ] && break
-        [ -n "$f" ] && open "$f" && break
+        [ -n "$f" ] && _explorer_open "$f" && break
     done
 }
 
@@ -20502,7 +20532,7 @@ reconnect_down_veth_interfaces() {
 }
 
 rrnet() {
-    [ ! "$1" == "yes" ] && return
+    [ "$1" != "yes" ] && return
 
     if [ ! -f /etc/network/interfaces ]; then
         echo "Error: /etc/network/interfaces does not exist."
@@ -20516,7 +20546,7 @@ rrnet() {
         if [ -f $file ]; then
             cp $file /etc/network/interfaces 2>/dev/null
             #systemctl restart networking.service
-            which ifreload && ifreload -a || systemctl restart networking.service
+            command -v ifreload >/dev/null 2>&1 && ifreload -a || systemctl restart networking.service
 
             if ping -c 4 8.8.8.8 >/dev/null; then
                 echo "Network configuration from $file is successful."
@@ -20836,15 +20866,15 @@ domchg() {
 template_edit() {
     [ $# -eq 0 ] && echo "Usage: template_edit file1 [file2 ...]" && return 1
 
-    open() {
+    _tpl_edit_open() {
         [ -n "$1" ] && conff "$1)" || echo "'$1' not found"
     }
 
-    [ $# -eq 1 ] && open "$1" && return
+    [ $# -eq 1 ] && _tpl_edit_open "$1" && return
 
     select f in "$@" "Cancel"; do
         [ "$f" = "Cancel" ] && break
-        [ -n "$f" ] && open "$f" && break
+        [ -n "$f" ] && _tpl_edit_open "$f" && break
     done
 }
 template_view() {
@@ -24552,38 +24582,6 @@ Alias /webmail $webroot/roundcube/public_html
     AllowOverride All
     Require all granted
 </Directory>
-EOF
-
-        ;;
-
-    teldrive.service)
-        cat >"$file_path" <<EOF
-[Unit]
-Description=Teldrive Service (run mode - Optimized)
-Documentation=https://github.com/divyam234/teldrive
-After=network-online.target postgresql.service
-Wants=network-online.target
-
-[Service]
-User=teldrive
-Group=teldrive
-
-ExecStart=/usr/bin/teldrive run \
-    --tg-app-id "$telegramappid" \
-    --tg-app-hash "$telegramapphash" \
-    --jwt-secret "$jwtsecret" \
-    --tg-uploads-encryption-key "$tguploadsencryptionkey" \
-    --db-data-source "postgresql://$teldbuser:"$teldbpw"@$teldbhost:5432/$teldbname?sslmode=disable" \
-    --log-level INFO \
-    --tg-stream-multi-threads 4 \
-    --tg-stream-buffers 12 \
-    --server-port $webport
-
-Restart=on-failure
-RestartSec=10s
-
-[Install]
-WantedBy=multi-user.target
 EOF
 
         ;;
